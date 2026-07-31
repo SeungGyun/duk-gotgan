@@ -42,7 +42,7 @@ def make_keyword(**over) -> Keyword:
         status="active",
         language="ko",
         schedule="daily",
-        min_duration_sec=900,
+        min_duration_sec=1200,
         max_duration_sec=14400,
         min_expert_score=75,
         max_per_run=10,
@@ -58,9 +58,9 @@ def test_통과하는_후보():
 @pytest.mark.parametrize(
     "over,expect",
     [
-        ({"duration_sec": 720}, "길이 미달"),
+        ({"duration_sec": 900}, "길이 미달"),
         ({"duration_sec": 20000}, "길이 초과"),
-        ({"view_count": 300}, "조회수 미달"),
+        ({"view_count": 120}, "조회수 미달"),
         ({"published_at": now_kst() - timedelta(days=1000)}, "오래됨"),
         ({"title": "무료특강 신청하세요"}, "홍보성 제목"),
         ({"title": "쿠버네티스 쇼츠 모음"}, "홍보성 제목"),
@@ -85,6 +85,13 @@ def test_키워드_설정이_전역값보다_우선():
     kw = make_keyword(min_duration_sec=3600)
     assert not evaluate(make_candidate(duration_sec=1800), kw).ok
     assert evaluate(make_candidate(duration_sec=1800), make_keyword()).ok
+
+
+def test_컨퍼런스_세션이_통과한다():
+    """M2 실측에서 나온 사례. 조회수 300~400 대인 한국 기술 컨퍼런스
+    발표가 예전 기준(1,000)에 통째로 걸렸습니다."""
+    c = make_candidate(title="[CNKCD2025] Cilium과 Istio Ambient 모드", view_count=380)
+    assert evaluate(c, make_keyword()).ok
 
 
 @pytest.mark.parametrize(

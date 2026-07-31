@@ -44,7 +44,7 @@ def main() -> None:
         for r in results:
             print()
             print(f"  [{r.keyword_term}] 발견 {r.discovered} · 통과 {r.rule_passed} "
-                  f"· 이미 있음 {r.already_known}")
+                  f"· 상한 대기 {r.deferred} · 이미 있음 {r.already_known}")
             for title, reason in r.rejected:
                 print(f"    ✕ {title[:52]:<52} {reason}")
 

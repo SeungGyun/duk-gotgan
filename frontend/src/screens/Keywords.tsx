@@ -11,7 +11,9 @@ const DEFAULT_DRAFT: KeywordDraft = {
   term: "",
   language: "ko",
   schedule: "daily",
-  minDurationSec: 900,
+  // 20분. 유튜브 검색이 20분 경계로만 거를 수 있어서, 더 낮게 잡아도
+  // 실제로는 20분 이상만 들어옵니다 — 설정과 동작을 맞춰 둡니다.
+  minDurationSec: 1200,
   minExpertScore: 75,
   maxPerRun: 10,
 };
@@ -212,8 +214,9 @@ export function Keywords({ list }: { list: ListState }) {
           </label>
           <p className={s.hint}>
             기준 점수를 올리면 수집량이 줄고 토큰도 아낍니다. <strong>75점</strong>은 전문가
-            강의만, <strong>70점</strong>은 실무 튜토리얼까지 들어옵니다. 첫 실행은 백로그를
-            훑으므로 <strong>1회 최대</strong>를 낮게 잡는 편이 안전합니다.
+            강의만, <strong>70점</strong>은 실무 튜토리얼까지 들어옵니다. 유튜브 검색이
+            20분 경계로만 걸러서, <strong>최소 길이</strong>를 그보다 낮게 잡아도 실제로는
+            20분 이상만 들어옵니다.
           </p>
           <Button variant="primary" type="submit" disabled={submitting || !draft.term.trim()}>
             {submitting ? "등록 중…" : "추가하고 바로 실행"}

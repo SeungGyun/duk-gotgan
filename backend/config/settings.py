@@ -24,7 +24,9 @@ class Settings(BaseSettings):
     # ── 룰 필터 기본값 (2026-08-01 확정, ROADMAP §3.1) ──────
     # 비용을 좌우하는 가장 큰 손잡이입니다. AI 호출 수를 직접 줄입니다.
     # 키워드별 값이 있으면 그쪽이 우선하고, 여기 값은 나머지를 채웁니다.
-    rule_min_view_count: int = 1_000
+    # 300 은 실측값입니다. 1,000 으로 두니 한국 기술 컨퍼런스 세션 발표가
+    # 통째로 걸렸습니다 — 조회수 300~400 대인데 전문성은 오히려 높은 쪽입니다.
+    rule_min_view_count: int = 300
     rule_max_age_days: int = 730  # 2년
     # 제목에 이게 들어가면 강의가 아니라 홍보로 봅니다
     rule_title_blocklist: str = (

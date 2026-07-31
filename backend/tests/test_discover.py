@@ -116,6 +116,48 @@ def test_실패해도_실행_이력과_쿼터가_남는다(db, monkeypatch):
     assert saved.youtube_units == 100
 
 
+def test_1회_상한을_넘으면_다음_실행으로_미룬다(db, monkeypatch):
+    """max_per_run 은 비용 가드입니다. 이게 안 걸리면 첫 실행에서 백로그가
+    통째로 AI 로 넘어갑니다 — 실제로 30건이 그렇게 통과한 적이 있습니다."""
+    add_keyword(db)
+    kw = db.get(Keyword, "kw_a")
+    kw.max_per_run = 3
+    db.commit()
+
+    cands = [fake_candidate(f"vid{i:08d}", search_rank=i) for i in range(8)]
+    patch_youtube(monkeypatch, cands)
+
+    run, results = D.run_discovery(db)
+
+    assert run.stats["rulePassed"] == 3
+    assert results[0].deferred == 5
+    promoted = db.scalars(select(Video).where(Video.state == "TRANSCRIPT_PENDING")).all()
+    # 잘리는 것은 검색 순위 하위여야 합니다
+    assert {v.id for v in promoted} == {"vid00000000", "vid00000001", "vid00000002"}
+    waiting = db.scalars(select(Video).where(Video.state == "DISCOVERED")).all()
+    assert len(waiting) == 5
+    assert "상한" in waiting[0].state_reason
+
+
+def test_미뤄둔_것을_다음_실행에서_이어받는다(db, monkeypatch):
+    add_keyword(db)
+    kw = db.get(Keyword, "kw_a")
+    kw.max_per_run = 2
+    db.commit()
+
+    cands = [fake_candidate(f"vid{i:08d}", search_rank=i) for i in range(5)]
+    patch_youtube(monkeypatch, cands)
+
+    D.run_discovery(db)
+    assert db.scalar(select(func.count()).select_from(Video).where(Video.state == "DISCOVERED")) == 3
+
+    D.run_discovery(db)  # 같은 결과가 또 나옴 — 미뤄둔 것 중 2건이 올라가야
+    assert db.scalar(
+        select(func.count()).select_from(Video).where(Video.state == "TRANSCRIPT_PENDING")
+    ) == 4
+    assert db.scalar(select(func.count()).select_from(Video).where(Video.state == "DISCOVERED")) == 1
+
+
 def test_API_키가_없으면_쿼터를_깎기_전에_멈춘다(db, monkeypatch):
     add_keyword(db)
     monkeypatch.setattr(settings, "youtube_api_key", "")

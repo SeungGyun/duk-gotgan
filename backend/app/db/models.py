@@ -66,7 +66,9 @@ class Keyword(Base):
     language: Mapped[str] = mapped_column(String(10), nullable=False, default="ko")
     # daily | twice_weekly | weekly — cron 문자열은 수집기가 이 값에서 만듭니다
     schedule: Mapped[str] = mapped_column(String(20), nullable=False, default="daily")
-    min_duration_sec: Mapped[int] = mapped_column(Integer, nullable=False, default=900)
+    # 20분. 유튜브 검색이 20분 경계로만 거를 수 있어, 그보다 낮게 잡아도
+    # 검색 단계에서 어차피 20분 이상만 들어옵니다 (youtube.duration_bucket).
+    min_duration_sec: Mapped[int] = mapped_column(Integer, nullable=False, default=1200)
     max_duration_sec: Mapped[int] = mapped_column(Integer, nullable=False, default=14400)
     min_expert_score: Mapped[int] = mapped_column(Integer, nullable=False, default=75)
     max_per_run: Mapped[int] = mapped_column(Integer, nullable=False, default=10)

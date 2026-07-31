@@ -34,6 +34,7 @@ class DiscoverResult:
     discovered: int = 0
     rule_passed: int = 0
     already_known: int = 0
+    deferred: int = 0  # 룰은 통과했지만 이번 실행 상한에 걸려 다음으로 미룬 것
     rejected: list[tuple[str, str]] = field(default_factory=list)  # (제목, 사유)
     error: str | None = None
 
@@ -84,24 +85,43 @@ def discover_keyword(db: Session, kw: Keyword, run: CrawlRun) -> DiscoverResult:
     candidates = fetch_details(ids)
     result.discovered = len(candidates)
 
-    for c in candidates:
+    # 1회 실행당 자막·AI 로 넘길 편수 상한. **비용 가드입니다.**
+    # 이게 없으면 첫 실행에서 백로그 50건이 통째로 AI 로 넘어갑니다.
+    budget = kw.max_per_run
+
+    # 검색 순위대로 처리합니다 — 상한에 걸려 잘리는 것이 하위 순위여야 합니다.
+    for c in sorted(candidates, key=lambda x: x.search_rank):
         existing = db.get(Video, c.video_id)
         if existing is not None:
-            # 이미 아는 영상 — 이 키워드와의 연결만 이어 줍니다.
-            # 자막 수집도 요약도 다시 하지 않습니다.
             _link(db, c, kw, run)
             result.already_known += 1
+            # 지난 실행에서 상한에 걸려 미뤄둔 것이면 이번에 올려 보냅니다.
+            # 안 그러면 영영 대기 상태로 남습니다.
+            if existing.state == "DISCOVERED" and budget > 0:
+                existing.state = "TRANSCRIPT_PENDING"
+                existing.state_reason = None
+                _event(db, existing.id, run.id, "DISCOVERED", existing.state, "discover", True, None)
+                budget -= 1
+                result.rule_passed += 1
             continue
 
         verdict = rules.evaluate(c, kw)
-        video = _insert_video(db, c, passed=verdict.ok, reason=verdict.reason)
-        _link(db, c, kw, run)
-        _event(db, video.id, run.id, None, video.state, "discover", verdict.ok, verdict.reason)
-
-        if verdict.ok:
+        if not verdict.ok:
+            state, reason = "REJECTED_RULE", verdict.reason
+            result.rejected.append((c.title, verdict.reason))
+        elif budget > 0:
+            state, reason = "TRANSCRIPT_PENDING", None
+            budget -= 1
             result.rule_passed += 1
         else:
-            result.rejected.append((c.title, verdict.reason))
+            # 룰은 통과했는데 이번 실행 상한을 넘었습니다. 버리지 않고
+            # DISCOVERED 로 남겨 다음 실행에서 이어받습니다.
+            state, reason = "DISCOVERED", f"1회 상한 {kw.max_per_run}편 초과 — 다음 실행에서 처리"
+            result.deferred += 1
+
+        video = _insert_video(db, c, state=state, reason=reason)
+        _link(db, c, kw, run)
+        _event(db, video.id, run.id, None, state, "discover", verdict.ok, reason)
 
     db.flush()
     return result
@@ -115,7 +135,7 @@ def _spend(db: Session, run: CrawlRun, units: int) -> None:
     db.commit()
 
 
-def _insert_video(db: Session, c: Candidate, *, passed: bool, reason: str) -> Video:
+def _insert_video(db: Session, c: Candidate, *, state: str, reason: str | None) -> Video:
     video = Video(
         id=c.video_id,
         title=c.title,
@@ -130,8 +150,8 @@ def _insert_video(db: Session, c: Candidate, *, passed: bool, reason: str) -> Vi
         thumbnail_url=c.thumbnail_url,
         default_language=c.default_language,
         has_official_caption=c.has_caption,
-        state="TRANSCRIPT_PENDING" if passed else "REJECTED_RULE",
-        state_reason=None if passed else reason,
+        state=state,
+        state_reason=reason,
         discovered_at=now_kst(),
     )
     db.add(video)
