@@ -672,6 +672,100 @@
   gap: 8px;
 }
 
+/* ── 섹션 — 요약의 본체 ──────────────────────────────────────
+   번호 · 제목 · 시각을 한 줄에 두고 그 아래 불릿. 블로그 글처럼 위에서
+   아래로 한 번에 읽히게 하는 것이 목적이라, 카드로 감싸지 않습니다. */
+.sec {
+  margin: 30px 0 0;
+}
+.read .secHead {
+  display: flex;
+  align-items: baseline;
+  gap: 11px;
+  margin: 0 0 12px;
+  padding: 0 0 9px;
+  border-bottom: 1px solid var(--border);
+  /* .read h2 의 대문자·자간 규칙을 쓰지 않습니다 — 여기 제목은 라벨이
+     아니라 문장이라 그대로 읽혀야 합니다 */
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.45;
+  color: var(--ink);
+  text-transform: none;
+}
+.read .secNo {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--surface);
+  background: var(--accent);
+  border-radius: var(--r);
+  min-width: 21px;
+  height: 21px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+  margin-top: 2px;
+}
+.read .secTitle {
+  flex: 1;
+  min-width: 0;
+  text-wrap: pretty;
+}
+.read .secHead .ts {
+  flex: none;
+  align-self: flex-start;
+  margin-top: 2px;
+}
+.secList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.secList li {
+  position: relative;
+  padding-left: 15px;
+  font-size: 14.5px;
+  line-height: 1.78;
+  color: var(--ink-2);
+}
+.secList li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 11px;
+  width: 4px;
+  height: 4px;
+  border-radius: 99px;
+  background: var(--border-strong);
+}
+/* 맺음말 — 글 전체의 결론이라 본문과 구별되게 둡니다 */
+.closing {
+  margin: 40px 0 0;
+  padding: 16px 18px;
+  background: var(--surface-2);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--r) var(--r) 0;
+  font-size: 14.5px;
+  line-height: 1.75;
+  color: var(--ink);
+}
+.closing b {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 650;
+  margin-bottom: 5px;
+}
+
 /* 개요 — 흐름의 마디.
    라벨을 왼쪽 기둥에 세워 두면 눈이 라벨만 훑고 필요한 마디로 들어갑니다.
    한 문단이면 그게 안 되어서 처음부터 끝까지 읽어야 합니다. */

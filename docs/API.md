@@ -162,22 +162,17 @@
 ```jsonc
 {
   "youtubeUrl": "https://youtu.be/aX7kQ2mN9pL",
-  "abstract": "마디를 이어 붙인 문단 (검색·목록용)",
-  "abstractBeats": [                     // 개요를 흐름의 마디로. 라벨은 강의마다 다름
-    { "label": "문제", "text": "20년간 운영된 레거시 결제 원장은 …" },
-    { "label": "설계", "text": "MySQL과 JPA 기반으로 신규 원장을 …" }
+  "sections": [                          // 요약의 본체. 개요·핵심포인트·챕터가 여기로 합쳐졌습니다
+    { "title": "레거시 원장의 세 가지 문제 — 제각각인 테이블, 도메인 결합, 확장 불가",
+      "startSec": 78,
+      "bullets": ["첫째, 테이블 구조가 제각각이었다. …", "둘째, 도메인 간 강한 의존성이다. …"] }
   ],
+  "closing": "20년 된 결제 원장을 다시 짓는 일의 핵심은 …",   // 글 맨 끝의 한 줄 요약
+  "abstract": "섹션 제목을 이어 붙인 문단 (검색·목록용)",
   "targetAudience": "…",
   "prerequisites": ["…"],
-  "keyPoints": [
-    { "heading": "…", "detail": "…", "timestampSec": 682 }
-  ],
-  "chapters": [
-    { "title": "문제 정의", "startSec": 0, "endSec": 580 }
-  ],
-  "terms": [{ "term": "멱등키", "definition": "…" }],
-  "takeaways": ["…"],
-  "quotes": [{ "text": "…", "timestampSec": 1868, "why": "…" }],
+  // 아래 다섯은 옛 형식(시드 데이터)에만 있습니다. sections 가 비어 있을 때만 화면에 쓰입니다.
+  "keyPoints": [], "chapters": [], "terms": [], "takeaways": [], "quotes": [],
   "coverageNote": null,          // 자막 품질 문제가 있으면 문장, 없으면 null
   "review": {
     "model": "claude-opus-5",

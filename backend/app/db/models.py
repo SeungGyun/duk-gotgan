@@ -293,6 +293,11 @@ class Lecture(Base):
     abstract: Mapped[str] = mapped_column(Text, nullable=False, default="")
     # [{label, text}] — 없으면 UI 가 abstract 문단으로 떨어집니다
     abstract_beats: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # [{title, startSec, bullets[]}] — 요약의 본체.
+    # 예전의 abstract·key_points·chapters 셋이 여기로 합쳐졌습니다.
+    # 비어 있으면 옛 형식(시드 데이터)이라 UI 가 예전 배치로 떨어집니다.
+    sections: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    closing: Mapped[str] = mapped_column(Text, nullable=False, default="")
     target_audience: Mapped[str] = mapped_column(Text, nullable=False, default="")
     prerequisites: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     key_points: Mapped[list] = mapped_column(JSON, nullable=False, default=list)

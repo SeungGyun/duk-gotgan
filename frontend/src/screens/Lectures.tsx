@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
-import type { LectureQuery, LectureSort, LectureSummary } from "../api";
+import type { LectureDetail, LectureQuery, LectureSort, LectureSummary } from "../api";
 import { Screen } from "../components/Screen";
 import { Button, Chip, Empty, ErrorState, Loading } from "../components/ui";
 import { useAsync } from "../hooks/useAsync";
@@ -378,7 +378,18 @@ function Reading({
   }
 
   const d = detail.data;
-  const totalChapterSec = d.chapters.reduce((sum, c) => sum + (c.endSec - c.startSec), 0);
+  // 섹션이 챕터를 겸합니다 — 둘이 같은 구간을 두 번 말하고 있었습니다.
+  // 옛 데이터는 chapters 를 그대로 씁니다.
+  const sections = d.sections ?? [];
+  const rail =
+    sections.length > 0
+      ? sections.map((sec, i) => ({
+          title: sec.title,
+          startSec: sec.startSec,
+          endSec: sections[i + 1]?.startSec ?? d.durationSec,
+        }))
+      : d.chapters;
+  const totalChapterSec = rail.reduce((sum, c) => sum + (c.endSec - c.startSec), 0);
   const prettyUrl = d.youtubeUrl.replace(/^https?:\/\//, "");
   const isFavorite = favOverride ?? d.isFavorite;
 
@@ -447,104 +458,55 @@ function Reading({
       </header>
 
         <article className={s.read}>
-          <p className={s.lead}>{d.oneLiner}</p>
-          {/* 개요는 흐름의 마디로 보여줍니다. 한 문단이면 강의의 서로 다른
-              이야기가 쉼표로 이어져 다 읽어야 지도가 그려집니다.
-              마디가 없는 옛 데이터는 문단 그대로 떨어집니다. */}
-          {/* 서버가 아직 이 필드를 안 주는 경우(구버전)에도 화면 전체가
-              죽지 않게 합니다 — 빈 배열과 같은 뜻으로 다룹니다. */}
-          {(d.abstractBeats ?? []).length > 0 ? (
-            <dl className={s.beats}>
-              {(d.abstractBeats ?? []).map((b, i) => (
-                <div key={i} className={s.beat}>
-                  <dt>{b.label}</dt>
-                  <dd>{b.text}</dd>
-                </div>
-              ))}
-            </dl>
-          ) : (
-            <p className={s.abstract}>{d.abstract}</p>
-          )}
-
-          <dl className={s.facts}>
-            <dt>대상</dt>
-            <dd>{d.targetAudience}</dd>
-            {d.prerequisites.length > 0 && (
-              <>
-                <dt>선수 지식</dt>
-                <dd>{d.prerequisites.join(", ")}</dd>
-              </>
-            )}
-          </dl>
-
-          {d.coverageNote && <p className={s.coverage}>{d.coverageNote}</p>}
-
-          <h2>핵심 포인트</h2>
-          <div className={s.kp}>
-            {d.keyPoints.map((k, i) => (
-              <div key={i} className={s.kpItem}>
-                <span className={s.kpNo}>{String(i + 1).padStart(2, "0")}</span>
-                <div>
-                  <h3>{k.heading}</h3>
-                  <p>{k.detail}</p>
-                  <a
-                    className={s.ts}
-                    href={youtubeAt(d.youtubeUrl, k.timestampSec)}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {timestamp(k.timestampSec)}
-                  </a>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {d.terms.length > 0 && (
+          {/* 섹션이 요약의 본체입니다. 예전에는 개요·핵심 포인트·챕터가
+              따로 있었는데 셋이 같은 이야기를 세 번 하고 있었습니다.
+              용어·인용·실무 적용도 별도 목록 대신 불릿 안에 녹아 있습니다.
+              섹션이 없는 옛 데이터(시드)는 아래 예전 배치로 떨어집니다. */}
+          {sections.length > 0 ? (
             <>
-              <h2>용어</h2>
-              <dl className={s.terms}>
-                {d.terms.map((t) => (
-                  <div key={t.term} style={{ display: "contents" }}>
-                    <dt>{t.term}</dt>
-                    <dd>{t.definition}</dd>
-                  </div>
-                ))}
+              <dl className={s.facts}>
+                <dt>대상</dt>
+                <dd>{d.targetAudience}</dd>
+                {d.prerequisites.length > 0 && (
+                  <>
+                    <dt>선수 지식</dt>
+                    <dd>{d.prerequisites.join(", ")}</dd>
+                  </>
+                )}
               </dl>
-            </>
-          )}
 
-          {d.takeaways.length > 0 && (
-            <>
-              <h2>실무 적용</h2>
-              <ul className={s.take}>
-                {d.takeaways.map((t, i) => (
-                  <li key={i}>{t}</li>
-                ))}
-              </ul>
-            </>
-          )}
+              {d.coverageNote && <p className={s.coverage}>{d.coverageNote}</p>}
 
-          {d.quotes.length > 0 && (
-            <>
-              <h2>인용</h2>
-              {d.quotes.map((qq, i) => (
-                <blockquote key={i} className={s.quote}>
-                  <p>&ldquo;{qq.text}&rdquo;</p>
-                  <footer>
+              {sections.map((sec, i) => (
+                <section key={i} className={s.sec}>
+                  <h2 className={s.secHead}>
+                    <span className={s.secNo}>{i + 1}</span>
+                    <span className={s.secTitle}>{sec.title}</span>
                     <a
                       className={s.ts}
-                      href={youtubeAt(d.youtubeUrl, qq.timestampSec)}
+                      href={youtubeAt(d.youtubeUrl, sec.startSec)}
                       target="_blank"
                       rel="noreferrer"
                     >
-                      {timestamp(qq.timestampSec)}
+                      {timestamp(sec.startSec)}
                     </a>
-                    <span>{qq.why}</span>
-                  </footer>
-                </blockquote>
+                  </h2>
+                  <ul className={s.secList}>
+                    {sec.bullets.map((b, j) => (
+                      <li key={j}>{b}</li>
+                    ))}
+                  </ul>
+                </section>
               ))}
+
+              {d.closing && (
+                <p className={s.closing}>
+                  <b>한 줄 요약</b> {d.closing}
+                </p>
+              )}
             </>
+          ) : (
+            <LegacyBody d={d} />
           )}
         </article>
         </div>
@@ -552,7 +514,7 @@ function Reading({
         {chaptersOpen && (
           <aside className={s.timeline}>
             <div className={s.tlCap}>
-              <span>챕터</span>
+              <span>{sections.length > 0 ? "목차" : "챕터"}</span>
               <button type="button" className={s.capBtn} onClick={onToggleChapters}>
                 접기
               </button>
@@ -561,9 +523,9 @@ function Reading({
                 짧은 챕터의 제목이 반 줄만 남고 잘립니다. */}
             <div
               className={s.tl}
-              style={{ height: Math.max(420, d.chapters.length * 38) }}
+              style={{ height: Math.max(420, rail.length * 38) }}
             >
-              {d.chapters.map((c) => (
+              {rail.map((c) => (
                 <a
                   key={c.startSec}
                   className={s.tlCh}
@@ -643,6 +605,84 @@ function Reading({
         </div>
       </div>
     </div>
+  );
+}
+
+
+// ── 옛 형식 본문 ──────────────────────────────────────────
+// 섹션 구조 이전에 만들어진 요약(시드 데이터)을 위한 배치입니다.
+// 새로 수집되는 강의는 이 경로를 타지 않습니다.
+function LegacyBody({ d }: { d: LectureDetail }) {
+  return (
+    <>
+      <p className={s.lead}>{d.oneLiner}</p>
+      <p className={s.abstract}>{d.abstract}</p>
+      <dl className={s.facts}>
+        <dt>대상</dt>
+        <dd>{d.targetAudience}</dd>
+        {d.prerequisites.length > 0 && (
+          <>
+            <dt>선수 지식</dt>
+            <dd>{d.prerequisites.join(", ")}</dd>
+          </>
+        )}
+      </dl>
+      {d.coverageNote && <p className={s.coverage}>{d.coverageNote}</p>}
+      <h2>핵심 포인트</h2>
+      <div className={s.kp}>
+        {d.keyPoints.map((k, i) => (
+          <div key={i} className={s.kpItem}>
+            <span className={s.kpNo}>{String(i + 1).padStart(2, "0")}</span>
+            <div>
+              <h3>{k.heading}</h3>
+              <p>{k.detail}</p>
+              <a className={s.ts} href={youtubeAt(d.youtubeUrl, k.timestampSec)} target="_blank" rel="noreferrer">
+                {timestamp(k.timestampSec)}
+              </a>
+            </div>
+          </div>
+        ))}
+      </div>
+      {d.terms.length > 0 && (
+        <>
+          <h2>용어</h2>
+          <dl className={s.terms}>
+            {d.terms.map((t) => (
+              <div key={t.term} style={{ display: "contents" }}>
+                <dt>{t.term}</dt>
+                <dd>{t.definition}</dd>
+              </div>
+            ))}
+          </dl>
+        </>
+      )}
+      {d.takeaways.length > 0 && (
+        <>
+          <h2>실무 적용</h2>
+          <ul className={s.take}>
+            {d.takeaways.map((t, i) => (
+              <li key={i}>{t}</li>
+            ))}
+          </ul>
+        </>
+      )}
+      {d.quotes.length > 0 && (
+        <>
+          <h2>인용</h2>
+          {d.quotes.map((qq, i) => (
+            <blockquote key={i} className={s.quote}>
+              <p>&ldquo;{qq.text}&rdquo;</p>
+              <footer>
+                <a className={s.ts} href={youtubeAt(d.youtubeUrl, qq.timestampSec)} target="_blank" rel="noreferrer">
+                  {timestamp(qq.timestampSec)}
+                </a>
+                <span>{qq.why}</span>
+              </footer>
+            </blockquote>
+          ))}
+        </>
+      )}
+    </>
   );
 }
 

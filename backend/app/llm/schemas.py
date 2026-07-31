@@ -62,53 +62,28 @@ class CriterionScore(Coercing):
     evidence: str = Field(description="점수 근거가 되는 자막 인용 1~2문장")
 
 
-class KeyPoint(Coercing):
-    heading: str = Field(description="핵심 주장 한 줄")
-    detail: str = Field(description="2~4문장 설명")
-    timestamp_sec: int = Field(ge=0)
+class Section(Coercing):
+    """번호 붙은 섹션 하나. 이 요약의 본체입니다.
 
+    예전에는 개요(abstract) · 핵심 포인트(key_points) · 챕터(chapters)가
+    따로 있었는데, 셋이 같은 이야기를 세 번 다르게 하고 있었습니다.
+    읽는 쪽에서는 위아래를 오가야 했고요. 하나로 합쳤습니다.
 
-class Chapter(Coercing):
-    title: str
-    start_sec: int = Field(ge=0)
-    end_sec: int = Field(ge=0)
-    summary: str = Field(default="", description="2~3문장")
-
-
-class Term(Coercing):
-    term: str
-    definition: str = Field(description="강의에서 설명한 방식대로 1~2문장")
-
-
-class Quote(Coercing):
-    text: str = Field(description="자막 원문 그대로")
-    timestamp_sec: int = Field(ge=0)
-    why: str
-
-
-class Beat(Coercing):
-    """개요의 한 마디.
-
-    한 문단짜리 개요는 강의의 서로 다른 이야기를 쉼표로 이어 붙여 덩어리로
-    읽힙니다. 흐름의 마디로 나누고 이름을 붙이면 읽기 전에 지도가 생깁니다.
+    용어·인용·실무 적용도 별도 목록으로 빼지 않고 `bullets` 안에 녹입니다 —
+    처음 나오는 자리에서 설명하는 편이 읽는 흐름에 맞습니다.
     """
 
-    label: str = Field(max_length=12, description="마디 이름 2~6자. 정해진 목록 없음")
-    text: str = Field(description="이 마디에서 다루는 것 1~3문장")
+    title: str = Field(description="그 구간이 무엇을 다루는지. '주제 — 부연' 형태 권장")
+    start_sec: int = Field(ge=0, description="자막 [MM:SS] 마커에서 그대로")
+    bullets: list[str] = Field(min_length=1, max_length=8, description="각 1~3문장")
 
 
 class LectureSummary(Coercing):
     one_liner: str = Field(max_length=80, description="무엇을 가르치는 강의인지 한 문장")
-    abstract_beats: list[Beat] = Field(
-        min_length=2, max_length=4, description="강의의 흐름을 2~4마디로"
-    )
     target_audience: str
     prerequisites: list[str] = Field(default_factory=list, max_length=5)
-    key_points: list[KeyPoint] = Field(min_length=3, max_length=10)
-    chapters: list[Chapter] = Field(min_length=1, max_length=20)
-    terms: list[Term] = Field(default_factory=list, max_length=20)
-    takeaways: list[str] = Field(default_factory=list, max_length=7)
-    quotes: list[Quote] = Field(default_factory=list, max_length=5)
+    sections: list[Section] = Field(min_length=3, max_length=12)
+    closing: str = Field(description="이 강의가 결국 무슨 말을 하는지 2~3문장")
     tags: list[str] = Field(min_length=3, max_length=8)
     coverage_note: str | None = Field(
         default=None, description="자막 품질 문제로 불완전한 구간이 있으면 명시, 없으면 null"

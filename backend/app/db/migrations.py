@@ -56,6 +56,15 @@ def ensure_schema(engine: Engine) -> None:
             conn.execute(text("UPDATE lectures SET abstract_beats = JSON_ARRAY()"))
             logger.info("[db] lectures.abstract_beats added")
 
+        # 개요·핵심포인트·챕터를 하나로 합친 섹션 구조
+        if not _column_exists(conn, "lectures", "sections"):
+            conn.execute(text("ALTER TABLE lectures ADD COLUMN sections JSON NULL"))
+            conn.execute(text("UPDATE lectures SET sections = JSON_ARRAY()"))
+            logger.info("[db] lectures.sections added")
+        if not _column_exists(conn, "lectures", "closing"):
+            conn.execute(text("ALTER TABLE lectures ADD COLUMN closing TEXT NULL"))
+            logger.info("[db] lectures.closing added")
+
         # 삭제 영역에서 "언제 지웠는지"를 보여주기 위한 컬럼
         if not _column_exists(conn, "keywords", "archived_at"):
             conn.execute(text("ALTER TABLE keywords ADD COLUMN archived_at DATETIME NULL"))

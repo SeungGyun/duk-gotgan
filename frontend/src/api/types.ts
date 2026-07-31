@@ -113,11 +113,23 @@ export interface Beat {
   text: string;
 }
 
+/** 번호 붙은 섹션 하나 — 요약의 본체.
+ *  예전의 개요·핵심 포인트·챕터가 여기로 합쳐졌습니다. */
+export interface Section {
+  title: string;
+  startSec: number;
+  bullets: string[];
+}
+
 export interface LectureDetail extends LectureSummary {
   youtubeUrl: string;
   abstract: string;
   /** 흐름의 마디. 비어 있으면 abstract 문단으로 떨어집니다(옛 데이터) */
   abstractBeats: Beat[];
+  /** 요약의 본체. 비어 있으면 옛 형식이라 예전 배치로 떨어집니다 */
+  sections: Section[];
+  /** 글 맨 끝의 한 줄 요약 */
+  closing: string;
   targetAudience: string;
   prerequisites: string[];
   keyPoints: KeyPoint[];

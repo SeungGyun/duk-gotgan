@@ -230,16 +230,12 @@ def _publish(db, video: Video, review: LectureReview, score: int) -> None:
             is_favorite=prev.is_favorite if prev else False,
             model=_model_name(),
             one_liner=s.one_liner,
-            # 검색·목록은 여전히 문단을 봅니다 — 마디를 이어 붙여 채웁니다
-            abstract=" ".join(b.text for b in s.abstract_beats),
-            abstract_beats=[b.model_dump() for b in s.abstract_beats],
+            sections=[_camel(sec.model_dump()) for sec in s.sections],
+            closing=s.closing,
+            # 검색·목록은 문단을 봅니다 — 섹션 제목과 불릿을 이어 붙여 채웁니다
+            abstract=" ".join(sec.title for sec in s.sections),
             target_audience=s.target_audience,
             prerequisites=s.prerequisites,
-            key_points=[_camel(k.model_dump()) for k in s.key_points],
-            chapters=[_camel(c.model_dump()) for c in s.chapters],
-            terms=[t.model_dump() for t in s.terms],
-            takeaways=s.takeaways,
-            quotes=[_camel(q.model_dump()) for q in s.quotes],
             tags=s.tags,
             coverage_note=s.coverage_note,
             search_text=_search_text(video, s),
@@ -263,10 +259,10 @@ def _search_text(video: Video, s) -> str:
             video.title,
             video.channel_title,
             s.one_liner,
-            " ".join(b.text for b in s.abstract_beats),
+            s.closing,
             " ".join(s.tags),
-            " ".join(t.term for t in s.terms),
-            " ".join(k.heading for k in s.key_points),
+            " ".join(sec.title for sec in s.sections),
+            " ".join(b for sec in s.sections for b in sec.bullets),
         ]
         if p
     )
