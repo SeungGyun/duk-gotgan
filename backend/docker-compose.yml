@@ -1,0 +1,37 @@
+# 덕!곳간 전용 MySQL.
+#
+# GuruguruCoin 의 MySQL(포트 3306, 볼륨 guruguru)과 **완전히 분리**합니다.
+# 같은 서버에 스키마만 추가하면 컨테이너 수명과 볼륨이 묶여서, 저쪽 프로젝트를
+# 내리거나 볼륨을 지울 때 이쪽 데이터까지 같이 사라집니다.
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: dukgotgan_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: dukgotgan_root
+      MYSQL_DATABASE: dukgotgan
+      MYSQL_USER: dukgotgan
+      MYSQL_PASSWORD: dukgotgan1234
+      TZ: Asia/Seoul
+    ports:
+      # 3306 은 guruguru_mysql 이 쓰고 있으므로 3307
+      - "3307:3306"
+    volumes:
+      - dukgotgan_mysql_data:/var/lib/mysql
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+09:00
+      # 한국어 전문 검색용. FULLTEXT ... WITH PARSER ngram 이 2글자 단위로
+      # 쪼개므로 "멱등" 같은 두 글자 질의부터 걸립니다.
+      - --ngram-token-size=2
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-pdukgotgan_root"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  dukgotgan_mysql_data:
