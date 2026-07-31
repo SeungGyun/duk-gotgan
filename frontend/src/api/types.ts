@@ -31,6 +31,8 @@ export interface Keyword {
   lectureCount: number;
   lastRunAt: string | null;
   createdAt: string;
+  /** 삭제 영역으로 옮긴 시각. 활성 상태면 null */
+  archivedAt: string | null;
 }
 
 /** 키워드 등록 폼이 보내는 값. id·상태·집계는 서버가 채운다. */

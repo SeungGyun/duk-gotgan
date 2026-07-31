@@ -165,6 +165,117 @@
   }
 }
 
+/* ── 행 동작 ────────────────────────────────────────────── */
+.actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+/* 삭제는 되돌릴 수 있지만, 다른 버튼과 같은 무게로 두면 잘못 누릅니다.
+   평소엔 조용히 있다가 커서를 올렸을 때만 위험한 색을 냅니다. */
+.danger {
+  color: var(--muted);
+}
+.danger:hover {
+  color: var(--fail);
+  border-color: var(--fail);
+}
+
+.rowError {
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--fail);
+  border-radius: var(--r);
+  background: var(--surface);
+  color: var(--fail);
+  font-size: 12.5px;
+}
+
+/* 방금 지운 것을 그 자리에서 되돌립니다 — 삭제 영역까지 가지 않아도 되게 */
+.undo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 8px 10px 8px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r);
+  background: var(--surface-2);
+  font-size: 13px;
+}
+.undo strong {
+  font-weight: 650;
+}
+
+/* ── 수정 줄 ────────────────────────────────────────────── */
+.editRow > td {
+  background: var(--surface-2);
+  padding: 0 !important;
+}
+.edit {
+  padding: 13px 14px;
+  border-top: 1px solid var(--border-strong);
+}
+.editActions {
+  display: flex;
+  gap: 6px;
+  padding-bottom: 2px;
+}
+
+/* ── 삭제 영역 ──────────────────────────────────────────── */
+.bin {
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+.binHead {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 11px 14px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.binHead:hover {
+  background: var(--surface-2);
+}
+.binCaret {
+  font-size: 10px;
+  color: var(--muted);
+}
+.binCount {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.binHint {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+.binList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+.binList li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 14px;
+}
+.binList li + li {
+  border-top: 1px solid var(--border);
+}
+
 /* ── 쿼터 ───────────────────────────────────────────────── */
 .quotaPanel {
   margin-top: 16px;

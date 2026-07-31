@@ -46,6 +46,7 @@ let keywords: Keyword[] = [
     lectureCount: 24,
     lastRunAt: runAt(0, 2),
     createdAt: daysAgo(64),
+    archivedAt: null,
   },
   {
     id: "kw_2",
@@ -59,6 +60,7 @@ let keywords: Keyword[] = [
     lectureCount: 17,
     lastRunAt: runAt(0, 5),
     createdAt: daysAgo(51),
+    archivedAt: null,
   },
   {
     id: "kw_3",
@@ -72,6 +74,7 @@ let keywords: Keyword[] = [
     lectureCount: 31,
     lastRunAt: runAt(1, 11),
     createdAt: daysAgo(88),
+    archivedAt: null,
   },
   {
     id: "kw_4",
@@ -85,6 +88,7 @@ let keywords: Keyword[] = [
     lectureCount: 28,
     lastRunAt: runAt(0, 8),
     createdAt: daysAgo(40),
+    archivedAt: null,
   },
   {
     id: "kw_5",
@@ -98,6 +102,7 @@ let keywords: Keyword[] = [
     lectureCount: 9,
     lastRunAt: runAt(0, 20),
     createdAt: daysAgo(22),
+    archivedAt: null,
   },
   {
     id: "kw_6",
@@ -111,6 +116,7 @@ let keywords: Keyword[] = [
     lectureCount: 0,
     lastRunAt: null,
     createdAt: daysAgo(0),
+    archivedAt: null,
   },
   {
     id: "kw_7",
@@ -124,6 +130,7 @@ let keywords: Keyword[] = [
     lectureCount: 28,
     lastRunAt: runAt(19, 4),
     createdAt: daysAgo(120),
+    archivedAt: null,
   },
 ];
 
@@ -644,7 +651,15 @@ function toSummary(s: Seed): LectureSummary {
 export const mockApi: Api = {
   async listKeywords() {
     await delay();
-    return keywords.map((k) => ({ ...k }));
+    return keywords.filter((k) => k.status !== "archived").map((k) => ({ ...k }));
+  },
+
+  async listArchivedKeywords() {
+    await delay();
+    return keywords
+      .filter((k) => k.status === "archived")
+      .sort((a, b) => (b.archivedAt ?? "").localeCompare(a.archivedAt ?? ""))
+      .map((k) => ({ ...k }));
   },
 
   async createKeyword(draft: KeywordDraft) {
@@ -666,6 +681,7 @@ export const mockApi: Api = {
       lectureCount: 0,
       lastRunAt: null,
       createdAt: iso(new Date()),
+      archivedAt: null,
     };
     keywords = [created, ...keywords];
     return { ...created };
@@ -693,7 +709,28 @@ export const mockApi: Api = {
 
   async deleteKeyword(id) {
     await delay();
-    keywords = keywords.filter((k) => k.id !== id);
+    // 목록에서 지우는 게 아니라 삭제 영역으로 옮깁니다 — 되살릴 수 있어야 합니다
+    const i = keywords.findIndex((k) => k.id === id);
+    const found = keywords[i];
+    if (!found) throw new ApiError("키워드를 찾을 수 없습니다.", 404, "NOT_FOUND");
+    keywords[i] = { ...found, status: "archived", archivedAt: iso(new Date()) };
+  },
+
+  async restoreKeyword(id) {
+    await delay();
+    const i = keywords.findIndex((k) => k.id === id);
+    const found = keywords[i];
+    if (!found) throw new ApiError("키워드를 찾을 수 없습니다.", 404, "NOT_FOUND");
+    if (found.status !== "archived") {
+      throw new ApiError("삭제된 키워드가 아닙니다.", 409, "NOT_ARCHIVED");
+    }
+    const restored: Keyword = {
+      ...found,
+      status: found.lastRunAt === null ? "pending" : "active",
+      archivedAt: null,
+    };
+    keywords[i] = restored;
+    return { ...restored };
   },
 
   async listLectures(query) {

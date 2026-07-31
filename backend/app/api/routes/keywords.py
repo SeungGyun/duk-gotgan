@@ -4,7 +4,7 @@ UI 가 실제 테이블에 값을 넣는 지점입니다. 등록된 키워드의
 나중에 붙을 수집 스케줄러의 트리거가 됩니다.
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -13,6 +13,7 @@ from app.api.errors import ApiError
 from app.api.serializers import keyword_out
 from app.db.models import Keyword, Lecture, VideoKeyword
 from app.db.session import get_db
+from config.time import now_kst
 
 router = APIRouter(prefix="/keywords", tags=["keywords"])
 
@@ -65,12 +66,21 @@ def _validate(value: str | None, allowed: set[str], field: str) -> None:
 
 
 @router.get("")
-def list_keywords(db: Session = Depends(get_db)):
+def list_keywords(
+    archived: bool = Query(default=False, description="true 면 삭제(보관)된 것만"),
+    db: Session = Depends(get_db),
+):
     counts = lecture_counts(db)
-    rows = db.scalars(
-        select(Keyword).where(Keyword.status != "archived").order_by(Keyword.created_at)
-    ).all()
-    return [keyword_out(k, counts.get(k.id, 0)) for k in rows]
+    if archived:
+        # 최근에 지운 것이 위로 — 삭제 영역에서는 방금 지운 것을 가장 자주 찾습니다
+        stmt = (
+            select(Keyword)
+            .where(Keyword.status == "archived")
+            .order_by(Keyword.archived_at.desc(), Keyword.created_at.desc())
+        )
+    else:
+        stmt = select(Keyword).where(Keyword.status != "archived").order_by(Keyword.created_at)
+    return [keyword_out(k, counts.get(k.id, 0)) for k in db.scalars(stmt).all()]
 
 
 @router.post("", status_code=201)
@@ -85,9 +95,10 @@ def create_keyword(draft: KeywordDraft, db: Session = Depends(get_db)):
     existing = db.scalar(select(Keyword).where(Keyword.term == term))
     if existing is not None:
         if existing.status == "archived":
-            # 보관된 것을 되살립니다. 새로 만들면 예전에 이 키워드로 모은
-            # 강의와의 연결이 끊깁니다.
-            existing.status = "pending"
+            # 삭제 영역에 있던 것을 되살립니다. 새로 만들면 예전에 이 키워드로
+            # 모은 강의와의 연결이 끊깁니다.
+            existing.status = "pending" if existing.last_run_at is None else "active"
+            existing.archived_at = None
             db.commit()
             return keyword_out(existing, lecture_counts(db).get(existing.id, 0))
         raise ApiError(409, "KEYWORD_DUPLICATE", f'"{term}" 은(는) 이미 등록되어 있습니다.')
@@ -143,9 +154,34 @@ def update_keyword(keyword_id: str, patch: KeywordPatch, db: Session = Depends(g
 
 @router.delete("/{keyword_id}", status_code=204)
 def delete_keyword(keyword_id: str, db: Session = Depends(get_db)):
-    """수집된 강의는 지우지 않습니다 — 보관 처리입니다."""
+    """지우지 않고 보관합니다.
+
+    수집된 강의도, 이 키워드가 데려왔다는 연결도 그대로 둡니다. 되살렸을 때
+    "몇 편 모았는지"가 이어져야 복구가 복구다워집니다.
+    """
     kw = db.get(Keyword, keyword_id)
     if kw is None:
         raise ApiError(404, "KEYWORD_NOT_FOUND", "해당 키워드를 찾을 수 없습니다.")
     kw.status = "archived"
+    kw.archived_at = now_kst()
     db.commit()
+
+
+@router.post("/{keyword_id}/restore")
+def restore_keyword(keyword_id: str, db: Session = Depends(get_db)):
+    """삭제 영역에서 되살립니다.
+
+    돌아갈 상태를 UI 가 고르게 하지 않습니다. 한 번도 안 돌아본 키워드는
+    `pending` 으로 보내 첫 수집을 받게 하고, 이미 돌던 것은 `active` 로
+    되돌려 주기를 이어갑니다.
+    """
+    kw = db.get(Keyword, keyword_id)
+    if kw is None:
+        raise ApiError(404, "KEYWORD_NOT_FOUND", "해당 키워드를 찾을 수 없습니다.")
+    if kw.status != "archived":
+        raise ApiError(409, "NOT_ARCHIVED", "삭제된 키워드가 아닙니다.")
+
+    kw.status = "pending" if kw.last_run_at is None else "active"
+    kw.archived_at = None
+    db.commit()
+    return keyword_out(kw, lecture_counts(db).get(kw.id, 0))

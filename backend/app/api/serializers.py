@@ -22,6 +22,7 @@ def keyword_out(k: Keyword, lecture_count: int = 0) -> dict:
         "lectureCount": lecture_count,
         "lastRunAt": to_utc_iso(k.last_run_at),
         "createdAt": to_utc_iso(k.created_at),
+        "archivedAt": to_utc_iso(k.archived_at),
     }
 
 

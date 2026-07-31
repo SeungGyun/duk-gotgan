@@ -73,6 +73,8 @@ class Keyword(Base):
     published_after: Mapped[date | None] = mapped_column(Date, nullable=True)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=now_kst)
+    # 삭제(보관)한 시각. 삭제 영역에서 "언제 지웠는지"를 보여주고, 복구하면 다시 비웁니다.
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     __table_args__ = (
         # 같은 검색어를 두 번 등록하지 못하게. archived 된 것까지 포함해 막습니다 —

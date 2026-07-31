@@ -22,11 +22,16 @@ import type {
 export interface Api {
   // 키워드
   listKeywords(): Promise<Keyword[]>;
+  /** 삭제 영역. 지운 것만, 최근 것부터. */
+  listArchivedKeywords(): Promise<Keyword[]>;
   /** 등록. 서버는 status=pending 으로 만들고 곧 첫 수집을 돌립니다. */
   createKeyword(draft: KeywordDraft): Promise<Keyword>;
   updateKeyword(id: string, patch: Partial<KeywordDraft>): Promise<Keyword>;
   setKeywordStatus(id: string, status: "active" | "paused"): Promise<Keyword>;
+  /** 지우지 않고 삭제 영역으로 옮깁니다. 모은 강의와 연결은 그대로 남습니다. */
   deleteKeyword(id: string): Promise<void>;
+  /** 삭제 영역에서 되살립니다. 돌아갈 상태는 서버가 정합니다. */
+  restoreKeyword(id: string): Promise<Keyword>;
 
   // 강의
   listLectures(query: LectureQuery): Promise<LectureSummary[]>;

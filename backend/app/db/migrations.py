@@ -50,4 +50,7 @@ def ensure_schema(engine: Engine) -> None:
             conn.execute(text(LECTURE_FULLTEXT_INDEX))
             logger.info("[db] created ft_lectures_search (ngram)")
 
-    _ = _column_exists  # 앞으로 컬럼 추가 시 여기서 씁니다
+        # 삭제 영역에서 "언제 지웠는지"를 보여주기 위한 컬럼
+        if not _column_exists(conn, "keywords", "archived_at"):
+            conn.execute(text("ALTER TABLE keywords ADD COLUMN archived_at DATETIME NULL"))
+            logger.info("[db] keywords.archived_at added")

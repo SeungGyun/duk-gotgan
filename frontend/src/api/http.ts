@@ -54,6 +54,8 @@ function qs(query: LectureQuery): string {
 export const httpApi: Api = {
   listKeywords: () => req("/keywords"),
 
+  listArchivedKeywords: () => req("/keywords?archived=true"),
+
   createKeyword: (draft: KeywordDraft) =>
     req<Keyword>("/keywords", { method: "POST", body: JSON.stringify(draft) }),
 
@@ -64,6 +66,8 @@ export const httpApi: Api = {
     req<Keyword>(`/keywords/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
 
   deleteKeyword: (id) => req<void>(`/keywords/${id}`, { method: "DELETE" }),
+
+  restoreKeyword: (id) => req<Keyword>(`/keywords/${id}/restore`, { method: "POST" }),
 
   listLectures: (query) => req(`/lectures${qs(query)}`),
 
