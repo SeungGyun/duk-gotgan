@@ -541,7 +541,12 @@ function Reading({
                 접기
               </button>
             </div>
-            <div className={s.tl}>
+            {/* 높이를 챕터 수에 맞춰 늘립니다. 고정 높이면 챕터가 많을 때
+                짧은 챕터의 제목이 반 줄만 남고 잘립니다. */}
+            <div
+              className={s.tl}
+              style={{ height: Math.max(420, d.chapters.length * 38) }}
+            >
               {d.chapters.map((c) => (
                 <a
                   key={c.startSec}
@@ -550,6 +555,7 @@ function Reading({
                   target="_blank"
                   rel="noreferrer"
                   style={{ flex: totalChapterSec > 0 ? c.endSec - c.startSec : 1 }}
+                  title={`${timestamp(c.startSec)} ${c.title}`}
                 >
                   <span className={s.tlTime}>{timestamp(c.startSec)}</span>
                   <span className={s.tlBar} />
@@ -557,7 +563,7 @@ function Reading({
                 </a>
               ))}
             </div>
-            <p className={s.tlNote}>막대 높이 = 챕터 길이 비율</p>
+            <p className={s.tlNote}>막대 높이 = 챕터 길이 (짧은 챕터는 제목이 보이도록 최소 높이)</p>
           </aside>
         )}
         </div>

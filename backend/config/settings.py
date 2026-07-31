@@ -34,6 +34,18 @@ class Settings(BaseSettings):
         "라이브방송,다시보기,shorts,쇼츠"
     )
 
+    # ── AI 검토 (M4) ────────────────────────────────────────
+    # 인증은 구독입니다 — ANTHROPIC_API_KEY 를 쓰지 않습니다 (ROADMAP §3-9).
+    review_model: str = "claude-opus-5"
+    # 판정 위주 작업이라 최고 강도가 필요 없습니다 (ROADMAP §3-5)
+    review_effort: str = "medium"
+    review_max_turns: int = 15
+    # 영상 1건당 격리 작업 폴더가 만들어지는 곳. 실행 후 삭제합니다.
+    jobs_dir: str = "/tmp/dukgotgan-jobs"
+    # 헤드리스 고유 오버헤드 실측값 (AI-PIPELINE §5.1). 조기 종료 판정에
+    # 씁니다 — 총 입력에서 이만큼을 빼야 "실제로 읽은 자막"이 나옵니다.
+    overhead_tokens: int = 18_700
+
     @property
     def title_blocklist(self) -> list[str]:
         return [w.strip().lower() for w in self.rule_title_blocklist.split(",") if w.strip()]

@@ -436,10 +436,12 @@
   color: var(--ink);
   background: var(--surface-2);
 }
+/* 높이는 챕터 수에 따라 TSX 가 정합니다. 고정 440px 이면 챕터가 많을 때
+   짧은 챕터의 제목이 막대 높이 안에서 잘려 반 줄만 남습니다 — 실제로
+   14챕터짜리 강의에서 그렇게 됐습니다. */
 .tl {
   display: flex;
   flex-direction: column;
-  height: 440px;
   gap: 3px;
 }
 .tlCh {
@@ -447,7 +449,9 @@
   grid-template-columns: 44px 6px minmax(0, 1fr);
   gap: 9px;
   align-items: stretch;
-  min-height: 0;
+  /* 제목 두 줄이 들어갈 최소 높이. 이보다 짧은 챕터는 막대가 실제 비율보다
+     길어지지만, 읽을 수 없는 정확함보다 읽히는 근사가 낫습니다. */
+  min-height: 34px;
   text-align: left;
   overflow: hidden;
   background: transparent;
@@ -469,6 +473,10 @@
   border-radius: 3px;
 }
 .tlName {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
   font-size: 11.5px;
   color: var(--ink-2);
   line-height: 1.4;
