@@ -64,9 +64,9 @@
 - 시스템 프롬프트 v1 (`prompts/*.md`, 문자열 전량 교체 방식)
 - 통합 검토 호출 1회 → 임계값 판정 → `evaluations` 기록 + 통과분 `lectures` 적재 (임시 → 정식 이동)
 - `usage_ledger` 계측 + 2단 예산 가드 (`max_budget_usd` + 일일 상한)
-- **오버헤드 실측** — 빈 호출의 `total_input_tokens`를 재고 비용표 재계산 (AI-PIPELINE §5.1)
+- ~~**오버헤드 실측**~~ — **완료 (2026-08-01)**. 약 18,700 토큰(가정의 12배)이지만 전부 캐시에 올라가 재호출은 1/18. 도구 제한이 25,000 → 18,700 으로 줄임. **배치로 몰아 돌려야 캐시가 유지됨** (AI-PIPELINE §5.1)
 - **토큰 실측** — 자막 샘플 10건으로 실제 입력 토큰 확인
-- **실패 유형 실측** — `subtype` / `terminal_reason`의 실제 문자열 값을 로깅해 확정 (AI-PIPELINE §7.1)
+- **실패 유형 실측** — 성공 경로는 확인됨(`subtype="success"`, `terminal_reason="completed"`). 실패·한도초과 시의 값은 M4 에서 계속 수집 (AI-PIPELINE §7.1)
 - 프롬프트 인젝션 방어 적용 — `disallowed_tools`, `permission_mode="dontAsk"`, `setting_sources=[]`, `<untrusted_transcript>` 태깅, 출력 검증
 
 **완료 조건:** 키워드 하나로 파이프라인이 끝까지 돌아 요약본 2~3건이 생긴다. 각 호출의 토큰·비용이 기록되고, **일일 상한을 $0.10으로 낮추면 실제로 큐가 멈춘다.**
@@ -207,7 +207,7 @@
 | 6 | 앱 사용자 인증 | — | 보류 | 로컬 단독 운영 중이라 아직 불필요 |
 | 7 | 장시간(4시간+) 강의 처리 | — | v2 | map-reduce 요약. v1은 스킵 |
 | 8 | 강의 Q&A 기능 | — | v2 | 헤드리스에서는 `resume=session_id`로 구현이 단순. 자막 TTL 정책과 충돌하므로 함께 결정 |
-| **9** | **Claude 인증 방식 (API 키 vs 구독)** | 🔴 **구독** | 확정 | 비용 가드 → 사용량 가드로 성격 변경. AI-PIPELINE §8.3 |
+| **9** | **Claude 인증 방식 (API 키 vs 구독)** | **구독** ✅ | 확정·검증됨 | 백그라운드·TTY 없이 `ANTHROPIC_API_KEY` 없이 동작 확인(2026-08-01). 비용 가드 → 사용량 가드 |
 | 10 | 스킬(`/lecture-review`) 전환 시점 | — | M7 | v1은 시스템 프롬프트 파일. AI-PIPELINE §2.4 |
 | 11 | 긴 영상 발췌 사전판정 도입 여부 | — | M7 | M4의 조기 종료 실측 결과에 따라 |
 | 12 | 커스텀 MCP 도구로 `Read` 대체 | — | v2 | `create_sdk_mcp_server`로 `get_transcript_range()` 제공 → 파일시스템 미노출 |
