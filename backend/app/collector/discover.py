@@ -75,6 +75,7 @@ def discover_keyword(db: Session, kw: Keyword, run: CrawlRun) -> DiscoverResult:
         language=kw.language,
         published_after=published_after,
         limit=SEARCH_PAGE_SIZE,
+        min_duration_sec=kw.min_duration_sec,
     )
     if not ids:
         return result

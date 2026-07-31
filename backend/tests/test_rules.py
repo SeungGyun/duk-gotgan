@@ -9,7 +9,7 @@ from datetime import timedelta
 import pytest
 
 from app.collector.rules import evaluate
-from app.collector.youtube import Candidate, parse_duration
+from app.collector.youtube import Candidate, duration_bucket, parse_duration
 from app.db.models import Keyword
 from config.time import now_kst
 
@@ -99,3 +99,11 @@ def test_키워드_설정이_전역값보다_우선():
 )
 def test_기간_파싱(iso, sec):
     assert parse_duration(iso) == sec
+
+
+@pytest.mark.parametrize("min_sec,bucket", [(0, "any"), (240, "long"), (900, "long"), (3600, "long")])
+def test_검색_길이_구간(min_sec, bucket):
+    """medium 을 쓰면 안 됩니다 — 20분에서 잘려 긴 강의가 통째로 사라집니다.
+    실제로 그렇게 넣었다가 50건 전부 탈락했습니다."""
+    assert duration_bucket(min_sec) == bucket
+    assert duration_bucket(min_sec) != "medium"

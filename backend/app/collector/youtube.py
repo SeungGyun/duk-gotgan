@@ -111,7 +111,27 @@ def _parse_dt(text: str | None) -> datetime | None:
 # ── 호출 ────────────────────────────────────────────────────
 
 
-def search_ids(term: str, *, language: str, published_after: datetime, limit: int) -> list[str]:
+def duration_bucket(min_duration_sec: int) -> str:
+    """우리 최소 길이를 유튜브가 아는 세 칸 중 하나로 옮깁니다.
+
+    유튜브는 `short`(4분 미만) · `medium`(4~20분) · `long`(20분 초과) 세 가지만
+    압니다. 임의의 분 단위 하한을 줄 수 없습니다.
+
+    **`medium` 은 강의 수집에 쓰면 안 됩니다.** 20분에서 잘리기 때문에,
+    "15분 이상"을 뜻하려고 medium 을 넣으면 오히려 4~20분짜리만 받아와
+    긴 강의가 전부 사라집니다. 실제로 그렇게 넣었다가 50건 전부 탈락했습니다.
+
+    그래서 하한이 있으면 `long` 으로 올려 잡습니다. 15~20분 구간을 놓치는
+    대신 검색 결과 50칸을 전부 긴 영상으로 채웁니다 — 그 편이 수확이 큽니다.
+    """
+    if min_duration_sec >= 240:
+        return "long"
+    return "any"
+
+
+def search_ids(
+    term: str, *, language: str, published_after: datetime, limit: int, min_duration_sec: int = 0
+) -> list[str]:
     """검색해서 video id 만 뽑습니다. 순서(= 검색 순위)를 유지합니다."""
     params: dict[str, Any] = {
         "part": "id",
@@ -120,9 +140,7 @@ def search_ids(term: str, *, language: str, published_after: datetime, limit: in
         "maxResults": min(limit, 50),
         "order": "relevance",
         "publishedAfter": published_after.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        # 강의는 대부분 20분 이상이라 short(4분 미만)를 API 단에서 미리 뺍니다.
-        # 유닛은 그대로지만 후보 품질이 올라가고, 상세 조회 대상도 줄어듭니다.
-        "videoDuration": "medium",
+        "videoDuration": duration_bucket(min_duration_sec),
     }
     if language in ("ko", "en"):
         params["relevanceLanguage"] = language
