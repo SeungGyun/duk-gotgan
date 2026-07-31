@@ -703,25 +703,33 @@ STT를 쓰는 경우 `worker`에 `ffmpeg`와 whisper 모델 캐시 볼륨이 필
 
 ## 8. 정책과 제약
 
-### 8.1 비용 가드 (필수)
+### 8.1 사용량 가드 (필수)
 
-가드가 **두 겹**입니다. 헤드리스는 호출 단위 하드 캡을 SDK가 제공하므로 이를 1차로 쓰고, 일일 상한은 우리가 관리합니다.
+> **인증은 구독으로 확정했습니다** (ROADMAP §3-9). 따라서 이 가드는 **비용 가드가 아니라 사용량 가드**입니다. 청구액은 정액이고, 실제 병목은 구독의 사용량 한도입니다. 돈이 아니라 **한도에 언제 닿는가**를 관리합니다.
+
+가드가 **두 겹**입니다.
 
 ```python
-# 1차: SDK 레벨 — 호출 하나가 폭주하는 것을 차단
-ClaudeAgentOptions(max_budget_usd=0.50, ...)
+# 1차: 호출 단위 — 한 호출이 폭주하는 것을 차단
+ClaudeAgentOptions(max_turns=15, ...)
 
 # 2차: 애플리케이션 레벨 — 하루 총량을 차단
-with budget.guard(kind="llm", estimated_usd=est):
+with usage.guard(kind="llm", est_input_tokens=est):
     out = run_sync(...)
-    budget.record(actual_usd=out.cost_usd)   # ResultMessage.total_cost_usd
+    usage.record(
+        input_tokens=out.input_tokens,
+        output_tokens=out.output_tokens,
+        cost_usd=out.cost_usd,   # 정액제라 청구액이 아님 — 사용량 프록시로만 기록
+    )
 ```
 
-- 일일 상한 도달 → 신규 태스크 발행 중단, 진행 중인 것만 완료
-- 호출 단위 상한(`max_budget_usd`)은 판정 $0.15 / 요약 $0.50를 기본값으로
-- UI 대시보드에 오늘 사용량 / 상한을 항상 표시
+- 일일 토큰 상한 도달 → 신규 태스크 발행 중단, 진행 중인 것만 완료
+- 한도 초과로 실행이 거부되면(`terminal_reason`) 큐를 **정지하고 윈도 리셋 후 재개**
+- UI 대시보드는 **"오늘 토큰"** 을 표시합니다 — 이미 그렇게 만들어져 있습니다
 
-> **인증 방식에 따라 이 가드의 의미가 달라집니다.** API 키 인증이면 `total_cost_usd`는 실제 과금액이고 위 설계가 그대로 성립합니다. 구독 인증이면 실제 청구는 정액이고 병목이 **사용량 한도**로 바뀌므로, 같은 계측을 쓰되 "예산" 대신 "레이트리밋 가드"로 동작해야 합니다. 어느 쪽인지는 M0에서 확정합니다 ([AI-PIPELINE.md](AI-PIPELINE.md) §8.3).
+`total_cost_usd`는 구독에서도 채워지지만 **실제 청구액이 아니라 API 환산 추정치**입니다. 사용량 추이를 보는 프록시로만 쓰고, 화면에 "비용"이라고 쓰지 않습니다.
+
+**구독 경로에서 M4 시작 전 반드시 확인할 것** — 헤드리스 실행이 구독 자격증명으로 백그라운드에서 성공하는지, 자격증명 갱신이 사람 개입 없이 되는지. 이게 안 되면 API 키로 되돌리고 이 절을 비용 가드로 되돌립니다.
 
 ### 8.2 YouTube 쿼터 가드
 
