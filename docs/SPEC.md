@@ -28,7 +28,7 @@
 | 백엔드 | Python 3.12 + FastAPI | 수집·AI 생태계(yt-dlp, whisper, anthropic SDK)가 Python 중심 |
 | 프론트 | React + Vite + TypeScript | SPA 하나면 충분, SSR 불필요 |
 | 큐/스케줄 | Celery + Celery Beat + Redis | 단계별 재시도·백오프·라우팅을 표준으로 제공 |
-| DB | PostgreSQL 16 | JSONB(구조화 요약) + `tsvector`(전문 검색)를 한 DB에서 |
+| DB | **MySQL 8** | 구현 시 변경. 같은 머신에서 이미 운영 중인 DB 엔진과 맞춰 운영 지식을 재사용합니다. JSON 은 동등하고, 미결이던 한국어 전문 검색은 `FULLTEXT ... WITH PARSER ngram` 으로 확장 없이 해결됩니다 (§3.2) |
 | 자막 | 공식 자막 우선, 없으면 Whisper STT | 커버리지와 비용의 균형 |
 | 배포 | Docker Compose 단일 서버 | 개인~소규모. 큐 기반이라 이후 수평 확장 가능 |
 | LLM 실행 | **Claude Code 헤드리스** (`claude-agent-sdk`) | Messages API 직접 호출이 아님. 상세는 AI-PIPELINE.md |
@@ -654,7 +654,7 @@ data: {"video_id":"...","title":"...","expert_score":87}
 
 ```yaml
 services:
-  db:         postgres:16-alpine     # volume: pgdata
+  db:         mysql:8.0              # volume: dukgotgan_mysql_data, 3307:3306
   redis:      redis:7-alpine
   api:        build: ./backend       # uvicorn, 8000
   worker:     build: ./backend       # celery worker -Q discover,transcript

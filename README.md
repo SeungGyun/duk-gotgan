@@ -39,7 +39,7 @@
 | **api** | REST API, 인증, 조회/검색 | FastAPI (Python 3.12) |
 | **worker** | 유튜브 수집 · 자막 확보 | Celery + Celery Beat |
 | **worker-ai** | 전문성 판정 · 요약 생성 | **Claude Code 헤드리스** (`claude-agent-sdk`) + Node.js |
-| **db** | 영속 저장 + 전문 검색 | PostgreSQL 16 |
+| **db** | 영속 저장 + 전문 검색 | MySQL 8 (ngram FULLTEXT) |
 | **broker** | 작업 큐 · 분산 락 · 캐시 | Redis 7 |
 
 > **AI는 Messages API 직접 호출이 아니라 Claude Code 헤드리스 실행입니다.** Python 프로젝트이므로 `claude -p` subprocess 대신 Agent SDK(`claude-agent-sdk`)를 씁니다. 스키마 강제 출력과 호출 단위 비용 상한(`max_budget_usd`)을 그대로 쓸 수 있고, 인프로세스 도구(`create_sdk_mcp_server`)로 저장까지 한 흐름에 담을 수 있습니다. 대신 Batch API 50% 할인은 사용할 수 없고 **프롬프트 인젝션이 새로운 최상위 리스크**가 됩니다 — 자세한 내용은 [docs/AI-PIPELINE.md](docs/AI-PIPELINE.md).
@@ -52,12 +52,24 @@
 
 | 단계 | 범위 | 상태 |
 |---|---|---|
-| **1. 웹 UI** | 4개 화면, 목 데이터로 단독 동작 | **진행 중** — `frontend/` |
-| 2. 키워드 적재 | 등록 폼 → 실제 테이블 | 직접 처리 (계약: [docs/API.md](docs/API.md)) |
-| 3. 수집 에이전트 | 스케줄러 · 유튜브 · 자막 · AI 검토 | 이후 별도 섹션 |
+| **1. 웹 UI** | 4개 화면, 목 데이터로 단독 동작 | 완료 — `frontend/` |
+| **2. 저장소 + API** | MySQL 스키마, docs/API.md 전 엔드포인트 | 완료 — `backend/` |
+| 3. 수집 에이전트 | 스케줄러 · 유튜브 · 자막 · AI 검토 | **다음** |
 
-지금은 1단계입니다. UI는 백엔드 없이 전부 돌아가고, 붙일 때는 `.env`의 `VITE_API` 한 줄만
-바꾸면 됩니다.
+UI는 백엔드 없이도 전부 돌아갑니다(목 데이터). 실제 API 로 붙일 때는 `frontend/.env` 의
+`VITE_API=http` 한 줄만 바꾸면 됩니다.
+
+```bash
+cd backend && docker compose up -d          # MySQL (3307)
+uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e ".[dev]"
+cp .env.example .env
+.venv/bin/python -m scripts.seed            # 목 데이터 적재 (선택)
+.venv/bin/uvicorn app.api.main:app --reload --port 8000
+
+cd ../frontend && echo "VITE_API=http" > .env && npm run dev
+```
+
+자세한 내용은 [backend/README.md](backend/README.md).
 
 ```bash
 cd frontend && npm install && npm run dev   # http://localhost:5173

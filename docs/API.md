@@ -3,8 +3,9 @@
 > UI가 백엔드에 기대하는 전부입니다. 이 문서와 `frontend/src/api/types.ts`가 같은 내용을
 > 서술하며, 타입 정의가 정본입니다.
 >
-> **현재 상태**: UI는 `frontend/src/api/mock.ts`(브라우저 메모리)로 동작합니다.
-> 백엔드가 준비되면 `.env`에서 `VITE_API=http`로 바꾸면 `http.ts`가 아래 경로를 호출합니다.
+> **현재 상태**: 아래 엔드포인트는 전부 `backend/` 에 구현되어 있습니다.
+> `frontend/.env` 에 `VITE_API=http` 를 두면 `http.ts` 가 이 경로들을 호출하고,
+> 값이 없으면 `mock.ts`(브라우저 메모리)로 계속 동작합니다.
 > 화면 코드는 어느 구현이 붙었는지 모릅니다.
 
 ---
@@ -272,7 +273,7 @@ UI는 각 엔드포인트가 없어도 나머지 화면이 동작하도록 만�
 
 | 순서 | 엔드포인트 | 붙이면 되는 것 |
 |---|---|---|
-| 1 | `GET /keywords`, `POST /keywords` | 키워드 화면 전체 — **여기까지가 지금 필요한 범위** |
+| 1 | `GET /keywords`, `POST /keywords` | 키워드 화면 전체 |
 | 2 | `PATCH` / `DELETE /keywords/{id}` | 일시정지·임계값 수정 |
 | 3 | `GET /stats/usage` | 상단바 토큰 미터, 쿼터 패널 |
 | 4 | `GET /lectures`, `GET /lectures/{id}` | 강의 화면 (수집 파이프라인이 데이터를 채운 뒤) |

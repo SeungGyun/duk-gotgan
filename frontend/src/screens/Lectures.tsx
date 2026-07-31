@@ -357,6 +357,11 @@ function Reading({
     if (loaded) onReady?.(videoId);
   }, [loaded, videoId, onReady]);
 
+  // 즐겨찾기는 낙관적으로 먼저 뒤집고, 서버가 거절하면 되돌립니다.
+  // null 이면 "아직 손대지 않음" — 서버가 준 값을 그대로 씁니다.
+  const [favOverride, setFavOverride] = useState<boolean | null>(null);
+  useEffect(() => setFavOverride(null), [videoId]);
+
   if (detail.error) {
     return (
       <div className={s.readPane}>
@@ -375,6 +380,13 @@ function Reading({
   const d = detail.data;
   const totalChapterSec = d.chapters.reduce((sum, c) => sum + (c.endSec - c.startSec), 0);
   const prettyUrl = d.youtubeUrl.replace(/^https?:\/\//, "");
+  const isFavorite = favOverride ?? d.isFavorite;
+
+  const toggleFavorite = () => {
+    const next = !isFavorite;
+    setFavOverride(next);
+    api.setFavorite(d.videoId, next).catch(() => setFavOverride(!next));
+  };
 
   return (
     <div className={s.readPane}>
@@ -412,13 +424,13 @@ function Reading({
             </a>
             <button
               type="button"
-              className={`${s.iconBtn} ${d.isFavorite ? s.iconOn : ""}`}
-              onClick={() => void api.setFavorite(d.videoId, !d.isFavorite)}
-              aria-pressed={d.isFavorite}
-              title={d.isFavorite ? "즐겨찾기 해제" : "즐겨찾기"}
-              aria-label={d.isFavorite ? "즐겨찾기 해제" : "즐겨찾기"}
+              className={`${s.iconBtn} ${isFavorite ? s.iconOn : ""}`}
+              onClick={toggleFavorite}
+              aria-pressed={isFavorite}
+              title={isFavorite ? "즐겨찾기 해제" : "즐겨찾기"}
+              aria-label={isFavorite ? "즐겨찾기 해제" : "즐겨찾기"}
             >
-              <IconStar filled={d.isFavorite} />
+              <IconStar filled={isFavorite} />
             </button>
             <button
               type="button"
