@@ -50,6 +50,12 @@ def ensure_schema(engine: Engine) -> None:
             conn.execute(text(LECTURE_FULLTEXT_INDEX))
             logger.info("[db] created ft_lectures_search (ngram)")
 
+        # 개요를 흐름의 마디로 나눠 받기 시작 (요약 구조 개선)
+        if not _column_exists(conn, "lectures", "abstract_beats"):
+            conn.execute(text("ALTER TABLE lectures ADD COLUMN abstract_beats JSON NULL"))
+            conn.execute(text("UPDATE lectures SET abstract_beats = JSON_ARRAY()"))
+            logger.info("[db] lectures.abstract_beats added")
+
         # 삭제 영역에서 "언제 지웠는지"를 보여주기 위한 컬럼
         if not _column_exists(conn, "keywords", "archived_at"):
             conn.execute(text("ALTER TABLE keywords ADD COLUMN archived_at DATETIME NULL"))

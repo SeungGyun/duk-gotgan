@@ -288,7 +288,11 @@ class Lecture(Base):
 
     model: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     one_liner: Mapped[str] = mapped_column(Text, nullable=False)
+    # 개요. 지금은 흐름의 마디(abstract_beats)로 받고, 문단은 검색·목록용으로
+    # 마디를 이어 붙여 채웁니다. 시드로 넣은 옛 행은 문단만 갖고 있습니다.
     abstract: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # [{label, text}] — 없으면 UI 가 abstract 문단으로 떨어집니다
+    abstract_beats: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     target_audience: Mapped[str] = mapped_column(Text, nullable=False, default="")
     prerequisites: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     key_points: Mapped[list] = mapped_column(JSON, nullable=False, default=list)

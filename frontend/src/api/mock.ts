@@ -156,6 +156,7 @@ const lectures: Seed[] = [
     keywordIds: ["kw_2"],
     detail: {
       youtubeUrl: "https://youtu.be/aX7kQ2mN9pL",
+      abstractBeats: [],
       abstract:
         "강연자는 실제 운영 중 발생한 이중 청구 사고를 재구성하며 시작한다. 네트워크 타임아웃 후 클라이언트가 재시도했고, 게이트웨이는 두 요청을 서로 다른 것으로 보았으며, DB 유니크 제약은 두 트랜잭션이 커밋되기 전 구간에서 무력했다. 이 사고를 축으로 방어 계층을 하나씩 쌓아 올리고, 각 층이 막는 실패와 막지 못하는 실패를 분리해 설명한다.",
       targetAudience: "결제·주문 도메인을 다루는 백엔드 개발자, 실무 경험 1년 이상",
@@ -285,6 +286,7 @@ const lectures: Seed[] = [
     keywordIds: ["kw_1"],
     detail: {
       youtubeUrl: "https://youtu.be/bK4rT8wY1zQ",
+      abstractBeats: [],
       abstract:
         "CNI는 스펙일 뿐 구현이 아니라는 점에서 출발해, 파드가 만들어질 때 네트워크 네임스페이스와 veth 쌍이 어떻게 배치되는지를 실습으로 보여준다. 이어서 Calico의 두 모드를 비교하며 각각 어떤 네트워크 환경에서 유효한지 설명한다.",
       targetAudience: "쿠버네티스 운영 경험 6개월 이상",
@@ -391,6 +393,7 @@ const lectures: Seed[] = [
     keywordIds: ["kw_3"],
     detail: {
       youtubeUrl: "https://youtu.be/cM9nP3vB7hR",
+      abstractBeats: [],
       abstract:
         "EXPLAIN 출력의 각 숫자가 무엇을 뜻하는지부터 시작해, 추정치와 실측치가 벌어질 때 무엇을 의심해야 하는지를 다룬다. 인덱스를 만들었는데도 순차 스캔이 나오는 상황을 다섯 가지 원인으로 분류한다.",
       targetAudience: "SQL을 쓰지만 실행 계획은 잘 안 보는 개발자",
@@ -478,6 +481,7 @@ const lectures: Seed[] = [
     keywordIds: ["kw_4"],
     detail: {
       youtubeUrl: "https://youtu.be/dW2jL6xF4tG",
+      abstractBeats: [],
       abstract:
         "렌더링 파이프라인의 다섯 단계를 나누고, 각 단계를 건드리는 CSS 속성이 무엇인지 정리한다. 이어서 읽기와 쓰기를 번갈아 하는 코드가 왜 강제 동기 레이아웃을 유발하는지 프로파일러로 보여준다.",
       targetAudience: "성능 문제를 감이 아니라 측정으로 접근하려는 프론트엔드 개발자",
@@ -572,6 +576,7 @@ const lectures: Seed[] = [
     keywordIds: ["kw_6"],
     detail: {
       youtubeUrl: "https://youtu.be/eR5tY8uI0oP",
+      abstractBeats: [],
       abstract:
         "파인튜닝을 검토하는 팀이 가장 자주 놓치는 것은 '이 문제가 정말 가중치 문제인가'라는 질문이다. 프롬프트 개선과 검색 증강으로 해결되는 사례를 먼저 걸러내고, 남는 경우에 필요한 데이터 규모와 평가 체계를 다룬다.",
       targetAudience: "LLM 제품을 만들며 파인튜닝을 검토 중인 팀",

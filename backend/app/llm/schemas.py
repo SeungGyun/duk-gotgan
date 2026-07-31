@@ -86,9 +86,22 @@ class Quote(Coercing):
     why: str
 
 
+class Beat(Coercing):
+    """개요의 한 마디.
+
+    한 문단짜리 개요는 강의의 서로 다른 이야기를 쉼표로 이어 붙여 덩어리로
+    읽힙니다. 흐름의 마디로 나누고 이름을 붙이면 읽기 전에 지도가 생깁니다.
+    """
+
+    label: str = Field(max_length=12, description="마디 이름 2~6자. 정해진 목록 없음")
+    text: str = Field(description="이 마디에서 다루는 것 1~3문장")
+
+
 class LectureSummary(Coercing):
     one_liner: str = Field(max_length=80, description="무엇을 가르치는 강의인지 한 문장")
-    abstract: str = Field(description="3~5문장 개요")
+    abstract_beats: list[Beat] = Field(
+        min_length=2, max_length=4, description="강의의 흐름을 2~4마디로"
+    )
     target_audience: str
     prerequisites: list[str] = Field(default_factory=list, max_length=5)
     key_points: list[KeyPoint] = Field(min_length=3, max_length=10)

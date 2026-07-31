@@ -162,7 +162,11 @@
 ```jsonc
 {
   "youtubeUrl": "https://youtu.be/aX7kQ2mN9pL",
-  "abstract": "3~5문장 개요",
+  "abstract": "마디를 이어 붙인 문단 (검색·목록용)",
+  "abstractBeats": [                     // 개요를 흐름의 마디로. 라벨은 강의마다 다름
+    { "label": "문제", "text": "20년간 운영된 레거시 결제 원장은 …" },
+    { "label": "설계", "text": "MySQL과 JPA 기반으로 신규 원장을 …" }
+  ],
   "targetAudience": "…",
   "prerequisites": ["…"],
   "keyPoints": [

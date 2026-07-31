@@ -51,6 +51,8 @@ def lecture_detail_out(lec: Lecture, keyword_ids: list[str], ev, transcript) -> 
         {
             "youtubeUrl": f"https://youtu.be/{lec.video_id}",
             "abstract": lec.abstract,
+            # 흐름의 마디. 비어 있으면 UI 가 abstract 문단으로 떨어집니다
+            "abstractBeats": lec.abstract_beats or [],
             "targetAudience": lec.target_audience,
             "prerequisites": lec.prerequisites or [],
             "keyPoints": lec.key_points or [],

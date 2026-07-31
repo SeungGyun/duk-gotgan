@@ -672,6 +672,53 @@
   gap: 8px;
 }
 
+/* 개요 — 흐름의 마디.
+   라벨을 왼쪽 기둥에 세워 두면 눈이 라벨만 훑고 필요한 마디로 들어갑니다.
+   한 문단이면 그게 안 되어서 처음부터 끝까지 읽어야 합니다. */
+.beats {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 0 20px;
+  margin: 0 0 22px;
+}
+.beats > div {
+  display: contents;
+}
+.beats dt {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--accent);
+  letter-spacing: -0.01em;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+.beats dd {
+  margin: 0;
+  padding: 12px 0;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--ink-2);
+  border-top: 1px solid var(--border);
+}
+.beats > div:last-child dt,
+.beats > div:last-child dd {
+  border-bottom: 1px solid var(--border);
+}
+@media (max-width: 640px) {
+  .beats {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .beats dt {
+    padding-bottom: 0;
+    border-bottom: 0;
+  }
+  .beats dd {
+    border-top: 0;
+    padding-top: 4px;
+  }
+}
+
 .coverage {
   font-size: 12.5px;
   color: var(--warn);

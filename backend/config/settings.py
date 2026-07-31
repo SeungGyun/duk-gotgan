@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     # 상한 — UI 미터의 분모. 0 이면 상한 없음(UI 가 미터를 숨김)
-    daily_token_limit: int = 1_000_000
+    daily_token_limit: int = 10_000_000
     youtube_unit_limit: int = 10_000
 
     # 유튜브 Data API v3 키 (Google Cloud Console 에서 발급, 무료)

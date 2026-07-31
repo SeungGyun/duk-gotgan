@@ -448,7 +448,23 @@ function Reading({
 
         <article className={s.read}>
           <p className={s.lead}>{d.oneLiner}</p>
-          <p className={s.abstract}>{d.abstract}</p>
+          {/* 개요는 흐름의 마디로 보여줍니다. 한 문단이면 강의의 서로 다른
+              이야기가 쉼표로 이어져 다 읽어야 지도가 그려집니다.
+              마디가 없는 옛 데이터는 문단 그대로 떨어집니다. */}
+          {/* 서버가 아직 이 필드를 안 주는 경우(구버전)에도 화면 전체가
+              죽지 않게 합니다 — 빈 배열과 같은 뜻으로 다룹니다. */}
+          {(d.abstractBeats ?? []).length > 0 ? (
+            <dl className={s.beats}>
+              {(d.abstractBeats ?? []).map((b, i) => (
+                <div key={i} className={s.beat}>
+                  <dt>{b.label}</dt>
+                  <dd>{b.text}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <p className={s.abstract}>{d.abstract}</p>
+          )}
 
           <dl className={s.facts}>
             <dt>대상</dt>

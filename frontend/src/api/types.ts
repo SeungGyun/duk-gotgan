@@ -107,9 +107,17 @@ export interface LectureSummary {
   keywordIds: string[];
 }
 
+/** 개요의 한 마디. 라벨은 강의마다 다릅니다 — 정해진 목록이 없습니다. */
+export interface Beat {
+  label: string;
+  text: string;
+}
+
 export interface LectureDetail extends LectureSummary {
   youtubeUrl: string;
   abstract: string;
+  /** 흐름의 마디. 비어 있으면 abstract 문단으로 떨어집니다(옛 데이터) */
+  abstractBeats: Beat[];
   targetAudience: string;
   prerequisites: string[];
   keyPoints: KeyPoint[];
