@@ -1,0 +1,167 @@
+/* 여러 화면에서 공유하는 작은 조각들 */
+
+/* ── 칩 ─────────────────────────────────────────────────── */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: var(--r);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.chip::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 99px;
+  background: currentColor;
+}
+.chip.plain::before {
+  display: none;
+}
+.pass {
+  color: var(--pass);
+  background: var(--pass-soft);
+  border-color: color-mix(in srgb, var(--pass) 24%, transparent);
+}
+.warn {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: color-mix(in srgb, var(--warn) 24%, transparent);
+}
+.fail {
+  color: var(--fail);
+  background: var(--fail-soft);
+  border-color: color-mix(in srgb, var(--fail) 24%, transparent);
+}
+.neutral {
+  color: var(--muted);
+  background: var(--surface-sink);
+  border-color: var(--border);
+}
+.accent {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+/* ── 버튼 ───────────────────────────────────────────────── */
+.btn {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 550;
+  padding: 6px 13px;
+  border-radius: var(--r);
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: var(--muted);
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+/* 액센트 위 글자는 --surface — 라이트에선 흰색, 다크에선 어두운색이 되어
+   미디어쿼리 분기 없이 양쪽에서 대비가 유지된다. */
+.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--surface);
+}
+.primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.small {
+  padding: 3px 9px;
+  font-size: 12px;
+}
+
+/* ── 패널 ───────────────────────────────────────────────── */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+}
+.panelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.panelHead h2 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.panelBody {
+  padding: 16px;
+}
+
+/* ── 미터 ───────────────────────────────────────────────── */
+.meter {
+  position: relative;
+  height: 6px;
+  background: var(--surface-sink);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.meter > i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 99px;
+  background: var(--accent);
+}
+.meterOver > i {
+  background: var(--warn);
+}
+
+/* ── 길이 트랙 ──────────────────────────────────────────────
+   이 제품의 시그니처. 폭 = 목록 내 최장 강의 대비 비율,
+   세로 눈금 = 핵심 포인트 위치. 길이 비교와 내부 밀도를 동시에 본다. */
+.rail {
+  position: relative;
+  height: 4px;
+  /* --surface-sink 는 선택된 행(accent-soft)과 거의 같은 색이라 레일이 사라진다 */
+  background: var(--border);
+  border-radius: 99px;
+}
+.track {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--seq-3);
+  border-radius: 99px;
+}
+.tick {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 10px;
+  background: var(--accent);
+  border-radius: 1px;
+}
+
+/* ── 상태 ───────────────────────────────────────────────── */
+.state {
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+.stateError {
+  color: var(--fail);
+}
+.stateAction {
+  margin-top: 10px;
+}

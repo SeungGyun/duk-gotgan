@@ -1,0 +1,774 @@
+/* ── 키워드 필터 ─────────────────────────────────────────────
+   고를 수 있는 키워드를 전부 펼쳐 보여야 "무엇을 선택 중인지"가
+   읽힙니다. 선택된 것만 칩으로 띄우면 선택지가 보이지 않습니다.
+   0편인 키워드도 숨기지 않습니다 — 쿼터만 쓰고 성과가 없다는 신호라서요.
+   머리글과 선택 개수는 두지 않습니다: 칩의 켜짐 상태가 이미 같은 말을
+   하고 있어서, 글자로 반복하면 줄만 하나 늘어납니다. */
+.kwFilter {
+  padding: 0;
+  margin-bottom: 12px;
+}
+.kwChips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.kwChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  padding: 4px 11px;
+  border-radius: 99px;
+  cursor: pointer;
+}
+.kwChip:hover {
+  border-color: var(--muted);
+  background: var(--surface-2);
+}
+.kwChip .c {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.kwChipOn {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--surface);
+  font-weight: 600;
+}
+.kwChipOn .c {
+  color: var(--surface);
+  opacity: 0.72;
+}
+.kwAdd {
+  border-style: dashed;
+  color: var(--accent);
+  border-color: var(--accent-line);
+  text-decoration: none;
+}
+.kwAdd:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+/* 선택이 있을 때만 나타납니다 — 평소엔 자리도 차지하지 않습니다 */
+.kwClear {
+  border-style: dashed;
+  color: var(--muted);
+}
+
+/* ── 필터 바 ────────────────────────────────────────────── */
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-bottom: 14px;
+}
+.search {
+  flex: 1;
+  min-width: 180px;
+  max-width: 320px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 11px;
+}
+.search::placeholder {
+  color: var(--muted);
+}
+.seg {
+  display: flex;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.seg button {
+  border: 0;
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  padding: 5px 11px;
+  cursor: pointer;
+  border-right: 1px solid var(--border);
+}
+.seg button:last-child {
+  border-right: 0;
+}
+.segOn {
+  background: var(--accent-soft) !important;
+  color: var(--accent) !important;
+  font-weight: 600;
+}
+
+/* ── 2단: 목록 + 읽기 ────────────────────────────────────────
+   아카이브는 훑으면서 읽는 물건이라 화면을 오가면 "어디까지 봤더라"를
+   매번 다시 찾게 됩니다. 왼쪽에서 고르면 오른쪽이 바로 바뀝니다.
+   다만 읽는 동안에는 목록이 방해가 되므로, 카드 껍데기를 벗겨 색인처럼
+   낮추고 필요하면 통째로 접을 수 있게 했습니다. */
+.split {
+  display: grid;
+  grid-template-columns: minmax(240px, 272px) minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+.splitSolo {
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (max-width: 1180px) {
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 카드가 아니라 색인. 테두리·배경을 걷어내 시선을 덜 끕니다. */
+.listPane {
+  position: sticky;
+  top: calc(var(--tb-off) + 14px);
+  align-self: start;
+}
+.lpHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.lpSort {
+  font-size: 11.5px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.lpSort:hover {
+  color: var(--ink);
+}
+
+/* 목록은 제목만. 읽는 동안 시선을 뺏지 않는 것이 목적이라
+   점수·채널·길이 트랙을 모두 덜어냈습니다. */
+.row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 9px 10px 9px 9px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+}
+.row:last-child {
+  border-bottom: 0;
+}
+.row:hover {
+  background: var(--surface-2);
+}
+.rowOn,
+.rowOn:hover {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+/* 좁아진 폭에서 행 높이가 들쭉날쭉하지 않게 두 줄로 자릅니다.
+   잘린 제목은 마우스를 올리면 전체가 보입니다(title 속성). */
+.rowTitle {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: -0.012em;
+  color: var(--ink-2);
+}
+.row:hover .rowTitle {
+  color: var(--ink);
+}
+.rowOn .rowTitle,
+.rowOn:hover .rowTitle {
+  color: var(--accent);
+  font-weight: 650;
+}
+
+/* ── 이어보기 ───────────────────────────────────────────────
+   한 편을 다 읽으면 다음 편이 아래에 이어 붙습니다. 화면을 갈아끼우지
+   않으므로 읽던 흐름이 끊기지 않고, 스크롤 위치에 따라 주소와 목록
+   강조가 따라옵니다(뒤로 가기 기록은 남기지 않습니다). */
+.feed {
+  min-width: 0;
+}
+/* 다음 편이 시작한다는 표시. 앞 편의 꼬리와 섞이지 않게 넉넉히 띄웁니다. */
+.nextCue {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 72px 0 44px;
+}
+.nextCue::before,
+.nextCue::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.nextCue span {
+  font-size: 10.5px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 650;
+  white-space: nowrap;
+}
+/* 다음 편을 불러오는 동안 감시선이 화면 안에 남아 목록이 한꺼번에
+   딸려오지 않도록, 자리표시자에 최소 높이를 줍니다. */
+.readLoading {
+  min-height: 70vh;
+}
+.tail {
+  height: 1px;
+}
+.feedEnd {
+  margin: 64px 0 0;
+  padding-top: 22px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* ── 읽기 패널 ──────────────────────────────────────────── */
+.readPane {
+  min-width: 0;
+}
+.rpHead {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 16px;
+  margin-bottom: 22px;
+}
+.rpMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+/* 제목과 동작을 한 줄에. 아래로 쌓으면 본문이 그만큼 밀립니다. */
+.rpTitleRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+.rpTitle {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.35;
+  text-wrap: balance;
+}
+.rpActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding-top: 2px;
+}
+.iconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r);
+  background: var(--surface);
+  color: var(--ink-2);
+  cursor: pointer;
+  text-decoration: none;
+  padding: 0;
+}
+.iconBtn:hover {
+  background: var(--surface-2);
+  border-color: var(--muted);
+  color: var(--ink);
+}
+.iconBtn svg {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+.iconOn {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+.iconOn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+/* 원본 주소는 메타 줄에 텍스트로 남깁니다 — 어디로 가는지 보이는 편이 낫습니다 */
+.srcLink {
+  color: var(--accent);
+  text-decoration: none;
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.srcLink:hover {
+  text-decoration: underline;
+}
+
+/* ── 상세 본문 ────────────────────────────────────────────────
+   챕터를 오른쪽으로 옮겼습니다. 왼쪽에 두면 목록 다음에 기둥이 하나 더
+   서서 본문이 오른쪽으로 밀립니다. 오른쪽으로 보내면 본문이 시선의
+   중앙에 오고, 챕터는 "읽다가 참조하는 것"이라는 성격에도 맞습니다. */
+/* 본문(인용까지)과 부록을 두 개의 격자로 나눕니다. 챕터 레일은 앞쪽 격자
+   안에 있으므로 그 끝에서 멈춥니다 — 강의 꼬리까지 따라 내려가 다음 강의의
+   챕터와 나란히 서는 일이 없습니다.
+   한 격자에 두 줄로 두는 방법도 있지만, 크롬은 sticky 를 격자 칸이 아니라
+   격자 컨테이너로 가둬서 줄을 나눠도 멈추지 않습니다. */
+.detail {
+  min-width: 0;
+}
+.detailMain,
+.tailCol {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 208px;
+  column-gap: 30px;
+  align-items: start;
+}
+.tailCol > * {
+  grid-column: 1;
+}
+.detailSolo .detailMain,
+.detailSolo .tailCol {
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (max-width: 900px) {
+  .detailMain,
+  .tailCol {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 챕터 타임라인 — 막대 높이가 실제 챕터 길이 비율.
+   라벨을 막대 밖에 두어야 높이 차이가 정보로 읽힌다. */
+.timeline {
+  grid-column: 2;
+  position: sticky;
+  top: calc(var(--tb-off) + 16px);
+}
+/* 한 칸으로 접히면 본문 아래에 그냥 쌓이고, 스크롤을 따라다니지 않습니다.
+   (뒤에 와야 위 .timeline 선언을 덮습니다 — 같은 특정도라 순서가 이깁니다) */
+@media (max-width: 900px) {
+  .timeline {
+    grid-column: 1;
+    position: static;
+  }
+}
+.tlCap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10.5px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 650;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ── 접기 토글 ────────────────────────────────────────────── */
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  padding: 5px 11px;
+  border-radius: var(--r);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.toggle:hover {
+  background: var(--surface-2);
+  border-color: var(--muted);
+}
+.toggleOn {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+.caret {
+  font-size: 9px;
+  opacity: 0.8;
+}
+/* 챕터 캡션 안의 작은 닫기 버튼 */
+.capBtn {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 2px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.capBtn:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+.tl {
+  display: flex;
+  flex-direction: column;
+  height: 440px;
+  gap: 3px;
+}
+.tlCh {
+  display: grid;
+  grid-template-columns: 44px 6px minmax(0, 1fr);
+  gap: 9px;
+  align-items: stretch;
+  min-height: 0;
+  text-align: left;
+  overflow: hidden;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+}
+.tlTime {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  padding-top: 1px;
+  align-self: start;
+}
+.tlBar {
+  background: var(--seq-3);
+  border-radius: 3px;
+}
+.tlName {
+  font-size: 11.5px;
+  color: var(--ink-2);
+  line-height: 1.4;
+  align-self: start;
+  padding-top: 1px;
+}
+.tlCh:hover .tlBar {
+  background: var(--seq-5);
+}
+.tlCh:hover .tlTime,
+.tlCh:hover .tlName {
+  color: var(--ink);
+}
+.tlNote {
+  font-size: 10.5px;
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 12px 0 0;
+}
+
+/* 제목·링크 헤더와 본문을 한 컬럼으로 묶어 같은 축에 세웁니다.
+   본문은 자기 칸 안에서 가운데로 뜨지 않고, 칸을 그대로 채웁니다.
+   폭 상한을 따로 두면 목록과 본문 사이에 빈 구멍이 생기고 위쪽의
+   제목·키워드·검색줄과 시작선이 어긋나 본문만 떠 보입니다.
+   읽기 폭은 --page-max(레이어)와 양옆 레일이 이미 정해 줍니다. */
+.mainCol {
+  grid-column: 1;
+  margin: 0;
+  min-width: 0;
+  width: 100%;
+}
+/* 패널을 접으면 여백만 늘리는 게 아니라 본문 폭 자체를 넓힙니다.
+   한 번에 다 늘리지는 않습니다 — 한글도 한 줄이 너무 길면 눈이 줄을 놓칩니다. */
+.read {
+  min-width: 0;
+}
+.read h2 {
+  font-size: 12px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 650;
+  margin: 34px 0 12px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--border);
+}
+.lead {
+  font-size: 17px;
+  line-height: 1.75;
+  letter-spacing: -0.015em;
+  margin: 0 0 14px;
+  text-wrap: pretty;
+}
+.abstract {
+  font-size: 14.5px;
+  line-height: 1.85;
+  color: var(--ink-2);
+  margin: 0;
+}
+.facts {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 7px 14px;
+  margin: 18px 0 0;
+  font-size: 13.5px;
+}
+.facts dt {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.facts dd {
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.6;
+}
+
+/* 타임스탬프 — 클릭하면 원본 해당 시점으로.
+   요약본의 가치는 "다 읽게 하는 것"이 아니라 "필요한 3분으로 보내는 것". */
+.ts {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: 2px;
+  padding: 0 4px;
+  text-decoration: none;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ts:hover {
+  background: var(--accent);
+  color: var(--surface);
+  border-color: var(--accent);
+}
+
+.kp {
+  display: flex;
+  flex-direction: column;
+}
+.kpItem {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 12px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--border);
+}
+.kpItem:last-child {
+  border-bottom: 0;
+}
+.kpNo {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  padding-top: 2px;
+}
+.kpItem h3 {
+  margin: 0 0 5px;
+  font-size: 14.5px;
+  font-weight: 620;
+  letter-spacing: -0.015em;
+  line-height: 1.45;
+}
+.kpItem p {
+  margin: 0 0 7px;
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: var(--ink-2);
+}
+
+.terms {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  gap: 9px 16px;
+  font-size: 13.5px;
+  margin: 0;
+}
+.terms dt {
+  font-weight: 600;
+}
+.terms dd {
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.65;
+}
+
+/* grid 로 만들면 안 됩니다 — 텍스트와 섞인 <code> 같은 인라인 요소가
+   각각 별도 그리드 아이템으로 승격돼 좁은 첫 컬럼에 끼어 들어갑니다. */
+.take {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.take li {
+  position: relative;
+  padding-left: 25px;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+.take li::before {
+  content: "→";
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.quote {
+  margin: 0 0 10px;
+  padding: 13px 16px;
+  background: var(--surface-2);
+  border-left: 2px solid var(--accent-line);
+  border-radius: 0 var(--r) var(--r) 0;
+}
+.quote p {
+  margin: 0 0 6px;
+  font-size: 14px;
+  line-height: 1.75;
+}
+.quote footer {
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.coverage {
+  font-size: 12.5px;
+  color: var(--warn);
+  background: var(--warn-soft);
+  border: 1px solid color-mix(in srgb, var(--warn) 24%, transparent);
+  border-radius: var(--r);
+  padding: 9px 12px;
+  margin: 16px 0 0;
+  line-height: 1.6;
+}
+
+/* 판정 근거 — 평소엔 방해되지만 임계값 튜닝 때는 반드시 필요 */
+.disc {
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
+  margin-top: 34px;
+}
+.disc + .disc {
+  margin-top: 10px;
+}
+.disc > summary {
+  padding: 11px 15px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  list-style: none;
+}
+.disc > summary::-webkit-details-marker {
+  display: none;
+}
+.disc > summary::before {
+  content: "▸";
+  color: var(--muted);
+  font-size: 11px;
+}
+.disc[open] > summary::before {
+  content: "▾";
+}
+.disc[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+.discBody {
+  padding: 15px;
+}
+.crit {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.critRow {
+  display: grid;
+  grid-template-columns: 74px 120px 34px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  font-size: 12.5px;
+}
+.critName {
+  color: var(--ink-2);
+  font-weight: 550;
+}
+.critScore {
+  font-family: var(--mono);
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.critEvidence {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.cBar {
+  height: 5px;
+  background: var(--surface-sink);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.cBar > i {
+  display: block;
+  height: 100%;
+  border-radius: 99px;
+}
+@media (max-width: 760px) {
+  .critRow {
+    grid-template-columns: 74px 1fr 34px;
+  }
+  .critEvidence {
+    grid-column: 1 / -1;
+  }
+}
+.reviewFoot {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.flags {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  color: var(--warn);
+  line-height: 1.6;
+}

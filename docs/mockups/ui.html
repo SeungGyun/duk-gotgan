@@ -1,0 +1,1561 @@
+<meta charset="utf-8" />
+<title>덕곳간 — UI 설계 시안</title>
+
+<style>
+/* ─────────────────────────────────────────────────────────────
+   덕곳간 UI 시안
+   색: 블루프린트 블루 액센트 + 청색 편향 뉴트럴. 의미색은 액센트와 분리.
+       팔레트는 dataviz 검증 스크립트 5개 항목 통과 (라이트/다크 각각).
+   타입: 한글 UI 스택 + 모든 시간·수치는 모노스페이스 (시간 색인 아카이브)
+   레이아웃: 좌측 레일 + 본문. 시간이 화면의 척추 — 목록엔 길이 트랙,
+             상세엔 비율 그대로 그린 챕터 타임라인.
+   ───────────────────────────────────────────────────────────── */
+
+:root {
+  --canvas:        #F1F3F5;
+  --surface:       #FFFFFF;
+  --surface-2:     #F7F9FA;
+  --surface-sink:  #EBEEF1;
+  --border:        #DCE1E6;
+  --border-strong: #C3CBD3;
+  --ink:           #14181C;
+  --ink-2:         #3D464E;
+  --muted:         #6B757E;
+
+  --accent:        #1D5FA8;
+  --accent-soft:   #E8F0F9;
+  --accent-line:   #B7D2EC;
+
+  --pass:          #2E7D4F;
+  --warn:          #BC8104;
+  --fail:          #A32C2C;
+  --pass-soft:     #E7F2EB;
+  --warn-soft:     #FBF2DE;
+  --fail-soft:     #F8EAEA;
+
+  /* 순차 램프 — 단일 색상, 밝음→어두움 (퍼널·점수) */
+  --seq-1: #DCE9F6;
+  --seq-2: #B7D2EC;
+  --seq-3: #7FAEDB;
+  --seq-4: #4A87C4;
+  --seq-5: #1D5FA8;
+
+  --font: "Pretendard Variable", Pretendard, -apple-system, "Apple SD Gothic Neo",
+          "Noto Sans KR", "Malgun Gothic", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", "JetBrains Mono", Menlo,
+          Consolas, monospace;
+
+  --r: 3px;
+  --tb-h: 54px;
+  --tb-off: 54px;  /* 상단바가 접히면 0 으로 (JS) */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas:        #0F1216;
+    --surface:       #161A1F;
+    --surface-2:     #1C2127;
+    --surface-sink:  #12161A;
+    --border:        #272E36;
+    --border-strong: #39424C;
+    --ink:           #E6EAEE;
+    --ink-2:         #B4BCC4;
+    --muted:         #7C8790;
+
+    --accent:        #4E93D4;
+    --accent-soft:   #17293C;
+    --accent-line:   #2C4A6B;
+
+    --pass:          #3F9E6C;
+    --warn:          #BE8A16;
+    --fail:          #D45E66;
+    --pass-soft:     #14291F;
+    --warn-soft:     #2A2213;
+    --fail-soft:     #2C1A1C;
+
+    --seq-1: #1E2E42;
+    --seq-2: #2A4664;
+    --seq-3: #376294;
+    --seq-4: #4179BE;
+    --seq-5: #4E93D4;
+  }
+}
+
+:root[data-theme="dark"] {
+  --canvas:#0F1216; --surface:#161A1F; --surface-2:#1C2127; --surface-sink:#12161A;
+  --border:#272E36; --border-strong:#39424C;
+  --ink:#E6EAEE; --ink-2:#B4BCC4; --muted:#7C8790;
+  --accent:#4E93D4; --accent-soft:#17293C; --accent-line:#2C4A6B;
+  --pass:#3F9E6C; --warn:#BE8A16; --fail:#D45E66;
+  --pass-soft:#14291F; --warn-soft:#2A2213; --fail-soft:#2C1A1C;
+  --seq-1:#1E2E42; --seq-2:#2A4664; --seq-3:#376294; --seq-4:#4179BE; --seq-5:#4E93D4;
+}
+:root[data-theme="light"] {
+  --canvas:#F1F3F5; --surface:#FFFFFF; --surface-2:#F7F9FA; --surface-sink:#EBEEF1;
+  --border:#DCE1E6; --border-strong:#C3CBD3;
+  --ink:#14181C; --ink-2:#3D464E; --muted:#6B757E;
+  --accent:#1D5FA8; --accent-soft:#E8F0F9; --accent-line:#B7D2EC;
+  --pass:#2E7D4F; --warn:#BC8104; --fail:#A32C2C;
+  --pass-soft:#E7F2EB; --warn-soft:#FBF2DE; --fail-soft:#F8EAEA;
+  --seq-1:#DCE9F6; --seq-2:#B7D2EC; --seq-3:#7FAEDB; --seq-4:#4A87C4; --seq-5:#1D5FA8;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "tnum" 0;
+}
+
+.mono, code { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* ── 시안 표시 스트립 ────────────────────────────────────── */
+.mockbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 7px 16px;
+  background: var(--ink);
+  color: var(--canvas);
+  font-size: 11.5px;
+  letter-spacing: 0.01em;
+}
+.mockbar b { font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; font-size: 10.5px; }
+.mockbar span { opacity: 0.72; }
+
+/* ── 셸: 상단 바 ────────────────────────────────────────────
+   메뉴를 상단으로 올렸습니다. 핵심 화면(강의)이 이미 목록+읽기 2단이라
+   좌측 레일까지 있으면 세로 기둥이 셋이 되고, 정작 폭이 아쉬운 읽기
+   영역이 좁아집니다. 항목이 4개뿐이라 가로 한 줄로 충분합니다.
+   토큰 미터도 상단 우측이 더 낫습니다 — 늘 시야에 있습니다.
+   높이에 100vh 를 쓰지 않습니다(프레임 높이 ↔ 콘텐츠 높이 순환 방지). */
+.topbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 26px;
+  padding: 0 26px; height: var(--tb-h);
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  transition: transform 0.2s ease;
+  will-change: transform;
+}
+/* 아래로 스크롤하면 접히고, 위로 올리거나 커서를 화면 맨 위로
+   가져가면 다시 나옵니다. 상단바가 세로 공간을 영구히 차지하는
+   문제를 없애면서 메뉴 접근성은 유지합니다. */
+.topbar.tucked { transform: translateY(-100%); }
+
+.tb-brand { display: flex; align-items: baseline; gap: 9px; flex: none; }
+.tb-mark {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em;
+  text-transform: uppercase; color: var(--accent); font-weight: 600;
+}
+.tb-name { font-size: 16px; font-weight: 700; letter-spacing: -0.025em; }
+
+.tb-nav { display: flex; gap: 2px; align-items: stretch; height: 100%; }
+.tb-nav button {
+  display: inline-flex; align-items: center; gap: 7px;
+  border: 0; background: transparent; color: var(--ink-2);
+  font: inherit; font-size: 13.5px; padding: 0 13px; cursor: pointer;
+  box-shadow: inset 0 -2px 0 transparent;
+}
+.tb-nav button:hover { color: var(--ink); background: var(--surface-2); }
+.tb-nav button[aria-current="page"] {
+  color: var(--accent); font-weight: 650;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.tb-nav .count {
+  font-family: var(--mono); font-size: 11px; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.tb-nav button[aria-current="page"] .count { color: var(--accent); }
+
+/* 토큰 사용량 — 상시 제약이라 크롬에 고정 */
+.tb-meter { margin-left: auto; display: flex; align-items: center; gap: 10px; flex: none; }
+.tb-meter .lb { font-size: 11px; color: var(--muted); font-weight: 600; }
+.tb-meter .val {
+  font-family: var(--mono); font-size: 13px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.tb-meter .cap { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.meter {
+  position: relative; height: 6px;
+  background: var(--surface-sink); border-radius: 99px; overflow: hidden;
+}
+.tb-meter .meter { width: 72px; height: 5px; }
+.meter > i { position: absolute; inset: 0 auto 0 0; border-radius: 99px; background: var(--accent); }
+.meter-foot {
+  display: flex; justify-content: space-between;
+  font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-top: 5px;
+}
+
+/* ── 본문 ───────────────────────────────────────────────── */
+.main { min-width: 0; }
+.screen { display: none; }
+.screen.on { display: block; }
+
+.head {
+  padding: 24px 30px 16px;
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 20px; flex-wrap: wrap;
+}
+.head h1 {
+  margin: 0; font-size: 21px; font-weight: 700;
+  letter-spacing: -0.025em; text-wrap: balance;
+}
+.head p { margin: 3px 0 0; color: var(--muted); font-size: 13px; }
+.body { padding: 6px 30px 56px; }
+
+.eyebrow {
+  font-size: 10.5px; letter-spacing: 0.13em; text-transform: uppercase;
+  color: var(--muted); font-weight: 650;
+}
+
+.btn {
+  border: 1px solid var(--border-strong); background: var(--surface);
+  color: var(--ink); font: inherit; font-size: 13px; font-weight: 550;
+  padding: 6px 13px; border-radius: var(--r); cursor: pointer;
+}
+.btn:hover { background: var(--surface-2); border-color: var(--muted); }
+/* 액센트 위 글자색은 --surface 로 — 라이트에선 흰색, 다크에선 어두운색이 되어
+   미디어쿼리 분기 없이 양쪽 테마에서 대비가 유지된다. */
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.btn-primary:hover { filter: brightness(1.08); }
+
+/* ── 칩 ─────────────────────────────────────────────────── */
+.chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 7px; border-radius: var(--r);
+  font-size: 11.5px; font-weight: 600; letter-spacing: -0.005em;
+  border: 1px solid transparent; white-space: nowrap;
+}
+.chip::before { content: ""; width: 5px; height: 5px; border-radius: 99px; background: currentColor; }
+.chip-pass { color: var(--pass); background: var(--pass-soft); border-color: color-mix(in srgb, var(--pass) 24%, transparent); }
+.chip-warn { color: var(--warn); background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 24%, transparent); }
+.chip-fail { color: var(--fail); background: var(--fail-soft); border-color: color-mix(in srgb, var(--fail) 24%, transparent); }
+.chip-neutral { color: var(--muted); background: var(--surface-sink); border-color: var(--border); }
+.chip-accent { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-line); }
+
+/* ── 패널 ───────────────────────────────────────────────── */
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); }
+.panel-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
+}
+.panel-head h2 { margin: 0; font-size: 13.5px; font-weight: 650; letter-spacing: -0.01em; }
+.panel-body { padding: 16px; }
+
+.grid { display: grid; gap: 16px; }
+.g-dash { grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); align-items: start; }
+@media (max-width: 1080px) { .g-dash { grid-template-columns: minmax(0, 1fr); } }
+
+/* ── 통계 타일 ──────────────────────────────────────────── */
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; }
+.stat { padding: 14px 16px; border-right: 1px solid var(--border); }
+.stat:last-child { border-right: 0; }
+.stat .k { font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: 0.02em; }
+.stat .v {
+  font-family: var(--mono); font-size: 25px; font-weight: 600;
+  letter-spacing: -0.03em; line-height: 1.15; margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.stat .d { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.stat .d em { font-style: normal; color: var(--pass); font-weight: 600; }
+@media (max-width: 720px) {
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat:nth-child(2) { border-right: 0; }
+  .stat:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
+}
+
+/* ── 퍼널 ───────────────────────────────────────────────── */
+.funnel { display: flex; flex-direction: column; gap: 2px; }
+.fn-row { display: grid; grid-template-columns: 92px minmax(0, 1fr) 46px; gap: 10px; align-items: center; }
+.fn-row .lab { font-size: 12.5px; color: var(--ink-2); text-align: right; }
+.fn-bar { height: 22px; background: var(--surface-sink); border-radius: 2px; overflow: hidden; }
+.fn-bar > i { display: block; height: 100%; border-radius: 0 2px 2px 0; }
+.fn-row .num {
+  font-family: var(--mono); font-size: 13px; font-weight: 600;
+  text-align: right; font-variant-numeric: tabular-nums;
+}
+.fn-gap {
+  display: grid; grid-template-columns: 92px minmax(0, 1fr) 46px; gap: 10px;
+  font-size: 11px; color: var(--muted); padding: 1px 0;
+}
+.fn-gap span { grid-column: 2; font-family: var(--mono); }
+
+/* 키워드별 기여 — 어느 키워드가 쿼터값을 하는가 */
+.kwbars { display: flex; flex-direction: column; gap: 7px; }
+.kwbar { display: grid; grid-template-columns: 132px minmax(0, 1fr) 22px; gap: 10px; align-items: center; }
+.kwbar .kn { font-size: 12.5px; color: var(--ink-2); }
+.kwbar .kb { height: 5px; background: var(--surface-sink); border-radius: 99px; overflow: hidden; }
+.kwbar .kb > i { display: block; height: 100%; background: var(--seq-4); border-radius: 99px; }
+.kwbar .kv { font-family: var(--mono); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+.kwbar.zero .kn, .kwbar.zero .kv { color: var(--muted); }
+
+/* ── 실패 목록 ──────────────────────────────────────────── */
+.fail-list { display: flex; flex-direction: column; }
+.fail-item {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 16px; border-bottom: 1px solid var(--border);
+}
+.fail-item:last-child { border-bottom: 0; }
+.fail-item .t { flex: 1; min-width: 0; }
+.fail-item .t b { display: block; font-weight: 550; font-size: 13px; }
+.fail-item .t span { font-size: 11.5px; color: var(--muted); font-family: var(--mono); }
+
+/* ── 필터 바 ────────────────────────────────────────────── */
+.filters {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding-bottom: 14px; margin-bottom: 4px;
+}
+.seg { display: flex; border: 1px solid var(--border-strong); border-radius: var(--r); overflow: hidden; }
+.seg button {
+  border: 0; background: var(--surface); color: var(--ink-2);
+  font: inherit; font-size: 12.5px; padding: 5px 11px; cursor: pointer;
+  border-right: 1px solid var(--border);
+}
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.search {
+  flex: 1; min-width: 180px; max-width: 320px;
+  border: 1px solid var(--border-strong); border-radius: var(--r);
+  background: var(--surface); color: var(--ink);
+  font: inherit; font-size: 13px; padding: 6px 11px;
+}
+.search::placeholder { color: var(--muted); }
+
+/* ── 키워드 필터 ─────────────────────────────────────────
+   고를 수 있는 키워드를 전부 펼쳐 보여야 "무엇을 선택 중인지"가
+   읽힙니다. 선택된 것만 칩으로 띄우면 선택지가 보이지 않습니다. */
+.kwfilter {
+  border: 1px solid var(--border); background: var(--surface);
+  border-radius: var(--r); padding: 12px 14px 13px; margin-bottom: 14px;
+}
+.kf-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 11px; }
+.kwchips { display: flex; gap: 6px; flex-wrap: wrap; }
+.kwchip {
+  display: inline-flex; align-items: center; gap: 7px;
+  border: 1px solid var(--border-strong); background: var(--surface);
+  color: var(--ink-2); font: inherit; font-size: 12.5px;
+  padding: 4px 11px; border-radius: 99px; cursor: pointer;
+}
+.kwchip:hover { border-color: var(--muted); background: var(--surface-2); }
+.kwchip .c { font-family: var(--mono); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.kwchip[aria-pressed="true"] {
+  background: var(--accent); border-color: var(--accent);
+  color: var(--surface); font-weight: 600;
+}
+.kwchip[aria-pressed="true"] .c { color: var(--surface); opacity: 0.72; }
+.kwchip.add { border-style: dashed; color: var(--accent); border-color: var(--accent-line); }
+.kwchip.add:hover { background: var(--accent-soft); border-color: var(--accent); }
+
+/* ── 강의: 목록 + 읽기 2단 ──────────────────────────────── */
+.split { display: grid; grid-template-columns: 400px minmax(0, 1fr); gap: 24px; align-items: start; }
+@media (max-width: 1180px) { .split { grid-template-columns: minmax(0, 1fr); } }
+
+.listpane {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r); overflow: hidden;
+  position: sticky; top: calc(var(--tb-off) + 14px); align-self: start;
+}
+.lp-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 14px; border-bottom: 1px solid var(--border); background: var(--surface-2);
+}
+
+.lec2 {
+  display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 12px;
+  width: 100%; text-align: left; padding: 12px 14px;
+  border: 0; border-bottom: 1px solid var(--border);
+  background: transparent; font: inherit; color: inherit; cursor: pointer;
+}
+.lec2:last-child { border-bottom: 0; }
+.lec2:hover { background: var(--surface-2); }
+.lec2[aria-current="true"] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.lec2 .s { display: block; text-align: center; }
+.lec2 .s .n {
+  display: block; font-family: var(--mono); font-size: 16px; font-weight: 650;
+  letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums;
+}
+.lec2 .s .sb {
+  display: block; position: relative; height: 3px; margin-top: 5px;
+  background: var(--surface-sink); border-radius: 99px; overflow: hidden;
+}
+.lec2 .s .sb > i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 99px; }
+.lec2 .c { display: block; min-width: 0; }
+.lec2 .ti {
+  display: block; font-size: 13.5px; font-weight: 600; line-height: 1.42;
+  letter-spacing: -0.015em; margin-bottom: 3px;
+}
+.lec2[aria-current="true"] .ti { color: var(--accent); }
+.lec2 .mt { display: block; font-size: 11.5px; color: var(--muted); }
+.lec2 .rail-max { display: block; margin-top: 8px; }
+
+/* 읽기 패널 */
+.readpane { min-width: 0; }
+.rp-head { border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 22px; }
+.rp-meta {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 12.5px; color: var(--muted); margin-bottom: 8px;
+}
+.rp-title {
+  margin: 0 0 13px; font-size: 20px; font-weight: 700;
+  letter-spacing: -0.025em; line-height: 1.35; text-wrap: balance;
+}
+.rp-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* 유튜브 링크 — 버튼이 아니라 주소가 보이는 링크 */
+.ytlink {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 600; color: var(--accent);
+  text-decoration: none; padding: 5px 12px 5px 10px;
+  border: 1px solid var(--accent-line); background: var(--accent-soft);
+  border-radius: var(--r);
+}
+.ytlink:hover { background: var(--accent); color: var(--surface); border-color: var(--accent); }
+.ytlink .pl { font-size: 10px; }
+.ytlink .url { font-size: 11.5px; font-weight: 400; opacity: 0.8; }
+
+/* 길이 트랙 — 이 제품의 시그니처.
+   폭 = 목록 내 최장 강의 대비 길이 비율, 세로 눈금 = 핵심 포인트 위치.
+   강의끼리 길이를 비교하면서 동시에 내부 밀도를 볼 수 있다. */
+.lec-time { padding-top: 2px; }
+.lec-time .dur {
+  font-family: var(--mono); font-size: 12.5px; color: var(--ink-2);
+  font-variant-numeric: tabular-nums; display: flex; justify-content: space-between;
+}
+.lec-time .dur small { color: var(--muted); font-size: 10.5px; }
+.rail-max {
+  position: relative; height: 4px; margin-top: 9px;
+  /* --surface-sink 는 선택된 행(accent-soft)과 거의 같은 색이라 레일이 사라진다 */
+  background: var(--border); border-radius: 99px;
+}
+.track {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  width: calc(var(--len) / var(--max) * 100%);
+  background: var(--seq-3); border-radius: 99px;
+}
+.track > i {
+  position: absolute; top: -3px; width: 2px; height: 10px;
+  background: var(--accent); border-radius: 1px;
+  left: calc(var(--at) / var(--len) * 100%);
+}
+.rail-max .cap {
+  position: absolute; right: 0; top: 9px;
+  font-family: var(--mono); font-size: 10px; color: var(--muted);
+}
+
+/* ── 강의 상세 ──────────────────────────────────────────── */
+.detail { display: grid; grid-template-columns: 162px minmax(0, 1fr); gap: 26px; align-items: start; }
+@media (max-width: 900px) { .detail { grid-template-columns: minmax(0, 1fr); } }
+
+/* 챕터 타임라인 — 막대 높이가 실제 챕터 길이 비율.
+   라벨을 막대 밖에 두어야 높이 차이가 정보로 읽힌다. */
+.timeline { position: sticky; top: calc(var(--tb-off) + 16px); }
+.timeline .cap {
+  font-size: 10.5px; letter-spacing: 0.11em; text-transform: uppercase;
+  color: var(--muted); font-weight: 650; margin-bottom: 10px;
+}
+.tl { display: flex; flex-direction: column; height: 440px; gap: 3px; }
+.tl-ch {
+  display: grid; grid-template-columns: 44px 6px minmax(0, 1fr); gap: 9px;
+  align-items: stretch; min-height: 0; text-align: left; overflow: hidden;
+  background: transparent; border: 0; padding: 0; font: inherit; color: inherit;
+  cursor: pointer;
+}
+.tl-ch .t {
+  font-family: var(--mono); font-size: 10.5px; color: var(--muted);
+  padding-top: 1px; align-self: start;
+}
+.tl-ch .b { background: var(--seq-2); border-radius: 3px; }
+.tl-ch .n {
+  font-size: 11.5px; color: var(--ink-2); line-height: 1.4;
+  align-self: start; padding-top: 1px;
+}
+.tl-ch:hover .b { background: var(--seq-5); }
+.tl-ch:hover .t, .tl-ch:hover .n { color: var(--ink); }
+.tl-ch[aria-current="true"] .b { background: var(--accent); }
+
+.read { max-width: 45em; }
+.read h2 {
+  font-size: 12px; letter-spacing: 0.11em; text-transform: uppercase;
+  color: var(--muted); font-weight: 650; margin: 34px 0 12px;
+  padding-bottom: 7px; border-bottom: 1px solid var(--border);
+}
+.read h2:first-child { margin-top: 0; }
+.lead {
+  font-size: 17px; line-height: 1.75; letter-spacing: -0.015em;
+  margin: 0 0 14px; text-wrap: pretty;
+}
+.abstract { font-size: 14.5px; line-height: 1.85; color: var(--ink-2); margin: 0; }
+
+.facts { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 7px 14px; margin: 18px 0 0; font-size: 13.5px; }
+.facts dt { color: var(--muted); font-size: 12.5px; }
+.facts dd { margin: 0; color: var(--ink-2); line-height: 1.6; }
+
+/* 타임스탬프 — 클릭하면 원본 해당 시점으로 */
+.ts {
+  font-family: var(--mono); font-size: 11.5px; font-weight: 600;
+  color: var(--accent); background: var(--accent-soft);
+  border: 1px solid var(--accent-line); border-radius: 2px;
+  padding: 0 4px; text-decoration: none; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ts:hover { background: var(--accent); color: var(--surface); border-color: var(--accent); }
+
+.kp { display: flex; flex-direction: column; gap: 0; }
+.kp-item { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 12px; padding: 13px 0; border-bottom: 1px solid var(--border); }
+.kp-item:last-child { border-bottom: 0; }
+.kp-item .no { font-family: var(--mono); font-size: 12px; color: var(--muted); padding-top: 2px; }
+.kp-item h3 { margin: 0 0 5px; font-size: 14.5px; font-weight: 620; letter-spacing: -0.015em; line-height: 1.45; }
+.kp-item p { margin: 0 0 7px; font-size: 13.5px; line-height: 1.75; color: var(--ink-2); }
+
+.terms { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 9px 16px; font-size: 13.5px; margin: 0; }
+.terms dt { font-weight: 600; }
+.terms dd { margin: 0; color: var(--ink-2); line-height: 1.65; }
+
+.take { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 9px; }
+/* grid 로 만들면 안 됩니다 — 텍스트와 섞인 <code> 같은 인라인 요소가
+   각각 별도 그리드 아이템으로 승격돼 좁은 첫 컬럼에 끼어 들어갑니다.
+   마커는 절대 배치로 두고 본문은 인라인 흐름을 유지합니다. */
+.take li {
+  position: relative; padding-left: 25px;
+  font-size: 13.5px; line-height: 1.7; color: var(--ink-2);
+}
+.take li::before {
+  content: "→"; position: absolute; left: 0; top: 0;
+  color: var(--accent); font-family: var(--mono); font-size: 12px;
+}
+
+.quote {
+  margin: 0; padding: 13px 16px;
+  background: var(--surface-2); border-left: 2px solid var(--accent-line); border-radius: 0 var(--r) var(--r) 0;
+}
+.quote p { margin: 0 0 6px; font-size: 14px; line-height: 1.75; }
+.quote footer { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+
+/* 판정 근거 — 접기 */
+.disc { border: 1px solid var(--border); border-radius: var(--r); background: var(--surface); margin-top: 34px; }
+.disc > summary {
+  padding: 11px 15px; cursor: pointer; font-size: 13px; font-weight: 600;
+  display: flex; align-items: center; gap: 9px; list-style: none;
+}
+.disc > summary::-webkit-details-marker { display: none; }
+.disc > summary::before { content: "▸"; color: var(--muted); font-size: 11px; }
+.disc[open] > summary::before { content: "▾"; }
+.disc[open] > summary { border-bottom: 1px solid var(--border); }
+.disc .inner { padding: 15px; }
+
+.crit { display: flex; flex-direction: column; gap: 11px; }
+.crit-row { display: grid; grid-template-columns: 74px 120px 34px minmax(0, 1fr); gap: 12px; align-items: center; font-size: 12.5px; }
+.crit-row .cn { color: var(--ink-2); font-weight: 550; }
+.crit-row .cs { font-family: var(--mono); font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+.crit-row .ev { color: var(--muted); font-size: 12px; line-height: 1.55; }
+.cbar { height: 5px; background: var(--surface-sink); border-radius: 99px; overflow: hidden; }
+.cbar > i { display: block; height: 100%; border-radius: 99px; }
+@media (max-width: 760px) { .crit-row { grid-template-columns: 74px 1fr 34px; } .crit-row .ev { grid-column: 1 / -1; } }
+
+/* ── 키워드 추가 폼 ─────────────────────────────────────── */
+.addkw {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r); padding: 14px 16px 16px; margin-bottom: 16px;
+}
+.ak-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 13px; }
+.ak-row { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.ak-row + .ak-row { margin-top: 12px; padding-top: 13px; border-top: 1px solid var(--border); }
+
+.fld { display: flex; flex-direction: column; gap: 5px; }
+.fld.grow { flex: 1; min-width: 220px; }
+.fld.sm { width: 118px; }
+.fl { font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: 0.02em; }
+.fld input, .fld select {
+  border: 1px solid var(--border-strong); border-radius: var(--r);
+  background: var(--surface); color: var(--ink);
+  font: inherit; font-size: 13px; padding: 6px 10px; width: 100%;
+}
+.fld input::placeholder { color: var(--muted); }
+.fld .unit { position: relative; display: block; }
+.fld .unit input { padding-right: 30px; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.fld .unit em {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  font-style: normal; font-size: 12px; color: var(--muted); pointer-events: none;
+}
+.ak-hint {
+  flex: 1; min-width: 240px; font-size: 12px; color: var(--muted);
+  line-height: 1.55; padding-bottom: 2px;
+}
+.ak-hint strong { color: var(--ink-2); font-family: var(--mono); font-weight: 600; }
+
+/* ── 테이블 ─────────────────────────────────────────────── */
+.tw { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 640px; }
+thead th {
+  text-align: left; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--muted); font-weight: 650; padding: 9px 14px;
+  border-bottom: 1px solid var(--border-strong); white-space: nowrap;
+}
+tbody td { padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr:hover { background: var(--surface-2); }
+td.num, th.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.kw-term { font-weight: 600; font-size: 14px; letter-spacing: -0.01em; }
+.kw-sub { font-size: 11.5px; color: var(--muted); font-family: var(--mono); margin-top: 2px; }
+
+/* ── 실행 로그 ──────────────────────────────────────────── */
+.run { border-bottom: 1px solid var(--border); padding: 15px 18px; display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 22px; }
+.run:last-child { border-bottom: 0; }
+.run .when { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.run .kwn { font-size: 14px; font-weight: 600; margin: 2px 0 6px; letter-spacing: -0.012em; }
+/* 실행 간 비교가 목적이라 모든 실행이 같은 축척(최대 52건)을 씁니다.
+   퍼센트 높이는 부모 높이가 auto면 해석되지 않으므로 픽셀로 지정. */
+.mini { display: flex; align-items: flex-end; gap: 3px; height: 58px; }
+.mini-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.mini-col .bar { width: 100%; border-radius: 2px 2px 0 0; min-height: 2px; }
+.mini-col .cl { font-family: var(--mono); font-size: 10.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.mini-labels { display: flex; gap: 3px; margin-top: 5px; }
+.mini-labels span { flex: 1; text-align: center; font-size: 10px; color: var(--muted); }
+@media (max-width: 720px) { .run { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
+
+/* ── 설계 노트 ──────────────────────────────────────────── */
+.notes { margin-top: 26px; border-top: 1px dashed var(--border-strong); padding-top: 18px; }
+.notes h3 { font-size: 11px; letter-spacing: 0.11em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; font-weight: 650; }
+.notes ul { margin: 0; padding-left: 17px; display: flex; flex-direction: column; gap: 6px; }
+.notes li { font-size: 12.5px; color: var(--muted); line-height: 1.65; }
+.notes code { font-size: 11.5px; color: var(--ink-2); background: var(--surface-sink); padding: 1px 4px; border-radius: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  .topbar.tucked { transform: none; }   /* 자동 숨김 비활성 */
+}
+@media (max-width: 860px) {
+  /* 좁아지면 상단바를 두 줄로 흘리고, 토큰 미터는 수치만 남긴다 */
+  .topbar {
+    height: auto; padding: 8px 18px 0; gap: 10px 18px;
+    flex-wrap: wrap; align-items: center;
+  }
+  .tb-nav { height: auto; order: 3; width: 100%; overflow-x: auto; }
+  .tb-nav button { padding: 9px 11px; box-shadow: inset 0 -2px 0 transparent; white-space: nowrap; }
+  .tb-meter .meter, .tb-meter .cap { display: none; }
+  .head, .body { padding-left: 18px; padding-right: 18px; }
+}
+</style>
+
+<div class="mockbar">
+  <b>설계 시안</b>
+  <span>동작하지 않는 화면 목업입니다. 상단 메뉴로 화면을 전환하세요. 스크롤하면 상단바가 접히고, 커서를 화면 맨 위로 올리면 다시 나옵니다.
+        강의 목록·키워드 칩은 선택 표시만 바뀌고 내용은 그대로입니다. 데이터는 전부 예시입니다.</span>
+</div>
+
+<div class="topbar">
+  <div class="tb-brand">
+    <span class="tb-mark">Dukgotgan</span>
+    <span class="tb-name">덕곳간</span>
+  </div>
+
+  <nav class="tb-nav" aria-label="주요 화면">
+    <button type="button" data-go="dash" aria-current="page">대시보드</button>
+    <button type="button" data-go="lectures">강의 <span class="count">142</span></button>
+    <button type="button" data-go="keywords">키워드 <span class="count">10</span></button>
+    <button type="button" data-go="runs">실행 로그 <span class="count">3</span></button>
+  </nav>
+
+  <div class="tb-meter" title="오늘 사용한 토큰 / 일일 상한">
+    <span class="lb">오늘 토큰</span>
+    <span class="val">207K</span>
+    <span class="meter"><i style="width:21%"></i></span>
+    <span class="cap">21% · 상한 1.0M</span>
+  </div>
+</div>
+
+<main class="main">
+
+    <!-- ══ 대시보드 ══════════════════════════════════════ -->
+    <section class="screen on" data-screen="dash">
+      <div class="head">
+        <div>
+          <h1>대시보드</h1>
+          <p>2026년 7월 31일 금요일 · 마지막 실행 04:00</p>
+        </div>
+        <button class="btn" type="button">지금 실행</button>
+      </div>
+
+      <div class="body">
+        <div class="panel" style="margin-bottom:16px">
+          <div class="stats">
+            <div class="stat">
+              <div class="k">오늘 새 강의</div>
+              <div class="v">5</div>
+              <div class="d">이번 주 <em>+23</em></div>
+            </div>
+            <div class="stat">
+              <div class="k">전체 보관</div>
+              <div class="v">142</div>
+              <div class="d">평균 점수 81</div>
+            </div>
+            <div class="stat">
+              <div class="k">처리 대기</div>
+              <div class="v">9</div>
+              <div class="d">자막 확보 6 · 검토 3</div>
+            </div>
+            <div class="stat">
+              <div class="k">유튜브 쿼터</div>
+              <div class="v">2,140</div>
+              <div class="d">일 상한 10,000</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid g-dash">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>오늘의 파이프라인</h2>
+              <span class="eyebrow">키워드 10개 합계</span>
+            </div>
+            <div class="panel-body">
+              <div class="funnel">
+                <div class="fn-row">
+                  <span class="lab">검색 발견</span>
+                  <span class="fn-bar"><i style="width:100%;background:var(--seq-1)"></i></span>
+                  <span class="num">47</span>
+                </div>
+                <div class="fn-gap"><span>− 29 룰 필터 (길이·조회수·제목)</span></div>
+                <div class="fn-row">
+                  <span class="lab">룰 통과</span>
+                  <span class="fn-bar"><i style="width:38%;background:var(--seq-2)"></i></span>
+                  <span class="num">18</span>
+                </div>
+                <div class="fn-gap"><span>− 4 자막 없음</span></div>
+                <div class="fn-row">
+                  <span class="lab">자막 확보</span>
+                  <span class="fn-bar"><i style="width:30%;background:var(--seq-3)"></i></span>
+                  <span class="num">14</span>
+                </div>
+                <div class="fn-gap"><span>AI 검토 14건 · 조기 종료 9건</span></div>
+                <div class="fn-row">
+                  <span class="lab">전문성 통과</span>
+                  <span class="fn-bar"><i style="width:11%;background:var(--seq-5)"></i></span>
+                  <span class="num">5</span>
+                </div>
+              </div>
+
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
+                <span class="chip chip-neutral">발견 대비 공개율 <span class="mono" style="margin-left:2px">10.6%</span></span>
+                <span class="chip chip-neutral">건당 평균 <span class="mono" style="margin-left:2px">14.8K</span> 토큰</span>
+                <span class="chip chip-pass">조기 종료 작동 중</span>
+              </div>
+
+              <div style="margin-top:18px;padding-top:15px;border-top:1px solid var(--border)">
+                <div class="eyebrow" style="margin-bottom:11px">키워드별 기여 · 오늘</div>
+                <div class="kwbars">
+                  <div class="kwbar"><span class="kn">결제 시스템 설계</span><span class="kb"><i style="width:100%"></i></span><span class="kv">2</span></div>
+                  <div class="kwbar"><span class="kn">쿠버네티스 네트워킹</span><span class="kb"><i style="width:50%"></i></span><span class="kv">1</span></div>
+                  <div class="kwbar"><span class="kn">PostgreSQL 튜닝</span><span class="kb"><i style="width:50%"></i></span><span class="kv">1</span></div>
+                  <div class="kwbar"><span class="kn">브라우저 성능</span><span class="kb"><i style="width:50%"></i></span><span class="kv">1</span></div>
+                  <div class="kwbar zero"><span class="kn">나머지 6개</span><span class="kb"></span><span class="kv">0</span></div>
+                </div>
+                <p style="font-size:12px;color:var(--muted);margin:12px 0 0;line-height:1.6">
+                  6개 키워드가 오늘 쿼터 1,200유닛을 쓰고 아무것도 남기지 못했습니다.
+                  이런 상태가 일주일 이어지면 주기를 낮추거나 검색어를 좁히세요.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:16px">
+            <div class="panel">
+              <div class="panel-head"><h2>일일 사용량</h2></div>
+              <div class="panel-body">
+                <div style="display:flex;align-items:baseline;justify-content:space-between">
+                  <span class="mono" style="font-size:27px;font-weight:650;letter-spacing:-0.03em">207K</span>
+                  <span class="mono" style="font-size:12px;color:var(--muted)">/ 1.0M 토큰</span>
+                </div>
+                <div class="meter" style="height:8px;margin-top:10px"><i style="width:21%"></i></div>
+                <div class="meter-foot"><span>21% 소진</span><span>04:00 리셋</span></div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+                  <div>
+                    <div style="font-size:11px;color:var(--muted);font-weight:600">입력</div>
+                    <div class="mono" style="font-size:16px;font-weight:600;letter-spacing:-0.02em">183K</div>
+                  </div>
+                  <div>
+                    <div style="font-size:11px;color:var(--muted);font-weight:600">출력</div>
+                    <div class="mono" style="font-size:16px;font-weight:600;letter-spacing:-0.02em">24K</div>
+                  </div>
+                </div>
+                <p style="font-size:12.5px;color:var(--muted);margin:12px 0 0;line-height:1.6">
+                  검토 14건 · 조기 종료 9건이 입력을 <span class="mono">92K</span> 아꼈습니다.
+                  상한 도달 시 신규 검토는 중단되고 진행 중인 건만 마칩니다.
+                </p>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head">
+                <h2>최근 실패</h2>
+                <button class="btn" type="button" style="padding:3px 9px;font-size:12px">모두 재시도</button>
+              </div>
+              <div class="fail-list">
+                <div class="fail-item">
+                  <span class="chip chip-warn">자막 없음</span>
+                  <div class="t">
+                    <b>gRPC 스트리밍 실전 패턴</b>
+                    <span>03:58 · 자동 자막 미제공 · STT 대기</span>
+                  </div>
+                </div>
+                <div class="fail-item">
+                  <span class="chip chip-fail">검토 실패</span>
+                  <div class="t">
+                    <b>분산 트랜잭션 사가 패턴 정리</b>
+                    <span>04:12 · 타임아웃 900s · 재시도 1/2</span>
+                  </div>
+                </div>
+                <div class="fail-item">
+                  <span class="chip chip-warn">쿼터</span>
+                  <div class="t">
+                    <b>키워드 "옵저버빌리티"</b>
+                    <span>04:20 · 검색 유닛 부족 · 내일 재개</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="notes">
+          <h3>설계 의도</h3>
+          <ul>
+            <li>퍼널은 단계별 <em>탈락 사유와 개수</em>를 사이에 끼워 넣습니다. "왜 아무것도 안 나오지?"에 답할 수 없는 파이프라인은 튜닝이 불가능합니다.</li>
+            <li>예산 미터를 좌측 레일에 상시 고정한 이유 — 대시보드 위젯이 아니라 제품의 상시 제약이기 때문입니다.</li>
+            <li>퍼널 막대는 단일 색상 순차 램프(<code>--seq-1…5</code>). 단계는 범주가 아니라 순서라서 색을 나누지 않았습니다.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ 강의 — 목록과 읽기를 한 화면에 ═══════════════ -->
+    <section class="screen" data-screen="lectures">
+      <div class="head">
+        <div>
+          <h1>강의</h1>
+          <p>142편 보관 중 · 이번 주 23편 추가</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn" type="button">즐겨찾기만</button>
+          <button class="btn" type="button">최근 추가순</button>
+        </div>
+      </div>
+
+      <div class="body">
+
+        <!-- 키워드 필터 — 등록된 키워드를 전부 보여주고 눌러서 켜고 끈다 -->
+        <div class="kwfilter">
+          <div class="kf-head">
+            <span class="eyebrow">키워드로 좁히기</span>
+            <div style="display:flex;gap:8px;align-items:center">
+              <span style="font-size:12px;color:var(--muted)"><span class="mono">2</span>개 선택 · <span class="mono">41</span>편</span>
+              <button class="btn" type="button" style="padding:3px 9px;font-size:12px">전체 해제</button>
+            </div>
+          </div>
+          <div class="kwchips">
+            <button class="kwchip" type="button" aria-pressed="true">쿠버네티스 네트워킹 <span class="c">24</span></button>
+            <button class="kwchip" type="button" aria-pressed="true">결제 시스템 설계 <span class="c">17</span></button>
+            <button class="kwchip" type="button" aria-pressed="false">PostgreSQL 튜닝 <span class="c">31</span></button>
+            <button class="kwchip" type="button" aria-pressed="false">브라우저 성능 <span class="c">28</span></button>
+            <button class="kwchip" type="button" aria-pressed="false">옵저버빌리티 <span class="c">9</span></button>
+            <button class="kwchip" type="button" aria-pressed="false">LLM 서빙 최적화 <span class="c">0</span></button>
+            <button class="kwchip add" type="button">＋ 키워드 추가</button>
+          </div>
+        </div>
+
+        <div class="filters">
+          <input class="search" type="search" placeholder="제목 · 요약 · 용어 검색" />
+          <div class="seg" role="group" aria-label="점수 필터">
+            <button type="button" aria-pressed="true">전체</button>
+            <button type="button" aria-pressed="false">85+</button>
+            <button type="button" aria-pressed="false">70+</button>
+          </div>
+          <div class="seg" role="group" aria-label="길이 필터">
+            <button type="button" aria-pressed="false">~30분</button>
+            <button type="button" aria-pressed="true">30~90분</button>
+            <button type="button" aria-pressed="false">90분+</button>
+          </div>
+        </div>
+
+        <div class="split">
+
+          <!-- 왼쪽: 목록. 스크롤해도 따라온다 -->
+          <div class="listpane">
+            <div class="lp-head">
+              <span class="eyebrow">41편</span>
+              <span style="font-size:11.5px;color:var(--muted)">점수순</span>
+            </div>
+
+            <button class="lec2" type="button" aria-current="true" data-pick="1">
+              <span class="s">
+                <span class="n" style="color:var(--seq-5)">92</span>
+                <span class="sb"><i style="width:92%;background:var(--seq-5)"></i></span>
+              </span>
+              <span class="c">
+                <span class="ti">결제 시스템 멱등성 설계: 중복 결제를 막는 네 개의 층</span>
+                <span class="mt">백엔드 아키텍처 랩 · <span class="mono">1:34:05</span></span>
+                <span class="rail-max">
+                  <span class="track" style="--len:5645">
+                    <i style="--at:682"></i><i style="--at:1661"></i>
+                    <i style="--at:3364"></i><i style="--at:4470"></i>
+                  </span>
+                </span>
+              </span>
+            </button>
+
+            <button class="lec2" type="button" data-pick="2">
+              <span class="s">
+                <span class="n" style="color:var(--seq-5)">87</span>
+                <span class="sb"><i style="width:87%;background:var(--seq-5)"></i></span>
+              </span>
+              <span class="c">
+                <span class="ti">쿠버네티스 CNI 플러그인은 실제로 어떻게 패킷을 옮기는가</span>
+                <span class="mt">인프라 노트 · <span class="mono">1:12:40</span></span>
+                <span class="rail-max">
+                  <span class="track" style="--len:4360">
+                    <i style="--at:723"></i><i style="--at:1481"></i><i style="--at:2210"></i>
+                    <i style="--at:3105"></i><i style="--at:3940"></i>
+                  </span>
+                </span>
+              </span>
+            </button>
+
+            <button class="lec2" type="button" data-pick="3">
+              <span class="s">
+                <span class="n" style="color:var(--seq-4)">81</span>
+                <span class="sb"><i style="width:81%;background:var(--seq-4)"></i></span>
+              </span>
+              <span class="c">
+                <span class="ti">PostgreSQL 인덱스, EXPLAIN을 읽는 법부터</span>
+                <span class="mt">데이터베이스 실전 · <span class="mono">48:20</span></span>
+                <span class="rail-max">
+                  <span class="track" style="--len:2900">
+                    <i style="--at:395"></i><i style="--at:1240"></i><i style="--at:2115"></i>
+                  </span>
+                </span>
+              </span>
+            </button>
+
+            <button class="lec2" type="button" data-pick="4">
+              <span class="s">
+                <span class="n" style="color:var(--seq-4)">79</span>
+                <span class="sb"><i style="width:79%;background:var(--seq-4)"></i></span>
+              </span>
+              <span class="c">
+                <span class="ti">브라우저 렌더링 파이프라인과 레이아웃 스래싱</span>
+                <span class="mt">프론트엔드 딥다이브 · <span class="mono">1:05:33</span></span>
+                <span class="rail-max">
+                  <span class="track" style="--len:3933">
+                    <i style="--at:512"></i><i style="--at:1420"></i>
+                    <i style="--at:2380"></i><i style="--at:3350"></i>
+                  </span>
+                </span>
+              </span>
+            </button>
+
+            <button class="lec2" type="button" data-pick="5">
+              <span class="s">
+                <span class="n" style="color:var(--seq-3)">74</span>
+                <span class="sb"><i style="width:74%;background:var(--seq-3)"></i></span>
+              </span>
+              <span class="c">
+                <span class="ti">LLM 파인튜닝 전에 확인할 것들</span>
+                <span class="mt">ML 엔지니어링 랩 · <span class="mono">55:12</span></span>
+                <span class="rail-max">
+                  <span class="track" style="--len:3312">
+                    <i style="--at:440"></i><i style="--at:1590"></i><i style="--at:2705"></i>
+                  </span>
+                </span>
+              </span>
+            </button>
+          </div>
+
+          <!-- 오른쪽: 고른 강의가 바로 여기 펼쳐진다 -->
+          <div class="readpane">
+            <div class="rp-head">
+              <div class="rp-meta">
+                <span class="chip chip-pass">전문가 92</span>
+                <span class="mono">1:34:05</span>
+                <span style="color:var(--border-strong)">·</span>
+                <span>백엔드 아키텍처 랩</span>
+                <span style="color:var(--border-strong)">·</span>
+                <span class="mono">2026-06-18</span>
+              </div>
+              <h2 class="rp-title">결제 시스템 멱등성 설계: 중복 결제를 막는 네 개의 층</h2>
+              <div class="rp-actions">
+                <a class="ytlink" href="#">
+                  <span class="pl">▶</span>
+                  유튜브에서 보기
+                  <span class="mono url">youtu.be/aX7kQ2mN9pL</span>
+                </a>
+                <button class="btn" type="button">즐겨찾기</button>
+                <button class="btn" type="button">다시 요약</button>
+              </div>
+            </div>
+
+            <div class="detail">
+<div class="timeline">
+            <div class="cap">챕터</div>
+            <div class="tl">
+              <button class="tl-ch" type="button" style="flex:580">
+                <span class="t">00:00</span><span class="b"></span>
+                <span class="n">문제 정의 — 중복 결제는 어디서</span>
+              </button>
+              <button class="tl-ch" type="button" style="flex:875">
+                <span class="t">09:40</span><span class="b"></span>
+                <span class="n">멱등키의 정의와 생명주기</span>
+              </button>
+              <button class="tl-ch" type="button" style="flex:875">
+                <span class="t">24:15</span><span class="b"></span>
+                <span class="n">1층 · 클라이언트 재시도 제어</span>
+              </button>
+              <button class="tl-ch" type="button" style="flex:820">
+                <span class="t">38:50</span><span class="b"></span>
+                <span class="n">2층 · 게이트웨이 중복 제거</span>
+              </button>
+              <button class="tl-ch" type="button" aria-current="true" style="flex:940">
+                <span class="t">52:30</span><span class="b"></span>
+                <span class="n">3층 · 유니크 제약과 경쟁 조건</span>
+              </button>
+              <button class="tl-ch" type="button" style="flex:1070">
+                <span class="t">1:08:10</span><span class="b"></span>
+                <span class="n">4층 · PG 응답 대조와 정산 대사</span>
+              </button>
+              <button class="tl-ch" type="button" style="flex:485">
+                <span class="t">1:26:00</span><span class="b"></span>
+                <span class="n">정리 · 도입 순서</span>
+              </button>
+            </div>
+            <p style="font-size:10.5px;color:var(--muted);line-height:1.5;margin:12px 0 0">
+              막대 높이 = 챕터 길이 비율
+            </p>
+          </div>
+
+          <article class="read">
+            <p class="lead">중복 결제는 한 곳을 막아서 해결되지 않는다. 클라이언트·게이트웨이·DB·정산 네 지점에 각각 다른 성격의 방어를 두어야 한다.</p>
+
+            <p class="abstract">
+              강연자는 실제 운영 중 발생한 이중 청구 사고를 재구성하며 시작한다. 네트워크 타임아웃 후 클라이언트가
+              재시도했고, 게이트웨이는 두 요청을 서로 다른 것으로 보았으며, DB 유니크 제약은 두 트랜잭션이 커밋되기 전
+              구간에서 무력했다. 이 사고를 축으로 방어 계층을 하나씩 쌓아 올리고, 각 층이 막는 실패와 막지 못하는
+              실패를 분리해 설명한다. 마지막에는 이미 운영 중인 시스템에 어떤 순서로 도입해야 위험이 적은지를 다룬다.
+            </p>
+
+            <dl class="facts">
+              <dt>대상</dt>
+              <dd>결제·주문 도메인을 다루는 백엔드 개발자, 실무 경험 1년 이상</dd>
+              <dt>선수 지식</dt>
+              <dd>HTTP 재시도 의미론, 트랜잭션 격리 수준, 기본적인 분산 시스템 용어</dd>
+              <dt>수집 키워드</dt>
+              <dd><span class="chip chip-accent" style="margin-right:4px">결제 시스템 설계</span><span class="chip chip-accent">멱등성</span></dd>
+            </dl>
+
+            <h2>핵심 포인트</h2>
+            <div class="kp">
+              <div class="kp-item">
+                <span class="no">01</span>
+                <div>
+                  <h3>멱등키는 요청이 아니라 "의도"에 붙인다</h3>
+                  <p>요청마다 새 키를 발급하면 재시도가 새 결제가 된다. 키는 사용자가 결제 버튼을 누른 그 행위 하나에
+                     귀속되어야 하며, 화면 진입 시점에 발급해 재시도 전체가 같은 키를 공유하게 만든다.</p>
+                  <a class="ts" href="#">11:22</a>
+                </div>
+              </div>
+              <div class="kp-item">
+                <span class="no">02</span>
+                <div>
+                  <h3>지수 백오프보다 멱등성이 먼저다</h3>
+                  <p>재시도 정책을 정교하게 다듬는 것은 멱등성이 보장된 다음의 일이다. 순서를 바꾸면 백오프는 사고의
+                     빈도만 낮출 뿐 원인을 남겨둔다.</p>
+                  <a class="ts" href="#">27:41</a>
+                </div>
+              </div>
+              <div class="kp-item">
+                <span class="no">03</span>
+                <div>
+                  <h3>유니크 제약만으로는 부족하다 — 커밋 전 경쟁 구간이 남는다</h3>
+                  <p>두 트랜잭션이 동시에 조회하고 동시에 삽입을 시도하면, 제약은 늦게 도착한 쪽을 실패시키지만 그
+                     실패를 "이미 처리됨"으로 해석할지 "오류"로 해석할지가 애플리케이션 몫으로 남는다. 강연자는
+                     <code>SELECT&nbsp;FOR&nbsp;UPDATE</code>로 구간을 좁히는 방법을 시연한다.</p>
+                  <a class="ts" href="#">56:04</a>
+                </div>
+              </div>
+              <div class="kp-item">
+                <span class="no">04</span>
+                <div>
+                  <h3>정산 대사는 최후의 방어선이지 예방책이 아니다</h3>
+                  <p>PG사 응답과 내부 기록을 하루 단위로 맞춰보는 배치는 놓친 건을 찾아낼 뿐 발생을 막지 못한다.
+                     앞의 세 층 없이 대사만 붙이면 매일 수동 보정을 하게 된다.</p>
+                  <a class="ts" href="#">1:14:30</a>
+                </div>
+              </div>
+            </div>
+
+            <h2>용어</h2>
+            <dl class="terms">
+              <dt>멱등키</dt>
+              <dd>같은 의도의 요청을 하나로 식별하는 클라이언트 발급 식별자. 서버는 이 키로 이미 처리한 결과를 되돌려준다.</dd>
+              <dt>경쟁 구간</dt>
+              <dd>조회와 삽입 사이, 두 트랜잭션이 서로를 아직 볼 수 없는 시간 창.</dd>
+              <dt>정산 대사</dt>
+              <dd>결제사 기록과 내부 기록을 주기적으로 대조해 불일치를 찾는 절차.</dd>
+            </dl>
+
+            <h2>실무 적용</h2>
+            <ul class="take">
+              <li>결제 API에 <code>Idempotency-Key</code> 헤더를 필수화하고 24시간 보관한다.</li>
+              <li>키 발급 시점을 결제 요청이 아니라 결제 화면 진입으로 옮긴다.</li>
+              <li>유니크 제약 위반을 오류가 아니라 "기존 결과 반환"으로 처리하는 분기를 넣는다.</li>
+              <li>일 1회 PG 대사 배치를 붙이고, 불일치 건수를 알림 임계값으로 잡는다.</li>
+            </ul>
+
+            <h2>인용</h2>
+            <blockquote class="quote">
+              <p>"멱등성을 나중에 붙이겠다는 말은, 사고가 난 다음에 붙이겠다는 말과 같습니다.
+                 결제는 그 사고의 비용을 고객이 먼저 지불합니다."</p>
+              <footer><a class="ts" href="#">31:08</a> <span>도입 순서를 논하며</span></footer>
+            </blockquote>
+
+            <details class="disc">
+              <summary>전문성 판정 근거 · 종합 92점</summary>
+              <div class="inner">
+                <div class="crit">
+                  <div class="crit-row">
+                    <span class="cn">구조성</span>
+                    <span class="cbar"><i style="width:88%;background:var(--seq-5)"></i></span>
+                    <span class="cs">88</span>
+                    <span class="ev">도입에서 목차를 제시하고 계층별로 순서대로 전개</span>
+                  </div>
+                  <div class="crit-row">
+                    <span class="cn">깊이</span>
+                    <span class="cbar"><i style="width:95%;background:var(--seq-5)"></i></span>
+                    <span class="cs">95</span>
+                    <span class="ev">"제약은 늦게 도착한 쪽을 실패시키지만 그 해석은 애플리케이션 몫"</span>
+                  </div>
+                  <div class="crit-row">
+                    <span class="cn">근거</span>
+                    <span class="cbar"><i style="width:93%;background:var(--seq-5)"></i></span>
+                    <span class="cs">93</span>
+                    <span class="ev">실제 장애 타임라인과 로그를 화면에 띄워 설명</span>
+                  </div>
+                  <div class="crit-row">
+                    <span class="cn">화자</span>
+                    <span class="cbar"><i style="width:90%;background:var(--seq-5)"></i></span>
+                    <span class="cs">90</span>
+                    <span class="ev">"결제 도메인 7년" 자기소개, 용어 구사 자연스러움</span>
+                  </div>
+                  <div class="crit-row">
+                    <span class="cn">밀도</span>
+                    <span class="cbar"><i style="width:86%;background:var(--seq-4)"></i></span>
+                    <span class="cs">86</span>
+                    <span class="ev">도입 3분가량 잡담, 이후 군더더기 거의 없음</span>
+                  </div>
+                  <div class="crit-row">
+                    <span class="cn">상업성</span>
+                    <span class="cbar"><i style="width:8%;background:var(--pass)"></i></span>
+                    <span class="cs">8</span>
+                    <span class="ev">홍보 없음 (낮을수록 좋음)</span>
+                  </div>
+                </div>
+                <p style="font-size:12px;color:var(--muted);margin:14px 0 0;padding-top:12px;border-top:1px solid var(--border)">
+                  <span class="mono">claude-opus-5</span> · effort medium ·
+                  입력 <span class="mono">19,240</span> · 출력 <span class="mono">3,610</span> 토큰 ·
+                  8턴 · 프롬프트 <span class="mono">v1</span>
+                </p>
+              </div>
+            </details>
+
+            <details class="disc" style="margin-top:10px">
+              <summary>자막 원문 · 보관 만료 2026-07-18</summary>
+              <div class="inner">
+                <p style="font-size:12.5px;color:var(--muted);margin:0">
+                  자막 원문은 요약 생성 후 30일간만 보관합니다. 이 강의는 보관 기간이 지나 원문이 삭제되었고,
+                  타임스탬프 색인만 남아 있습니다.
+                </p>
+              </div>
+            </details>
+          </article>            </div>
+          </div>
+
+        </div>
+
+        <div class="notes">
+          <h3>설계 의도</h3>
+          <ul>
+            <li><strong>목록과 읽기를 한 화면에 뒀습니다.</strong> 아카이브는 훑으면서 읽는 물건이라, 화면을 오가면 "어디까지 봤더라"를 매번 다시 찾게 됩니다. 왼쪽에서 고르면 오른쪽이 바로 바뀝니다.</li>
+            <li><strong>메뉴를 상단으로 올린 이유가 여기 있습니다.</strong> 이 화면은 이미 목록+읽기 2단이라 좌측 레일까지 있으면 세로 기둥이 셋이 되고, 정작 폭이 아쉬운 읽기 영역이 좁아집니다. 항목이 4개뿐이라 가로 한 줄로 충분하고, 확보한 218px은 읽기에 돌렸습니다.</li>
+            <li>상단바는 아래로 스크롤하면 접히고, 위로 올리거나 커서를 화면 맨 위로 가져가면 다시 나옵니다. 가로 배치의 유일한 대가인 "세로 54px 영구 점유"를 없앤 장치입니다.</li>
+            <li>목록 패널은 스크롤을 따라옵니다. 긴 요약을 끝까지 읽어도 다음 강의가 손 닿는 곳에 있습니다.</li>
+            <li><strong>키워드 필터를 상단에 펼쳤습니다.</strong> 이전에는 선택된 것만 칩으로 떠 있어서 무엇을 고를 수 있는지 알 수 없었습니다. 지금은 등록된 키워드가 편수와 함께 전부 보이고, 눌러서 켜고 끕니다. 0편인 키워드도 숨기지 않습니다 — 쿼터만 쓰고 성과가 없다는 신호라서요.</li>
+            <li>목록의 길이 트랙은 좁은 폭에서도 유지했습니다. 폭은 최장 강의 대비 비율, 눈금은 핵심 포인트 위치입니다.</li>
+            <li>유튜브 링크는 버튼이 아니라 <em>주소가 보이는 링크</em>로 뒀습니다. 원본으로 가는 경로라 어디로 가는지 보이는 편이 낫습니다.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ 키워드 ════════════════════════════════════════ -->
+    <section class="screen" data-screen="keywords">
+      <div class="head">
+        <div>
+          <h1>키워드</h1>
+          <p>활성 8 · 일시정지 1 · 대기 1</p>
+        </div>
+        <button class="btn" type="button">전체 일시정지</button>
+      </div>
+
+      <div class="body">
+
+        <!-- 추가 폼을 접어두지 않고 펼쳐 둡니다. 어떤 값을 정해야 하는지가
+             곧 이 제품의 튜닝 지점이라, 버튼 뒤에 숨기면 기본값으로만 쓰게 됩니다. -->
+        <div class="addkw">
+          <div class="ak-head">
+            <span class="eyebrow">새 키워드 추가</span>
+            <span style="font-size:12px;color:var(--muted)">등록하면 몇 분 안에 첫 수집이 돕니다</span>
+          </div>
+          <div class="ak-row">
+            <label class="fld grow">
+              <span class="fl">검색어</span>
+              <input type="text" placeholder="예: 카프카 파티셔닝 전략" />
+            </label>
+            <label class="fld">
+              <span class="fl">언어</span>
+              <select><option>한국어</option><option>영어</option><option>전체</option></select>
+            </label>
+            <label class="fld">
+              <span class="fl">주기</span>
+              <select><option>매일 04:00</option><option>주 2회</option><option>주 1회</option></select>
+            </label>
+          </div>
+          <div class="ak-row">
+            <label class="fld sm">
+              <span class="fl">최소 길이</span>
+              <span class="unit"><input type="number" value="15" /><em>분</em></span>
+            </label>
+            <label class="fld sm">
+              <span class="fl">기준 점수</span>
+              <span class="unit"><input type="number" value="75" /><em>점</em></span>
+            </label>
+            <label class="fld sm">
+              <span class="fl">1회 최대</span>
+              <span class="unit"><input type="number" value="10" /><em>편</em></span>
+            </label>
+            <div class="ak-hint">
+              기준 점수를 올리면 수집량이 줄고 토큰도 아낍니다.
+              <strong>75점</strong>은 전문가 강의만, <strong>70점</strong>은 실무 튜토리얼까지 들어옵니다.
+            </div>
+            <button class="btn btn-primary" type="button">추가하고 바로 실행</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="tw">
+            <table>
+              <thead>
+                <tr>
+                  <th>키워드</th>
+                  <th>상태</th>
+                  <th>주기</th>
+                  <th class="num">최소 길이</th>
+                  <th class="num">기준 점수</th>
+                  <th class="num">수집</th>
+                  <th>마지막 실행</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <div class="kw-term">쿠버네티스 네트워킹</div>
+                    <div class="kw-sub">ko · 최근 2년</div>
+                  </td>
+                  <td><span class="chip chip-pass">활성</span></td>
+                  <td class="mono" style="font-size:12px">매일 04:00</td>
+                  <td class="num">15분</td>
+                  <td class="num">75</td>
+                  <td class="num">24</td>
+                  <td class="mono" style="font-size:12px;color:var(--muted)">오늘 04:02</td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="kw-term">결제 시스템 설계</div>
+                    <div class="kw-sub">ko · 최근 2년</div>
+                  </td>
+                  <td><span class="chip chip-pass">활성</span></td>
+                  <td class="mono" style="font-size:12px">매일 04:00</td>
+                  <td class="num">20분</td>
+                  <td class="num">80</td>
+                  <td class="num">17</td>
+                  <td class="mono" style="font-size:12px;color:var(--muted)">오늘 04:05</td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="kw-term">PostgreSQL 튜닝</div>
+                    <div class="kw-sub">ko · 최근 3년</div>
+                  </td>
+                  <td><span class="chip chip-pass">활성</span></td>
+                  <td class="mono" style="font-size:12px">주 2회</td>
+                  <td class="num">10분</td>
+                  <td class="num">70</td>
+                  <td class="num">31</td>
+                  <td class="mono" style="font-size:12px;color:var(--muted)">어제 04:11</td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="kw-term">옵저버빌리티</div>
+                    <div class="kw-sub">ko · 최근 2년</div>
+                  </td>
+                  <td><span class="chip chip-warn">쿼터 대기</span></td>
+                  <td class="mono" style="font-size:12px">매일 04:00</td>
+                  <td class="num">15분</td>
+                  <td class="num">75</td>
+                  <td class="num">9</td>
+                  <td class="mono" style="font-size:12px;color:var(--muted)">오늘 04:20</td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="kw-term">LLM 서빙 최적화</div>
+                    <div class="kw-sub">ko · 최근 1년</div>
+                  </td>
+                  <td><span class="chip chip-accent">첫 실행 대기</span></td>
+                  <td class="mono" style="font-size:12px">등록 직후</td>
+                  <td class="num">15분</td>
+                  <td class="num">75</td>
+                  <td class="num">—</td>
+                  <td class="mono" style="font-size:12px;color:var(--muted)">3분 후 예정</td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="kw-term">프론트엔드 성능</div>
+                    <div class="kw-sub">ko · 최근 2년</div>
+                  </td>
+                  <td><span class="chip chip-neutral">일시정지</span></td>
+                  <td class="mono" style="font-size:12px">—</td>
+                  <td class="num">15분</td>
+                  <td class="num">70</td>
+                  <td class="num">28</td>
+                  <td class="mono" style="font-size:12px;color:var(--muted)">7월 12일</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top:16px">
+          <div class="panel-head"><h2>쿼터 배분</h2></div>
+          <div class="panel-body">
+            <p style="font-size:13px;color:var(--ink-2);margin:0 0 12px;line-height:1.65">
+              유튜브 검색은 호출당 100유닛, 일 상한 10,000유닛입니다.
+              <strong>하루에 가능한 검색은 100회</strong>이고, 키워드 하나당 최대 2회를 씁니다.
+            </p>
+            <div class="meter" style="height:8px"><i style="width:21.4%"></i></div>
+            <div class="meter-foot">
+              <span>오늘 2,140 유닛 (키워드 10개 × 최대 2회)</span>
+              <span>10,000</span>
+            </div>
+            <p style="font-size:12.5px;color:var(--muted);margin:12px 0 0;line-height:1.6">
+              키워드가 45개를 넘으면 실행 주기를 주 2회로 자동 하향합니다.
+            </p>
+          </div>
+        </div>
+
+        <div class="notes">
+          <h3>설계 의도</h3>
+          <ul>
+            <li>키워드별 임계값(<code>최소 길이</code>·<code>기준 점수</code>)을 목록에 그대로 노출했습니다. 이 두 값이 수집량과 비용을 직접 좌우해서, 설정 화면에 숨기면 튜닝을 안 하게 됩니다.</li>
+            <li>"첫 실행 대기" 상태를 별도로 둔 이유 — 키워드를 막 등록한 사용자는 결과를 기다립니다. 몇 분 뒤에 돌아간다는 사실이 보여야 중복 등록을 안 합니다.</li>
+            <li>쿼터 설명을 숫자와 함께 문장으로 적었습니다. "2,140/10,000"만으로는 하루 100회가 상한이라는 제약이 전달되지 않습니다.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ 실행 로그 ═════════════════════════════════════ -->
+    <section class="screen" data-screen="runs">
+      <div class="head">
+        <div>
+          <h1>실행 로그</h1>
+          <p>최근 3회 · 실패 3건</p>
+        </div>
+        <button class="btn" type="button">실패만 보기</button>
+      </div>
+
+      <div class="body">
+        <div class="panel">
+
+          <div class="run">
+            <div>
+              <div class="when">2026-07-31 04:00 → 04:24</div>
+              <div class="kwn">키워드 10개 · 정기 실행</div>
+              <span class="chip chip-pass">완료</span>
+              <div class="mono" style="font-size:11.5px;color:var(--muted);margin-top:8px">207K 토큰 · 2,140 유닛</div>
+            </div>
+            <div>
+              <div class="mini">
+                <div class="mini-col"><span class="cl">47</span><span class="bar" style="height:36px;background:var(--seq-1)"></span></div>
+                <div class="mini-col"><span class="cl">18</span><span class="bar" style="height:14px;background:var(--seq-2)"></span></div>
+                <div class="mini-col"><span class="cl">14</span><span class="bar" style="height:11px;background:var(--seq-3)"></span></div>
+                <div class="mini-col"><span class="cl">14</span><span class="bar" style="height:11px;background:var(--seq-4)"></span></div>
+                <div class="mini-col"><span class="cl">5</span><span class="bar" style="height:4px;background:var(--seq-5)"></span></div>
+              </div>
+              <div class="mini-labels">
+                <span>발견</span><span>룰</span><span>자막</span><span>검토</span><span>공개</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="run">
+            <div>
+              <div class="when">2026-07-30 04:00 → 04:31</div>
+              <div class="kwn">키워드 10개 · 정기 실행</div>
+              <span class="chip chip-warn">일부 실패 2</span>
+              <div class="mono" style="font-size:11.5px;color:var(--muted);margin-top:8px">222K 토큰 · 2,140 유닛</div>
+            </div>
+            <div>
+              <div class="mini">
+                <div class="mini-col"><span class="cl">52</span><span class="bar" style="height:40px;background:var(--seq-1)"></span></div>
+                <div class="mini-col"><span class="cl">21</span><span class="bar" style="height:16px;background:var(--seq-2)"></span></div>
+                <div class="mini-col"><span class="cl">15</span><span class="bar" style="height:12px;background:var(--seq-3)"></span></div>
+                <div class="mini-col"><span class="cl">13</span><span class="bar" style="height:10px;background:var(--seq-4)"></span></div>
+                <div class="mini-col"><span class="cl">7</span><span class="bar" style="height:5px;background:var(--seq-5)"></span></div>
+              </div>
+              <div class="mini-labels">
+                <span>발견</span><span>룰</span><span>자막</span><span>검토</span><span>공개</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="run">
+            <div>
+              <div class="when">2026-07-29 14:12 → 14:19</div>
+              <div class="kwn">"LLM 서빙 최적화" · 수동 실행</div>
+              <span class="chip chip-fail">실패</span>
+              <div class="mono" style="font-size:11.5px;color:var(--muted);margin-top:8px">2.4K 토큰 · 200 유닛</div>
+            </div>
+            <div>
+              <div class="mini">
+                <div class="mini-col"><span class="cl">31</span><span class="bar" style="height:24px;background:var(--seq-1)"></span></div>
+                <div class="mini-col"><span class="cl">6</span><span class="bar" style="height:5px;background:var(--seq-2)"></span></div>
+                <div class="mini-col"><span class="cl">1</span><span class="bar" style="height:2px;background:var(--seq-3)"></span></div>
+                <div class="mini-col"><span class="cl">0</span><span class="bar" style="height:2px;background:var(--surface-sink)"></span></div>
+                <div class="mini-col"><span class="cl">0</span><span class="bar" style="height:2px;background:var(--surface-sink)"></span></div>
+              </div>
+              <div class="mini-labels">
+                <span>발견</span><span>룰</span><span>자막</span><span>검토</span><span>공개</span>
+              </div>
+              <p style="font-size:12.5px;color:var(--fail);margin:10px 0 0">
+                자막 수집 5건 연속 429 — 요청이 차단되어 실행을 중단했습니다. 30분 후 자동 재개됩니다.
+              </p>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="notes">
+          <h3>설계 의도</h3>
+          <ul>
+            <li>실행마다 같은 5단 퍼널을 같은 축척으로 그립니다. 어제와 오늘을 나란히 두면 <em>어느 단계가 달라졌는지</em>가 바로 보입니다.</li>
+            <li>실패는 코드가 아니라 문장으로 설명하고 다음에 무슨 일이 일어나는지까지 씁니다. "429 Error"만 있으면 사용자가 할 수 있는 일이 없습니다.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+
+<script>
+(function () {
+  var nav = document.querySelectorAll('.tb-nav button[data-go]');
+  var screens = document.querySelectorAll('.screen');
+
+  function show(name) {
+    screens.forEach(function (s) { s.classList.toggle('on', s.dataset.screen === name); });
+    nav.forEach(function (b) {
+      if (b.dataset.go === name) { b.setAttribute('aria-current', 'page'); }
+      else { b.removeAttribute('aria-current'); }
+    });
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }
+
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest('[data-go]');
+    if (!t) return;
+    e.preventDefault();
+    show(t.dataset.go);
+  });
+
+  // 상단바 자동 숨김 — 아래로 스크롤하면 접고, 위로 올리거나
+  // 커서를 화면 맨 위로 가져가면 편다.
+  (function () {
+    var bar = document.querySelector('.topbar');
+    var root = document.documentElement;
+    if (!bar) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    var last = window.scrollY, queued = false, atTop = false;
+
+    function set(tuck) {
+      bar.classList.toggle('tucked', tuck);
+      root.style.setProperty('--tb-off', tuck ? '0px' : '54px');
+    }
+
+    function onFrame() {
+      var y = window.scrollY;
+      if (atTop || y <= 8) set(false);
+      else if (y > last + 4 && y > 90) set(true);
+      else if (y < last - 4) set(false);
+      last = y;
+      queued = false;
+    }
+
+    addEventListener('scroll', function () {
+      if (!queued) { queued = true; requestAnimationFrame(onFrame); }
+    }, { passive: true });
+
+    // 커서가 화면 최상단 56px 안에 들어오면 다시 편다
+    addEventListener('pointermove', function (e) {
+      atTop = e.clientY < 56;
+      if (atTop) set(false);
+    }, { passive: true });
+
+    // 키보드 포커스가 상단바로 들어와도 편다
+    bar.addEventListener('focusin', function () { set(false); });
+  })();
+
+  // 세그먼트 토글 (시각 확인용)
+  document.querySelectorAll('.seg').forEach(function (g) {
+    g.addEventListener('click', function (e) {
+      var b = e.target.closest('button');
+      if (!b) return;
+      g.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', 'false'); });
+      b.setAttribute('aria-pressed', 'true');
+    });
+  });
+
+  // 키워드 필터 켜고 끄기
+  document.querySelectorAll('.kwchip:not(.add)').forEach(function (c) {
+    c.addEventListener('click', function () {
+      c.setAttribute('aria-pressed', c.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+    });
+  });
+
+  // 목록에서 고르면 오른쪽 읽기 패널이 그 강의로 바뀐다 (목업이라 선택 표시만)
+  var picks = document.querySelectorAll('.lec2');
+  picks.forEach(function (b) {
+    b.addEventListener('click', function () {
+      picks.forEach(function (x) { x.removeAttribute('aria-current'); });
+      b.setAttribute('aria-current', 'true');
+    });
+  });
+})();
+</script>

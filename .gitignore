@@ -1,0 +1,22 @@
+# 의존성·빌드 산출물
+node_modules/
+dist/
+*.tsbuildinfo
+
+# 파이썬
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# 환경 — .env.example 만 커밋합니다
+.env
+.env.local
+.env.*.local
+
+# 도구 부산물
+.playwright-mcp/
+.DS_Store
+*.log

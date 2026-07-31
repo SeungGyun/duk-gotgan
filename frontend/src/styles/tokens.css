@@ -1,0 +1,146 @@
+/* ─────────────────────────────────────────────────────────────
+   디자인 토큰 — docs/mockups/ui.html 에서 확정한 값 그대로.
+
+   색: 블루프린트 블루 액센트 + 청색 편향 뉴트럴. 의미색은 액센트와 분리.
+       라이트/다크 각각 dataviz 검증 5개 항목(명도대·채도·CVD 분리·
+       정상시야 분리·대비) 통과.
+   타입: 한글 UI 스택 + 시간·수치는 전부 모노스페이스.
+   ───────────────────────────────────────────────────────────── */
+
+:root {
+  --canvas: #f1f3f5;
+  --surface: #ffffff;
+  --surface-2: #f7f9fa;
+  --surface-sink: #ebeef1;
+  --border: #dce1e6;
+  --border-strong: #c3cbd3;
+  --ink: #14181c;
+  --ink-2: #3d464e;
+  --muted: #6b757e;
+
+  --accent: #1d5fa8;
+  --accent-soft: #e8f0f9;
+  --accent-line: #b7d2ec;
+
+  --pass: #2e7d4f;
+  --warn: #bc8104;
+  --fail: #a32c2c;
+  --pass-soft: #e7f2eb;
+  --warn-soft: #fbf2de;
+  --fail-soft: #f8eaea;
+
+  /* 순차 램프 — 단일 색상, 밝음→어두움 (퍼널·점수) */
+  --seq-1: #dce9f6;
+  --seq-2: #b7d2ec;
+  --seq-3: #7faedb;
+  --seq-4: #4a87c4;
+  --seq-5: #1d5fa8;
+
+  --font:
+    "Pretendard Variable", Pretendard, -apple-system, "Apple SD Gothic Neo",
+    "Noto Sans KR", "Malgun Gothic", sans-serif;
+  --mono:
+    ui-monospace, SFMono-Regular, "SF Mono", "JetBrains Mono", Menlo, Consolas,
+    monospace;
+
+  --r: 3px;
+  --tb-h: 54px;
+  /* 페이지 레이어의 폭. 상단바·제목·필터·본문이 전부 이 한 겹 안에
+     들어오고, 왼쪽 시작선을 공유합니다. 3단(목록·본문·챕터)이 여백 없이
+     들어차는 폭으로 잡았습니다 — 더 넓히면 단 사이에 빈 구멍이 생깁니다. */
+  --page-max: 1360px;
+  /* 레이어 좌우 안쪽 여백. 시작선은 (화면폭 − page-max)/2 + 이 값. */
+  --page-pad: 30px;
+  /* 상단바가 접히면 JS 가 0 으로 바꿉니다 (sticky 기준점) */
+  --tb-off: 54px;
+}
+
+@media (max-width: 860px) {
+  :root {
+    --page-pad: 18px;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #0f1216;
+    --surface: #161a1f;
+    --surface-2: #1c2127;
+    --surface-sink: #12161a;
+    --border: #272e36;
+    --border-strong: #39424c;
+    --ink: #e6eaee;
+    --ink-2: #b4bcc4;
+    --muted: #7c8790;
+
+    --accent: #4e93d4;
+    --accent-soft: #17293c;
+    --accent-line: #2c4a6b;
+
+    --pass: #3f9e6c;
+    --warn: #be8a16;
+    --fail: #d45e66;
+    --pass-soft: #14291f;
+    --warn-soft: #2a2213;
+    --fail-soft: #2c1a1c;
+
+    --seq-1: #1e2e42;
+    --seq-2: #2a4664;
+    --seq-3: #376294;
+    --seq-4: #4179be;
+    --seq-5: #4e93d4;
+  }
+}
+
+/* 사용자가 테마를 직접 고른 경우 미디어쿼리를 이깁니다 */
+:root[data-theme="dark"] {
+  --canvas: #0f1216;
+  --surface: #161a1f;
+  --surface-2: #1c2127;
+  --surface-sink: #12161a;
+  --border: #272e36;
+  --border-strong: #39424c;
+  --ink: #e6eaee;
+  --ink-2: #b4bcc4;
+  --muted: #7c8790;
+  --accent: #4e93d4;
+  --accent-soft: #17293c;
+  --accent-line: #2c4a6b;
+  --pass: #3f9e6c;
+  --warn: #be8a16;
+  --fail: #d45e66;
+  --pass-soft: #14291f;
+  --warn-soft: #2a2213;
+  --fail-soft: #2c1a1c;
+  --seq-1: #1e2e42;
+  --seq-2: #2a4664;
+  --seq-3: #376294;
+  --seq-4: #4179be;
+  --seq-5: #4e93d4;
+}
+
+:root[data-theme="light"] {
+  --canvas: #f1f3f5;
+  --surface: #ffffff;
+  --surface-2: #f7f9fa;
+  --surface-sink: #ebeef1;
+  --border: #dce1e6;
+  --border-strong: #c3cbd3;
+  --ink: #14181c;
+  --ink-2: #3d464e;
+  --muted: #6b757e;
+  --accent: #1d5fa8;
+  --accent-soft: #e8f0f9;
+  --accent-line: #b7d2ec;
+  --pass: #2e7d4f;
+  --warn: #bc8104;
+  --fail: #a32c2c;
+  --pass-soft: #e7f2eb;
+  --warn-soft: #fbf2de;
+  --fail-soft: #f8eaea;
+  --seq-1: #dce9f6;
+  --seq-2: #b7d2ec;
+  --seq-3: #7faedb;
+  --seq-4: #4a87c4;
+  --seq-5: #1d5fa8;
+}

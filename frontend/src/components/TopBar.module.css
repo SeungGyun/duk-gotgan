@@ -1,0 +1,157 @@
+/* 메뉴를 상단에 둔 이유: 핵심 화면(강의)이 이미 목록+읽기 2단이라
+   좌측 레일까지 있으면 세로 기둥이 셋이 되고, 정작 폭이 아쉬운 읽기
+   영역이 좁아집니다. 항목이 4개뿐이라 가로 한 줄로 충분합니다. */
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  height: var(--tb-h);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  transition: transform 0.2s ease;
+  will-change: transform;
+}
+/* 배경 띠는 화면 끝까지, 내용은 본문과 같은 폭으로 맞춥니다.
+   안 그러면 넓은 화면에서 메뉴만 왼쪽 끝에 붙어 본문과 어긋납니다. */
+.inner {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  padding: 0 var(--page-pad);
+}
+
+/* 아래로 스크롤하면 접히고, 위로 올리거나 커서를 화면 맨 위로
+   가져가면 다시 나옵니다. 가로 배치의 유일한 대가인
+   "세로 54px 영구 점유"를 없애는 장치입니다. */
+.tucked {
+  transform: translateY(-100%);
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  flex: none;
+  text-decoration: none;
+  color: inherit;
+}
+.mark {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 600;
+}
+.name {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+/* 이름 가운데 느낌표. 700 굵기 그대로 두면 획이 굵어 가운데가 튀므로
+   색과 굵기를 죽여 "덕"과 "곳간"이 먼저 읽히게 합니다. */
+.sep {
+  color: var(--accent);
+  font-weight: 600;
+  margin: 0 0.5px;
+}
+/* 라틴 마크는 이미 10px·자간 0.2em 이라 한 글자만 흐리면 렌더링 오류처럼
+   보입니다. 색은 그대로 두고 자간만 살짝 좁혀 한 단어로 붙여 둡니다. */
+.markSep {
+  margin: 0 -0.06em;
+}
+
+.nav {
+  display: flex;
+  gap: 2px;
+  align-items: stretch;
+  height: 100%;
+}
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 13.5px;
+  padding: 0 13px;
+  cursor: pointer;
+  text-decoration: none;
+  box-shadow: inset 0 -2px 0 transparent;
+}
+.link:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+.active {
+  color: var(--accent);
+  font-weight: 650;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.count {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.active .count {
+  color: var(--accent);
+}
+
+/* 토큰 사용량 — 상시 제약이라 크롬에 고정 */
+.usage {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+.usageLabel {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.usageValue {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.usageMeter {
+  width: 72px;
+}
+.usageCap {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+@media (max-width: 860px) {
+  .bar {
+    height: auto;
+  }
+  .inner {
+    height: auto;
+    padding: 8px var(--page-pad) 0;
+    gap: 10px 18px;
+    flex-wrap: wrap;
+  }
+  .nav {
+    height: auto;
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+  }
+  .link {
+    padding: 9px 11px;
+    white-space: nowrap;
+  }
+  .usageMeter,
+  .usageCap {
+    display: none;
+  }
+}

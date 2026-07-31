@@ -1,0 +1,649 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { api } from "../api";
+import type { LectureQuery, LectureSort, LectureSummary } from "../api";
+import { Screen } from "../components/Screen";
+import { Button, Chip, Empty, ErrorState, Loading } from "../components/ui";
+import { useAsync } from "../hooks/useAsync";
+import { usePersistentToggle } from "../hooks/usePersistentToggle";
+import {
+  criterionLabel,
+  date,
+  duration,
+  num,
+  scoreColor,
+  timestamp,
+  tokens,
+  verdictLabel,
+  youtubeAt,
+} from "../lib/format";
+import s from "./Lectures.module.css";
+
+const SCORE_BANDS = [
+  { label: "전체", value: undefined },
+  { label: "85+", value: 85 },
+  { label: "70+", value: 70 },
+] as const;
+
+const LENGTH_BANDS = [
+  { label: "전체", min: undefined, max: undefined },
+  { label: "~30분", min: undefined, max: 1800 },
+  { label: "30~90분", min: 1800, max: 5400 },
+  { label: "90분+", min: 5400, max: undefined },
+] as const;
+
+const SORTS: { value: LectureSort; label: string }[] = [
+  { value: "score", label: "점수순" },
+  { value: "recent", label: "최신순" },
+  { value: "duration", label: "긴 순" },
+];
+
+/** 목록이 비었을 때 매 렌더 새 배열이 생기지 않게 — 이어보기 옵저버의 의존값 */
+const NO_ROWS: LectureSummary[] = [];
+
+/** 바닥까지 이만큼 남으면 다음 강의를 미리 붙입니다 — 끊김 없이 이어지되,
+    첫 화면에서부터 다음 편을 당겨오지는 않을 만큼의 거리. */
+const PREFETCH_PX = 400;
+
+export function Lectures() {
+  const { videoId } = useParams<{ videoId: string }>();
+  const navigate = useNavigate();
+
+  const [selectedKeywords, setSelectedKeywords] = useState<string[]>([]);
+  const [scoreBand, setScoreBand] = useState(0);
+  const [lengthBand, setLengthBand] = useState(0);
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState<LectureSort>("score");
+
+  // 읽기에 집중하고 싶을 때 양옆 패널을 접습니다. 둘 다 접으면 본문이 화면 정중앙.
+  const [listOpen, toggleList] = usePersistentToggle("ui.lectures.list", true);
+  const [chaptersOpen, toggleChapters] = usePersistentToggle("ui.lectures.chapters", true);
+
+  const keywords = useAsync(() => api.listKeywords(), []);
+
+  const query: LectureQuery = useMemo(() => {
+    const band = LENGTH_BANDS[lengthBand]!;
+    return {
+      keywordIds: selectedKeywords.length ? selectedKeywords : undefined,
+      minScore: SCORE_BANDS[scoreBand]!.value,
+      minDurationSec: band.min,
+      maxDurationSec: band.max,
+      q: q.trim() || undefined,
+      sort,
+    };
+  }, [selectedKeywords, scoreBand, lengthBand, q, sort]);
+
+  const queryKey = JSON.stringify(query);
+  const list = useAsync(() => api.listLectures(query), [queryKey]);
+
+  // 목록이 준비되면 아무것도 안 고른 상태로 두지 않는다 — 첫 항목을 편다
+  const rows = list.data ?? NO_ROWS;
+  const currentId = videoId ?? rows[0]?.videoId;
+
+  // ── 이어보기 ──────────────────────────────────────────────
+  // 읽던 강의가 끝나면 다음 강의를 아래에 이어 붙이고, 스크롤 위치에 따라
+  // 주소와 목록 강조를 따라 옮깁니다. 화면 전환 없이 계속 읽게 하는 게 목적.
+  const [stack, setStack] = useState<string[]>([]);
+  const feedRef = useRef<HTMLDivElement | null>(null);
+  const tailRef = useRef<HTMLDivElement | null>(null);
+  const itemRefs = useRef(new Map<string, HTMLDivElement>());
+  const seedRef = useRef<string | null>(null);
+  const activeRef = useRef<string | undefined>(currentId);
+  activeRef.current = currentId;
+
+  // 필터가 바뀌면 처음부터, 목록에서 다른 강의를 고르면 그 강의부터 다시 쌓습니다.
+  // 스크롤로 주소만 바뀐 경우(이미 스택에 있는 id)는 그대로 둡니다.
+  useEffect(() => {
+    if (!currentId) {
+      setStack([]);
+      return;
+    }
+    const fresh = seedRef.current !== queryKey;
+    seedRef.current = queryKey;
+    setStack((prev) => (!fresh && prev.includes(currentId) ? prev : [currentId]));
+  }, [currentId, queryKey]);
+
+  const lastId = stack[stack.length - 1];
+  const nextId = useMemo(() => {
+    if (!lastId) return undefined;
+    const i = rows.findIndex((r) => r.videoId === lastId);
+    return i >= 0 ? rows[i + 1]?.videoId : undefined;
+  }, [rows, lastId]);
+
+  // 바닥이 가까워지면 다음 강의를 붙인다.
+  // 마지막 강의가 다 그려진 뒤에만 관측합니다 — 로딩 자리표시자는 짧아서,
+  // 그대로 두면 감시선이 계속 화면 안에 남아 목록 전체가 한 번에 딸려옵니다.
+  const [readyId, setReadyId] = useState<string | null>(null);
+  const markReady = useCallback((id: string) => setReadyId(id), []);
+
+  useEffect(() => {
+    const el = tailRef.current;
+    if (!el || !nextId || readyId !== lastId) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setStack((prev) => (prev.includes(nextId) ? prev : [...prev, nextId]));
+        }
+      },
+      { rootMargin: `${PREFETCH_PX}px 0px` },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [nextId, readyId, lastId]);
+
+  // 화면 위쪽 띠에 걸린 강의를 "지금 읽는 강의"로 본다.
+  // 좌표를 비교하지 않고 문서 순서(stack)로 고르므로 관측 시점이 엇갈려도 안전합니다.
+  useEffect(() => {
+    if (stack.length < 2) return;
+    const visible = new Set<string>();
+    const obs = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          const id = (e.target as HTMLElement).dataset.lecture;
+          if (!id) continue;
+          if (e.isIntersecting) visible.add(id);
+          else visible.delete(id);
+        }
+        const active = stack.find((id) => visible.has(id));
+        if (active && active !== activeRef.current) {
+          activeRef.current = active;
+          navigate(`/lectures/${active}`, { replace: true });
+        }
+      },
+      { rootMargin: "-120px 0px -55% 0px" },
+    );
+    for (const id of stack) {
+      const el = itemRefs.current.get(id);
+      if (el) obs.observe(el);
+    }
+    return () => obs.disconnect();
+  }, [stack, navigate]);
+
+  // 목록에서 다른 강의를 고르면 읽던 위치가 아니라 그 강의의 머리로 보냅니다
+  const scrollToFeed = useCallback(() => {
+    const el = feedRef.current;
+    if (!el) return;
+    const top = el.getBoundingClientRect().top + window.scrollY - 72;
+    if (window.scrollY > top + 8) window.scrollTo({ top, behavior: "smooth" });
+  }, []);
+
+  const toggleKeyword = (id: string) =>
+    setSelectedKeywords((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+
+  return (
+    <Screen
+      title="덕질"
+      subtitle={list.data ? `${num(rows.length)}편` : undefined}
+      actions={
+        <Button onClick={() => setSort(sort === "score" ? "recent" : "score")}>
+          {SORTS.find((x) => x.value === sort)?.label}
+        </Button>
+      }
+    >
+      {/* 키워드 필터 — 칩 자체가 설명이라 머리글·선택 수는 두지 않습니다 */}
+      <div className={s.kwFilter}>
+        <div className={s.kwChips}>
+          {(keywords.data ?? [])
+            .filter((k) => k.status !== "archived")
+            .map((k) => {
+              const on = selectedKeywords.includes(k.id);
+              return (
+                <button
+                  key={k.id}
+                  type="button"
+                  className={`${s.kwChip} ${on ? s.kwChipOn : ""}`}
+                  aria-pressed={on}
+                  onClick={() => toggleKeyword(k.id)}
+                >
+                  {k.term} <span className={s.c}>{k.lectureCount}</span>
+                </button>
+              );
+            })}
+          {selectedKeywords.length > 0 && (
+            <button
+              type="button"
+              className={`${s.kwChip} ${s.kwClear}`}
+              onClick={() => setSelectedKeywords([])}
+            >
+              전체 해제
+            </button>
+          )}
+          <Link to="/keywords" className={`${s.kwChip} ${s.kwAdd}`}>
+            ＋ 키워드 추가
+          </Link>
+        </div>
+      </div>
+
+      <div className={s.filters}>
+        <button
+          type="button"
+          className={`${s.toggle} ${listOpen ? s.toggleOn : ""}`}
+          onClick={toggleList}
+          aria-pressed={listOpen}
+          title={listOpen ? "목록을 접고 본문을 넓게 봅니다" : "목록을 펼칩니다"}
+        >
+          <span className={s.caret}>{listOpen ? "◀" : "▶"}</span>
+          목록
+        </button>
+        <input
+          className={s.search}
+          type="search"
+          placeholder="제목 · 요약 · 용어 검색"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <div className={s.seg} role="group" aria-label="점수 필터">
+          {SCORE_BANDS.map((b, i) => (
+            <button
+              key={b.label}
+              type="button"
+              aria-pressed={scoreBand === i}
+              className={scoreBand === i ? s.segOn : undefined}
+              onClick={() => setScoreBand(i)}
+            >
+              {b.label}
+            </button>
+          ))}
+        </div>
+        <div className={s.seg} role="group" aria-label="길이 필터">
+          {LENGTH_BANDS.map((b, i) => (
+            <button
+              key={b.label}
+              type="button"
+              aria-pressed={lengthBand === i}
+              className={lengthBand === i ? s.segOn : undefined}
+              onClick={() => setLengthBand(i)}
+            >
+              {b.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {list.error ? (
+        <ErrorState message={list.error} onRetry={list.reload} />
+      ) : list.loading ? (
+        <Loading />
+      ) : rows.length === 0 ? (
+        <Empty>조건에 맞는 덕질이 없습니다. 필터를 넓혀 보세요.</Empty>
+      ) : (
+        <div className={`${s.split} ${listOpen ? "" : s.splitSolo}`}>
+          {listOpen && (
+          <div className={s.listPane}>
+            <div className={s.lpHead}>
+              <span className="eyebrow">{rows.length}편</span>
+              <button
+                type="button"
+                className={s.lpSort}
+                onClick={() => {
+                  const i = SORTS.findIndex((x) => x.value === sort);
+                  setSort(SORTS[(i + 1) % SORTS.length]!.value);
+                }}
+              >
+                {SORTS.find((x) => x.value === sort)?.label}
+              </button>
+            </div>
+
+            {rows.map((l) => (
+              <Link
+                key={l.videoId}
+                to={`/lectures/${l.videoId}`}
+                replace
+                className={`${s.row} ${l.videoId === currentId ? s.rowOn : ""}`}
+                aria-current={l.videoId === currentId ? "true" : undefined}
+                onClick={scrollToFeed}
+                title={`${l.title}\n${l.channelTitle} · ${duration(l.durationSec)} · 전문성 ${l.expertScore}`}
+              >
+                <span className={s.rowTitle}>{l.title}</span>
+              </Link>
+            ))}
+          </div>
+          )}
+
+          {stack.length > 0 ? (
+            <div className={s.feed} ref={feedRef}>
+              {stack.map((id, i) => (
+                <div
+                  key={id}
+                  data-lecture={id}
+                  ref={(el) => {
+                    if (el) itemRefs.current.set(id, el);
+                    else itemRefs.current.delete(id);
+                  }}
+                >
+                  {i > 0 && (
+                    <div className={s.nextCue}>
+                      <span>다음 덕질</span>
+                    </div>
+                  )}
+                  <Reading
+                    videoId={id}
+                    chaptersOpen={chaptersOpen}
+                    onToggleChapters={toggleChapters}
+                    onReady={markReady}
+                  />
+                </div>
+              ))}
+              <div ref={tailRef} className={s.tail} aria-hidden="true" />
+              {!nextId && <p className={s.feedEnd}>마지막 덕질입니다</p>}
+            </div>
+          ) : (
+            <Empty>왼쪽에서 덕질을 고르세요.</Empty>
+          )}
+        </div>
+      )}
+    </Screen>
+  );
+}
+
+// ── 읽기 패널 ─────────────────────────────────────────────
+function Reading({
+  videoId,
+  chaptersOpen,
+  onToggleChapters,
+  onReady,
+}: {
+  videoId: string;
+  chaptersOpen: boolean;
+  onToggleChapters: () => void;
+  onReady?: (videoId: string) => void;
+}) {
+  const detail = useAsync(() => api.getLecture(videoId), [videoId]);
+
+  const loaded = Boolean(detail.data);
+  useEffect(() => {
+    if (loaded) onReady?.(videoId);
+  }, [loaded, videoId, onReady]);
+
+  if (detail.error) {
+    return (
+      <div className={s.readPane}>
+        <ErrorState message={detail.error} onRetry={detail.reload} />
+      </div>
+    );
+  }
+  if (detail.loading || !detail.data) {
+    return (
+      <div className={`${s.readPane} ${s.readLoading}`}>
+        <Loading label="요약 불러오는 중" />
+      </div>
+    );
+  }
+
+  const d = detail.data;
+  const totalChapterSec = d.chapters.reduce((sum, c) => sum + (c.endSec - c.startSec), 0);
+  const prettyUrl = d.youtubeUrl.replace(/^https?:\/\//, "");
+
+  return (
+    <div className={s.readPane}>
+      <div className={`${s.detail} ${chaptersOpen ? "" : s.detailSolo}`}>
+        <div className={s.detailMain}>
+        <div className={s.mainCol}>
+      <header className={s.rpHead}>
+        <div className={s.rpMeta}>
+          <Chip tone={d.verdict === "expert" ? "pass" : "neutral"}>
+            {verdictLabel[d.verdict]} {d.expertScore}
+          </Chip>
+          <span className="mono">{duration(d.durationSec)}</span>
+          <span>·</span>
+          <span>{d.channelTitle}</span>
+          <span>·</span>
+          <span className="mono">{date(d.publishedAt)}</span>
+          <span>·</span>
+          <a className={s.srcLink} href={d.youtubeUrl} target="_blank" rel="noreferrer">
+            {prettyUrl}
+          </a>
+        </div>
+
+        <div className={s.rpTitleRow}>
+          <h2 className={s.rpTitle}>{d.title}</h2>
+          <div className={s.rpActions}>
+            <a
+              className={s.iconBtn}
+              href={d.youtubeUrl}
+              target="_blank"
+              rel="noreferrer"
+              title="유튜브에서 보기"
+              aria-label="유튜브에서 보기"
+            >
+              <IconPlay />
+            </a>
+            <button
+              type="button"
+              className={`${s.iconBtn} ${d.isFavorite ? s.iconOn : ""}`}
+              onClick={() => void api.setFavorite(d.videoId, !d.isFavorite)}
+              aria-pressed={d.isFavorite}
+              title={d.isFavorite ? "즐겨찾기 해제" : "즐겨찾기"}
+              aria-label={d.isFavorite ? "즐겨찾기 해제" : "즐겨찾기"}
+            >
+              <IconStar filled={d.isFavorite} />
+            </button>
+            <button
+              type="button"
+              className={`${s.iconBtn} ${chaptersOpen ? s.iconOn : ""}`}
+              onClick={onToggleChapters}
+              aria-pressed={chaptersOpen}
+              title={chaptersOpen ? "챕터 접기" : "챕터 펼치기"}
+              aria-label={chaptersOpen ? "챕터 접기" : "챕터 펼치기"}
+            >
+              <IconChapters />
+            </button>
+          </div>
+        </div>
+      </header>
+
+        <article className={s.read}>
+          <p className={s.lead}>{d.oneLiner}</p>
+          <p className={s.abstract}>{d.abstract}</p>
+
+          <dl className={s.facts}>
+            <dt>대상</dt>
+            <dd>{d.targetAudience}</dd>
+            {d.prerequisites.length > 0 && (
+              <>
+                <dt>선수 지식</dt>
+                <dd>{d.prerequisites.join(", ")}</dd>
+              </>
+            )}
+          </dl>
+
+          {d.coverageNote && <p className={s.coverage}>{d.coverageNote}</p>}
+
+          <h2>핵심 포인트</h2>
+          <div className={s.kp}>
+            {d.keyPoints.map((k, i) => (
+              <div key={i} className={s.kpItem}>
+                <span className={s.kpNo}>{String(i + 1).padStart(2, "0")}</span>
+                <div>
+                  <h3>{k.heading}</h3>
+                  <p>{k.detail}</p>
+                  <a
+                    className={s.ts}
+                    href={youtubeAt(d.youtubeUrl, k.timestampSec)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {timestamp(k.timestampSec)}
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {d.terms.length > 0 && (
+            <>
+              <h2>용어</h2>
+              <dl className={s.terms}>
+                {d.terms.map((t) => (
+                  <div key={t.term} style={{ display: "contents" }}>
+                    <dt>{t.term}</dt>
+                    <dd>{t.definition}</dd>
+                  </div>
+                ))}
+              </dl>
+            </>
+          )}
+
+          {d.takeaways.length > 0 && (
+            <>
+              <h2>실무 적용</h2>
+              <ul className={s.take}>
+                {d.takeaways.map((t, i) => (
+                  <li key={i}>{t}</li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {d.quotes.length > 0 && (
+            <>
+              <h2>인용</h2>
+              {d.quotes.map((qq, i) => (
+                <blockquote key={i} className={s.quote}>
+                  <p>&ldquo;{qq.text}&rdquo;</p>
+                  <footer>
+                    <a
+                      className={s.ts}
+                      href={youtubeAt(d.youtubeUrl, qq.timestampSec)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {timestamp(qq.timestampSec)}
+                    </a>
+                    <span>{qq.why}</span>
+                  </footer>
+                </blockquote>
+              ))}
+            </>
+          )}
+        </article>
+        </div>
+
+        {chaptersOpen && (
+          <aside className={s.timeline}>
+            <div className={s.tlCap}>
+              <span>챕터</span>
+              <button type="button" className={s.capBtn} onClick={onToggleChapters}>
+                접기
+              </button>
+            </div>
+            <div className={s.tl}>
+              {d.chapters.map((c) => (
+                <a
+                  key={c.startSec}
+                  className={s.tlCh}
+                  href={youtubeAt(d.youtubeUrl, c.startSec)}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ flex: totalChapterSec > 0 ? c.endSec - c.startSec : 1 }}
+                >
+                  <span className={s.tlTime}>{timestamp(c.startSec)}</span>
+                  <span className={s.tlBar} />
+                  <span className={s.tlName}>{c.title}</span>
+                </a>
+              ))}
+            </div>
+            <p className={s.tlNote}>막대 높이 = 챕터 길이 비율</p>
+          </aside>
+        )}
+        </div>
+
+        {/* 부록. 챕터 레일이 여기까지 따라오지 않도록 격자 밖에 둡니다. */}
+        <div className={s.tailCol}>
+          <details className={s.disc}>
+            <summary>전문성 판정 근거 · 종합 {d.expertScore}점</summary>
+            <div className={s.discBody}>
+              <div className={s.crit}>
+                {d.review.criteria.map((c) => (
+                  <div key={c.criterion} className={s.critRow}>
+                    <span className={s.critName}>{criterionLabel[c.criterion]}</span>
+                    <span className={s.cBar}>
+                      <i
+                        style={{
+                          width: `${c.score}%`,
+                          background:
+                            c.criterion === "commercial" ? "var(--pass)" : scoreColor(c.score),
+                        }}
+                      />
+                    </span>
+                    <span className={s.critScore}>{c.score}</span>
+                    <span className={s.critEvidence}>{c.evidence}</span>
+                  </div>
+                ))}
+              </div>
+
+              {d.review.redFlags.length > 0 && (
+                <ul className={s.flags}>
+                  {d.review.redFlags.map((f, i) => (
+                    <li key={i}>{f}</li>
+                  ))}
+                </ul>
+              )}
+
+              <p className={s.reviewFoot}>
+                <span className="mono">{d.review.model}</span> · 확신도 {d.review.confidence} ·
+                입력 <span className="mono">{tokens(d.review.inputTokens)}</span> · 출력{" "}
+                <span className="mono">{tokens(d.review.outputTokens)}</span> 토큰 ·{" "}
+                {d.review.turns}턴 · 프롬프트 <span className="mono">{d.review.promptVersion}</span>
+              </p>
+            </div>
+          </details>
+
+          <details className={s.disc}>
+            <summary>
+              자막 원문
+              {d.transcriptExpiresAt
+                ? ` · 보관 만료 ${date(d.transcriptExpiresAt)}`
+                : " · 보관 기간 만료"}
+            </summary>
+            <div className={s.discBody}>
+              <p className={s.reviewFoot} style={{ margin: 0, padding: 0, border: 0 }}>
+                {d.transcriptExpiresAt
+                  ? "자막 원문은 요약 생성 후 30일간만 보관합니다."
+                  : "보관 기간이 지나 원문이 삭제되었고, 타임스탬프 색인만 남아 있습니다."}
+              </p>
+            </div>
+          </details>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── 아이콘 ────────────────────────────────────────────────
+// 외부 아이콘 라이브러리를 쓰지 않습니다 — 세 개뿐이고, 선 굵기를
+// 본문 타이포와 맞춰야 해서 직접 그리는 편이 정확합니다.
+function IconPlay() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="1" y="3" width="14" height="10" rx="3" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M6.6 6.2 10 8l-3.4 1.8V6.2Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function IconStar({ filled }: { filled: boolean }) {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M8 1.8l1.85 3.75 4.15.6-3 2.92.71 4.13L8 11.25 4.29 13.2 5 9.07l-3-2.92 4.15-.6L8 1.8Z"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+        fill={filled ? "currentColor" : "none"}
+      />
+    </svg>
+  );
+}
+
+function IconChapters() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M2 3.5h5M2 8h5M2 12.5h5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <rect x="10" y="2.4" width="4" height="4.2" rx="1" stroke="currentColor" strokeWidth="1.3" />
+      <rect x="10" y="9.4" width="4" height="4.2" rx="1" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  );
+}

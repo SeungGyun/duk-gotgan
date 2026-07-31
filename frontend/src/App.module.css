@@ -1,0 +1,59 @@
+.head {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 24px var(--page-pad) 16px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.head h1 {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+.head p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.headActions {
+  display: flex;
+  gap: 8px;
+}
+
+.body {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 6px var(--page-pad) 56px;
+}
+
+/* mock 구현으로 도는 중임을 숨기지 않는다 — 실제 DB 가 아님을 알아야 한다 */
+.mockNote {
+  background: var(--ink);
+  color: var(--canvas);
+  font-size: 11.5px;
+}
+.mockNoteInner {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 7px var(--page-pad);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.mockNote b {
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 10.5px;
+}
+.mockNote span {
+  opacity: 0.72;
+}
+
+/* 좁은 화면의 여백은 --page-pad 가 한 곳에서 줄입니다 (tokens.css) */

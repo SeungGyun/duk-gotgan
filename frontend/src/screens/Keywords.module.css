@@ -1,0 +1,191 @@
+/* 추가 폼을 접어두지 않고 펼쳐 둡니다. 어떤 값을 정해야 하는지가
+   곧 이 제품의 튜닝 지점이라, 버튼 뒤에 숨기면 기본값으로만 쓰게 됩니다. */
+.add {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 14px 16px 16px;
+  margin-bottom: 16px;
+}
+.addHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 13px;
+}
+.addHint {
+  font-size: 12px;
+  color: var(--muted);
+}
+.row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.row + .row {
+  margin-top: 12px;
+  padding-top: 13px;
+  border-top: 1px solid var(--border);
+}
+
+.fld {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.grow {
+  flex: 1;
+  min-width: 220px;
+}
+.sm {
+  width: 118px;
+}
+.label {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.fld input,
+.fld select {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 10px;
+  width: 100%;
+}
+.fld input::placeholder {
+  color: var(--muted);
+}
+.unit {
+  position: relative;
+  display: block;
+}
+.unit input {
+  padding-right: 30px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.unit em {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-style: normal;
+  font-size: 12px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.hint {
+  flex: 1;
+  min-width: 240px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.55;
+  padding-bottom: 2px;
+}
+.hint strong {
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-weight: 600;
+}
+.error {
+  color: var(--fail);
+  font-size: 12.5px;
+  margin: 10px 0 0;
+}
+
+/* ── 표 ─────────────────────────────────────────────────── */
+.wrap {
+  overflow-x: auto;
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  min-width: 720px;
+}
+.table thead th {
+  text-align: left;
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 650;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border-strong);
+  white-space: nowrap;
+}
+.table tbody td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.table tbody tr:hover {
+  background: var(--surface-2);
+}
+.num {
+  text-align: right;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.term {
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+}
+.sub {
+  font-size: 11.5px;
+  color: var(--muted);
+  font-family: var(--mono);
+  margin-top: 2px;
+}
+.mutedCell {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+.rowNew {
+  animation: flash 1.4s ease;
+}
+@keyframes flash {
+  from {
+    background: var(--accent-soft);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+/* ── 쿼터 ───────────────────────────────────────────────── */
+.quotaPanel {
+  margin-top: 16px;
+}
+.quotaText {
+  font-size: 13px;
+  color: var(--ink-2);
+  margin: 0 0 12px;
+  line-height: 1.65;
+}
+.quotaFoot {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  margin-top: 5px;
+}
+.note {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin: 12px 0 0;
+  line-height: 1.6;
+}

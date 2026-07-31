@@ -1,0 +1,253 @@
+.grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+  align-items: start;
+}
+@media (max-width: 1080px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── 통계 타일 ──────────────────────────────────────────── */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.stat {
+  padding: 14px 16px;
+  border-right: 1px solid var(--border);
+}
+.stat:last-child {
+  border-right: 0;
+}
+.statKey {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.statValue {
+  font-family: var(--mono);
+  font-size: 25px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.statNote {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.statNote em {
+  font-style: normal;
+  color: var(--pass);
+  font-weight: 600;
+}
+@media (max-width: 720px) {
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .stat:nth-child(2) {
+    border-right: 0;
+  }
+  .stat:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+/* ── 퍼널 ───────────────────────────────────────────────────
+   단계별 탈락 사유와 개수를 사이에 끼워 넣습니다. "왜 아무것도
+   안 나오지?"에 답할 수 없는 파이프라인은 튜닝이 불가능합니다. */
+.funnel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fnRow {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) 46px;
+  gap: 10px;
+  align-items: center;
+}
+.fnLabel {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  text-align: right;
+}
+.fnBar {
+  height: 22px;
+  background: var(--surface-sink);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.fnBar > i {
+  display: block;
+  height: 100%;
+  border-radius: 0 2px 2px 0;
+}
+.fnNum {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.fnGap {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) 46px;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 1px 0;
+}
+.fnGap span {
+  grid-column: 2;
+  font-family: var(--mono);
+}
+
+.chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+/* ── 키워드별 기여 ──────────────────────────────────────── */
+.contrib {
+  margin-top: 18px;
+  padding-top: 15px;
+  border-top: 1px solid var(--border);
+}
+.bars {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 11px;
+}
+.bar {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr) 22px;
+  gap: 10px;
+  align-items: center;
+}
+.barName {
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.barTrack {
+  height: 5px;
+  background: var(--surface-sink);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.barTrack > i {
+  display: block;
+  height: 100%;
+  background: var(--seq-4);
+  border-radius: 99px;
+}
+.barValue {
+  font-family: var(--mono);
+  font-size: 12px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.zero .barName,
+.zero .barValue {
+  color: var(--muted);
+}
+.note {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 12px 0 0;
+  line-height: 1.6;
+}
+
+/* ── 사용량 ─────────────────────────────────────────────── */
+.usageTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.usageBig {
+  font-family: var(--mono);
+  font-size: 27px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.usageCap {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+.usageFoot {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  margin-top: 5px;
+}
+.split2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.splitKey {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.splitValue {
+  font-family: var(--mono);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 실패 목록 ──────────────────────────────────────────── */
+.fails {
+  display: flex;
+  flex-direction: column;
+}
+.fail {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.fail:last-child {
+  border-bottom: 0;
+}
+.failText {
+  flex: 1;
+  min-width: 0;
+}
+.failTitle {
+  display: block;
+  font-weight: 550;
+  font-size: 13px;
+}
+.failDetail {
+  font-size: 11.5px;
+  color: var(--muted);
+  font-family: var(--mono);
+}
