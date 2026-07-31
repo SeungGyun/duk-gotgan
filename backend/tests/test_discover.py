@@ -1,0 +1,124 @@
+"""발견 파이프라인 — 유튜브 호출을 가짜로 바꿔 DB 동작만 검증합니다.
+
+여기서 보는 것은 두 가지입니다.
+  1. 실패해도 실행 이력과 쿼터 장부가 남는가 (한 번 잃어버린 적이 있습니다)
+  2. 같은 영상을 두 키워드가 데려와도 videos 행이 하나인가
+"""
+
+from datetime import timedelta
+
+import pytest
+from sqlalchemy import create_engine, func, select
+from sqlalchemy.orm import sessionmaker
+
+from app.collector import discover as D
+from app.collector.youtube import Candidate, YouTubeError
+from app.db.models import Base, CrawlRun, Keyword, UsageLedger, Video, VideoKeyword
+from config.settings import settings
+from config.time import now_kst
+
+
+@pytest.fixture
+def db():
+    """테스트 전용 DB. 운영 데이터와 섞이지 않게 별도 스키마를 씁니다."""
+    url = settings.database_url.replace("/dukgotgan?", "/dukgotgan_test?")
+    engine = create_engine(url)
+    Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine, expire_on_commit=False)()
+    yield session
+    session.close()
+    engine.dispose()
+
+
+def add_keyword(db, kid="kw_a", term="쿠버네티스 네트워킹"):
+    kw = Keyword(id=kid, term=term, status="pending", language="ko", schedule="daily",
+                 min_duration_sec=900, max_duration_sec=14400, min_expert_score=75, max_per_run=10)
+    db.add(kw)
+    db.commit()
+    return kw
+
+
+def fake_candidate(vid="vid00000001", **over):
+    base = dict(
+        video_id=vid, title="CNI 플러그인 심층 분석", description="본문",
+        channel_id="ch1", channel_title="인프라 노트",
+        published_at=now_kst() - timedelta(days=30),
+        duration_sec=4360, view_count=12_000, like_count=3, comment_count=1,
+        thumbnail_url=None, default_language="ko", has_caption=True, search_rank=0,
+    )
+    base.update(over)
+    return Candidate(**base)
+
+
+def patch_youtube(monkeypatch, candidates, ids=None):
+    monkeypatch.setattr(settings, "youtube_api_key", "test-key")
+    monkeypatch.setattr(D, "search_ids", lambda *a, **k: ids or [c.video_id for c in candidates])
+    monkeypatch.setattr(D, "fetch_details", lambda _ids: candidates)
+
+
+def test_통과와_탈락이_사유와_함께_적재된다(db, monkeypatch):
+    add_keyword(db)
+    patch_youtube(monkeypatch, [
+        fake_candidate("passing0001"),
+        fake_candidate("tooshort001", duration_sec=300),
+    ])
+
+    run, results = D.run_discovery(db)
+
+    assert run.status == "succeeded"
+    assert run.stats == {"discovered": 2, "rulePassed": 1, "transcribed": 0,
+                         "reviewed": 0, "published": 0}
+    assert db.get(Video, "passing0001").state == "TRANSCRIPT_PENDING"
+    rejected = db.get(Video, "tooshort001")
+    assert rejected.state == "REJECTED_RULE"
+    assert "길이 미달" in rejected.state_reason
+    assert results[0].rejected  # CLI 가 찍을 목록
+
+
+def test_첫_실행_후_pending이_active로(db, monkeypatch):
+    kw = add_keyword(db)
+    patch_youtube(monkeypatch, [fake_candidate()])
+    D.run_discovery(db)
+    db.refresh(kw)
+    assert kw.status == "active"
+    assert kw.last_run_at is not None
+
+
+def test_같은_영상을_두_키워드가_데려와도_행은_하나(db, monkeypatch):
+    add_keyword(db, "kw_a", "쿠버네티스 네트워킹")
+    add_keyword(db, "kw_b", "컨테이너 오케스트레이션")
+    patch_youtube(monkeypatch, [fake_candidate("shared00001")])
+
+    D.run_discovery(db)
+
+    assert db.scalar(select(func.count()).select_from(Video)) == 1
+    assert db.scalar(select(func.count()).select_from(VideoKeyword)) == 2
+
+
+def test_실패해도_실행_이력과_쿼터가_남는다(db, monkeypatch):
+    """예전에 여기서 롤백이 실행 이력까지 지워, 정작 실패를 기록할 행이
+    사라졌습니다."""
+    add_keyword(db)
+    monkeypatch.setattr(settings, "youtube_api_key", "test-key")
+    monkeypatch.setattr(D, "search_ids", lambda *a, **k: (_ for _ in ()).throw(
+        YouTubeError("유튜브 API 가 요청을 거절했습니다.")))
+
+    run, _ = D.run_discovery(db)
+
+    saved = db.get(CrawlRun, run.id)
+    assert saved is not None, "실패한 실행이 이력에 남아야 합니다"
+    assert saved.status == "failed"
+    assert "거절" in saved.error
+    # 검색 호출은 실제로 나갔으므로 유닛은 소비된 것으로 남아야 합니다
+    ledger = db.get(UsageLedger, now_kst().date())
+    assert ledger.youtube_units == 100
+    assert saved.youtube_units == 100
+
+
+def test_API_키가_없으면_쿼터를_깎기_전에_멈춘다(db, monkeypatch):
+    add_keyword(db)
+    monkeypatch.setattr(settings, "youtube_api_key", "")
+    with pytest.raises(YouTubeError, match="API 키"):
+        D.run_discovery(db)
+    assert db.get(UsageLedger, now_kst().date()) is None
