@@ -16,11 +16,19 @@ from app.db.session import get_db
 
 router = APIRouter(prefix="/lectures", tags=["lectures"])
 
+# `published_at` 은 **곳간에 들어온 시각**입니다 (영상 공개일이 아니라).
+# 같은 실행에서 여러 편이 한꺼번에 올라오면 값이 같아지므로, 뒤에 점수와
+# id 를 붙여 순서를 고정합니다 — 안 그러면 새로고침마다 줄이 뒤바뀝니다.
+_STABLE = (Lecture.expert_score.desc(), Lecture.id)
 SORTS = {
-    "score": (Lecture.expert_score.desc(), Lecture.published_at.desc()),
-    "recent": (Lecture.published_at.desc(),),
-    "duration": (Lecture.duration_sec.desc(),),
+    "recent": (Lecture.published_at.desc(), *_STABLE),
+    "score": (Lecture.expert_score.desc(), Lecture.published_at.desc(), Lecture.id),
+    "duration": (Lecture.duration_sec.desc(), *_STABLE),
 }
+
+# 기본은 최신 등록순입니다. 점수순으로 두면 새로 들어온 것이 아래에 묻혀,
+# 매번 목록을 훑어야 뭐가 새로 왔는지 알 수 있습니다.
+DEFAULT_SORT = "recent"
 
 
 class LecturePatch(BaseModel):
@@ -50,7 +58,7 @@ def list_lectures(
     max_duration_sec: int | None = Query(default=None, ge=0),
     q: str | None = Query(default=None),
     favorites_only: bool = Query(default=False),
-    sort: str = Query(default="score"),
+    sort: str = Query(default=DEFAULT_SORT),
     db: Session = Depends(get_db),
 ):
     if sort not in SORTS:

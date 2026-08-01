@@ -32,9 +32,12 @@ const LENGTH_BANDS = [
   { label: "90분+", min: 5400, max: undefined },
 ] as const;
 
+/** 첫 항목이 기본값입니다. **최신 등록순이 먼저**인 이유는, 점수순으로 두면
+    새로 들어온 덕질이 아래에 묻혀 매번 목록을 훑어야 하기 때문입니다.
+    여기서 말하는 "최신"은 영상 공개일이 아니라 곳간에 들어온 순서입니다. */
 const SORTS: { value: LectureSort; label: string }[] = [
-  { value: "score", label: "점수순" },
   { value: "recent", label: "최신순" },
+  { value: "score", label: "점수순" },
   { value: "duration", label: "긴 순" },
 ];
 
@@ -53,7 +56,7 @@ export function Lectures() {
   const [scoreBand, setScoreBand] = useState(0);
   const [lengthBand, setLengthBand] = useState(0);
   const [q, setQ] = useState("");
-  const [sort, setSort] = useState<LectureSort>("score");
+  const [sort, setSort] = useState<LectureSort>(SORTS[0]!.value);
 
   // 읽기에 집중하고 싶을 때 양옆 패널을 접습니다. 둘 다 접으면 본문이 화면 정중앙.
   const [listOpen, toggleList] = usePersistentToggle("ui.lectures.list", true);

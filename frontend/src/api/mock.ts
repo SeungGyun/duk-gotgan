@@ -801,7 +801,7 @@ export const mockApi: Api = {
       );
     }
 
-    const sort = query.sort ?? "score";
+    const sort = query.sort ?? "recent";
     rows.sort((a, b) => {
       if (sort === "recent") return b.publishedAt.localeCompare(a.publishedAt);
       if (sort === "duration") return b.durationSec - a.durationSec;
