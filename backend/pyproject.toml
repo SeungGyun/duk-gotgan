@@ -15,6 +15,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# 오디오 받아쓰기 폴백. 애플 실리콘 전용이라 기본 의존성에 넣지 않습니다 —
+# 없으면 자막 경로만 쓰고, 그마저 막히면 대기 상태로 남습니다.
+asr = [
+    "mlx-whisper>=0.4",
+]
 dev = [
     "pytest>=8.0.0",
     "httpx>=0.27.0",

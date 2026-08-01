@@ -33,6 +33,7 @@ from youtube_transcript_api._errors import (
 )
 
 from app.db.models import PipelineEvent, Transcript, Video
+from config.settings import settings
 from config.time import now_kst
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,11 @@ MAX_RETRY = 3
 CHARS_PER_TOKEN = 1.7
 
 
+# 자막 출처 표시. 화면과 판정 근거에 그대로 남습니다 — 어느 경로로 받은
+# 글인지 모르면 요약이 이상할 때 원인을 좁힐 수 없습니다.
+LOCAL_ASR = "local_asr"
+
+
 class TranscriptUnavailable(Exception):
     """이 영상에서는 자막을 얻을 수 없습니다. 사유는 사람 말로 씁니다."""
 
@@ -64,7 +70,7 @@ class Blocked(Exception):
 
 @dataclass
 class Fetched:
-    source: str  # youtube_manual | youtube_auto
+    source: str  # youtube_manual | youtube_auto | local_asr
     language: str
     segments: list[dict]  # [{start, dur, text}]
 
@@ -318,14 +324,15 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
     """
     global _blocked_until, _block_streak
 
-    result = {"attempted": 0, "ok": 0, "failed": 0, "blocked": False, "rows": []}
+    result = {"attempted": 0, "ok": 0, "failed": 0, "blocked": False, "asr": 0, "rows": []}
 
-    if _blocked_until and now_kst() < _blocked_until:
-        result["blocked"] = True
-        result["error"] = (
-            f"유튜브 차단으로 자막 수집을 쉬는 중입니다 — {_blocked_until:%H:%M} 이후 재개."
+    # 냉각 중이라고 손을 놓지 않습니다. **자막 경로만 쉬게 두고** 받아쓰기로
+    # 갑니다 — 어차피 막힌 문을 영상마다 25초씩 두드릴 이유가 없습니다.
+    skip_youtube = bool(_blocked_until and now_kst() < _blocked_until)
+    if skip_youtube:
+        logger.info(
+            "[transcript] 자막 경로 냉각 중(%s 재개) — 받아쓰기로 갑니다", f"{_blocked_until:%H:%M}"
         )
-        return result
 
     videos = db.scalars(
         select(Video)
@@ -334,12 +341,22 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
         .limit(limit)
     ).all()
 
+    spent = 0.0  # 이번 사이클에 받아쓰기로 쓴 시간
     for i, video in enumerate(videos):
+        if spent > settings.asr_budget_sec:
+            logger.info(
+                "[transcript] 받아쓰기 시간 상한(%d분) — 남은 %d건은 다음 사이클로",
+                settings.asr_budget_sec // 60, len(videos) - i,
+            )
+            break
         if i:
-            time.sleep(random.uniform(*DELAY_RANGE))
+            # 받아쓰기 경로는 자막 엔드포인트를 건드리지 않아서 길게 쉴
+            # 이유가 없습니다. 오디오 호스트에 대한 예의만 지킵니다.
+            time.sleep(random.uniform(2.0, 5.0) if skip_youtube else random.uniform(*DELAY_RANGE))
         result["attempted"] += 1
+        started = time.time()
         try:
-            fetched = _fetch_with_retry(video)
+            fetched = _fetch_with_retry(video, skip_youtube=skip_youtube)
         except Blocked as e:
             _block_streak += 1
             wait = cooldown_minutes(_block_streak)
@@ -366,41 +383,81 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
         _event(db, video, run_id, "TRANSCRIPT_PENDING", video.state, True, fetched.source)
         db.commit()
         result["ok"] += 1
-        _block_streak = 0  # 한 건이라도 받았으면 차단이 풀린 것 — 대기를 되돌립니다
         result["rows"].append(
             (video.title, "○", f"{fetched.source} {fetched.language} · {row.est_tokens:,} 토큰")
         )
 
+        if fetched.source == LOCAL_ASR:
+            result["asr"] += 1
+            spent += time.time() - started
+            if not skip_youtube:
+                # 자막 경로가 죽어서 받아쓰기로 넘어온 것입니다. 남은 영상은
+                # 같은 문을 다시 두드리지 않게 이 사이클부터 바로 우회합니다.
+                _block_streak += 1
+                _blocked_until = now_kst() + timedelta(minutes=cooldown_minutes(_block_streak))
+                skip_youtube = True
+                logger.warning(
+                    "[transcript] 자막 경로 실패 %d회 — %s 까지 받아쓰기로 돕니다",
+                    _block_streak, f"{_blocked_until:%H:%M}",
+                )
+        else:
+            _block_streak = 0  # 자막을 받았으면 차단이 풀린 것 — 대기를 되돌립니다
+            _blocked_until = None
+
     return result
 
 
-def _fetch_with_retry(video: Video) -> Fetched:
-    """1차 경로로 받고, 막히면 yt-dlp 로 넘어갑니다.
+def _fetch_with_retry(video: Video, *, skip_youtube: bool = False) -> Fetched:
+    """세 경로를 순서대로 시도합니다.
+
+      1. youtube-transcript-api   공짜·즉시 — 있으면 언제나 이걸 씁니다
+      2. yt-dlp                   같은 엔드포인트, 다른 클라이언트
+      3. 로컬 받아쓰기             소리를 받아 직접 — 느리지만 안 막힙니다
+
+    **1·2 가 먼저인 이유**는 순전히 비용입니다. 이미 만들어진 자막을 받는
+    데는 1초가 걸리고, 받아쓰기는 36분짜리 한 편에 3분이 걸립니다. 자막이
+    살아 있는 동안 GPU 를 돌릴 이유가 없습니다.
 
     차단은 재시도로 풀리지 않습니다 — 같은 경로로 다시 두드리면 차단만
     길어집니다. 그래서 짧게 두 번만 더 시도해 보고, 안 되면 **경로를 바꿉니다.**
     """
-    delay = 5.0
-    for attempt in range(MAX_RETRY):
-        try:
-            return fetch(video)
-        except Blocked:
-            if attempt == MAX_RETRY - 1:
-                break
-            logger.warning("[transcript] 차단 감지 — %.0f초 후 재시도", delay)
-            time.sleep(delay)
-            delay *= 2
+    if not skip_youtube:
+        delay = 5.0
+        for attempt in range(MAX_RETRY):
+            try:
+                return fetch(video)
+            except Blocked:
+                if attempt == MAX_RETRY - 1:
+                    break
+                logger.warning("[transcript] 차단 감지 — %.0f초 후 재시도", delay)
+                time.sleep(delay)
+                delay *= 2
 
-    logger.warning("[transcript] %s — 1차 경로 차단, yt-dlp 로 시도합니다", video.id)
+        logger.warning("[transcript] %s — 1차 경로 차단, yt-dlp 로 시도합니다", video.id)
+        try:
+            fetched = fetch_via_ytdlp(video)
+        except TranscriptUnavailable:
+            pass  # 아래 받아쓰기로 넘어갑니다
+        else:
+            logger.info("[transcript] %s — yt-dlp 폴백 성공", video.id)
+            return fetched
+
+    return fetch_via_asr(video)
+
+
+def fetch_via_asr(video: Video) -> Fetched:
+    """소리를 받아 직접 받아씁니다. 자막 경로가 전부 막혔을 때만."""
+    from app.collector import asr
+
+    langs = _pick_languages(video)
     try:
-        fetched = fetch_via_ytdlp(video)
-    except TranscriptUnavailable:
-        # 폴백까지 못 받으면 **차단으로 다룹니다.** 이 영상만의 문제인지
+        r = asr.transcribe(video.id, video.duration_sec or 0, language=langs[0] if langs else "ko")
+    except asr.AsrUnavailable as e:
+        # 받아쓰기까지 못 하면 **차단으로 다룹니다.** 이 영상만의 문제인지
         # IP 문제인지 구분할 수 없는데, 자막 없음으로 기록해 버리면 나중에
         # 차단이 풀려도 다시 시도하지 않습니다.
-        raise Blocked("두 경로 모두 자막을 받지 못했습니다.") from None
-    logger.info("[transcript] %s — yt-dlp 폴백 성공", video.id)
-    return fetched
+        raise Blocked(f"자막 경로가 모두 막혔고 받아쓰기도 못 했습니다 — {e}") from None
+    return Fetched(source=LOCAL_ASR, language=r.language, segments=r.segments)
 
 
 def _event(db: Session, video: Video, run_id, frm: str, to: str, ok: bool, detail: str) -> None:

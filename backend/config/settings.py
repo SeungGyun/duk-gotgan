@@ -46,6 +46,16 @@ class Settings(BaseSettings):
     # 씁니다 — 총 입력에서 이만큼을 빼야 "실제로 읽은 자막"이 나옵니다.
     overhead_tokens: int = 18_700
 
+    # ── 오디오 받아쓰기 (자막 경로가 막혔을 때의 폴백) ──────────
+    asr_enabled: bool = True
+    # 애플 실리콘 GPU 를 그대로 씁니다. M4 실측 12.5배속.
+    asr_model: str = "mlx-community/whisper-large-v3-turbo"
+    # 사이클당 받아쓰기에 쓸 시간. 이게 없으면 대기 91건이 한 사이클에
+    # 다섯 시간을 잡아먹고 그동안 "지금 실행"에 반응하지 못합니다.
+    asr_budget_sec: int = 20 * 60
+    # 안전장치. 세 시간짜리 하나가 하룻밤을 통째로 먹는 일을 막습니다.
+    asr_max_duration_sec: int = 3 * 3600
+
     @property
     def title_blocklist(self) -> list[str]:
         return [w.strip().lower() for w in self.rule_title_blocklist.split(",") if w.strip()]
