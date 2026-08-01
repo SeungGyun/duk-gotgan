@@ -51,7 +51,9 @@
 ```jsonc
 {
   "id": "kw_1",
-  "term": "쿠버네티스 네트워킹",
+  "term": "쿠버네티스 네트워킹",     // 검색어, 또는 채널이면 "@gaingetv"
+  "sourceType": "search",         // search | channel
+  "channelTitle": null,           // 채널 구독이면 해석된 채널명
   "status": "active",           // pending | active | quota_wait | paused | archived
   "language": "ko",             // ko | en | any
   "schedule": "daily",          // daily | twice_weekly | weekly
@@ -90,6 +92,36 @@
 > `status: "pending"`이 스케줄러의 트리거입니다. UI는 이 상태를 "첫 실행 대기"로 표시하고,
 > 사용자에게 "몇 분 안에 첫 수집이 돕니다"라고 알립니다. 수집 파이프라인이 없는 동안에는
 > `pending`으로 남아 있어도 UI는 정상 동작합니다.
+
+> **채널 구독** — `POST /keywords` 에 `sourceType: "channel"` 과 `term: "@gaingetv"` 를
+> 보내면 핸들을 해석해 등록합니다. 못 찾으면 404 `CHANNEL_NOT_FOUND`.
+>
+> 검색은 호출당 100유닛인데 **업로드 목록은 1유닛**이라 50배 쌉니다. 관련도 문제도
+> 없습니다 — 채널을 직접 골랐으니까요. 대신 조회수 룰은 적용하지 않습니다.
+
+### `GET /channels/blocks` → `ChannelBlock[]`
+
+무관·홍보로 반복해서 걸린 채널은 자동으로 차단됩니다.
+
+```jsonc
+{
+  "channelId": "UCBJyRmWE_KJZu19EdeupQFA",
+  "channelTitle": "슬기로운 스테이블코인 생활",
+  "reason": "3번 검토, 한 번도 통과 못 함",
+  "auto": true,              // false = 사용자가 직접 막음
+  "rejectedCount": 3,
+  "createdAt": "2026-08-01T02:17:59Z"
+}
+```
+
+### `POST /channels/blocks` → `ChannelBlock` (201)
+
+`{ "handle": "@somechannel", "reason": "" }` — 직접 차단. 이미 막혀 있으면 409.
+
+### `DELETE /channels/blocks/{channelId}` → 204
+
+차단을 풉니다. **판정 이력은 지우지 않습니다** — 지우면 다음 탈락 때 처음부터
+세기 시작해 같은 채널이 또 자동 차단됩니다. 해제한 채널은 다시 자동 차단되지 않습니다.
 
 ### `PATCH /keywords/{id}` → `Keyword`
 

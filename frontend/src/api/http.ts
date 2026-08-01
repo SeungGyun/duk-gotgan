@@ -1,6 +1,6 @@
 import type { Api } from "./contract";
 import { ApiError } from "./contract";
-import type { Keyword, KeywordDraft, LectureQuery, Run } from "./types";
+import type { ChannelBlock, Keyword, KeywordDraft, LectureQuery, Run } from "./types";
 
 /**
  * 실제 REST 구현. 백엔드를 붙일 때 .env 에서 VITE_API=http 로 바꾸면 이쪽이 씁니다.
@@ -84,4 +84,15 @@ export const httpApi: Api = {
   listRuns: () => req("/runs"),
 
   requestRun: () => req<Run>("/runs", { method: "POST" }),
+
+  listChannelBlocks: () => req("/channels/blocks"),
+
+  blockChannel: (handle, reason) =>
+    req<ChannelBlock>("/channels/blocks", {
+      method: "POST",
+      body: JSON.stringify({ handle, reason: reason ?? "" }),
+    }),
+
+  unblockChannel: (channelId) =>
+    req<void>(`/channels/blocks/${channelId}`, { method: "DELETE" }),
 };

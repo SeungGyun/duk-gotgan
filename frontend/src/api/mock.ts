@@ -1,6 +1,7 @@
 import type { Api } from "./contract";
 import { ApiError } from "./contract";
 import type {
+  ChannelBlock,
   Keyword,
   KeywordDraft,
   LectureDetail,
@@ -32,6 +33,18 @@ const runAt = (n: number, min = 0) => atHour(n, 4, min);
 /** 목에서 "지금 실행"으로 쌓인 요청 — 워커가 없으니 대기 상태로 남습니다 */
 let queuedRuns: Run[] = [];
 
+/** 목의 차단 채널 — 자동 차단 예시 하나를 넣어 둡니다 */
+let channelBlocks: ChannelBlock[] = [
+  {
+    channelId: "ch_demo_1",
+    channelTitle: "슬기로운 스테이블코인 생활",
+    reason: "3번 검토, 한 번도 통과 못 함",
+    auto: true,
+    rejectedCount: 3,
+    createdAt: daysAgo(1),
+  },
+];
+
 let seq = 100;
 const nextId = (p: string) => `${p}_${++seq}`;
 
@@ -40,6 +53,8 @@ let keywords: Keyword[] = [
   {
     id: "kw_1",
     term: "쿠버네티스 네트워킹",
+    sourceType: "search" as const,
+    channelTitle: null,
     status: "active",
     language: "ko",
     schedule: "daily",
@@ -54,6 +69,8 @@ let keywords: Keyword[] = [
   {
     id: "kw_2",
     term: "결제 시스템 설계",
+    sourceType: "search" as const,
+    channelTitle: null,
     status: "active",
     language: "ko",
     schedule: "daily",
@@ -68,6 +85,8 @@ let keywords: Keyword[] = [
   {
     id: "kw_3",
     term: "PostgreSQL 튜닝",
+    sourceType: "search" as const,
+    channelTitle: null,
     status: "active",
     language: "ko",
     schedule: "twice_weekly",
@@ -82,6 +101,8 @@ let keywords: Keyword[] = [
   {
     id: "kw_4",
     term: "브라우저 성능",
+    sourceType: "search" as const,
+    channelTitle: null,
     status: "active",
     language: "ko",
     schedule: "daily",
@@ -96,6 +117,8 @@ let keywords: Keyword[] = [
   {
     id: "kw_5",
     term: "옵저버빌리티",
+    sourceType: "search" as const,
+    channelTitle: null,
     status: "quota_wait",
     language: "ko",
     schedule: "daily",
@@ -110,6 +133,8 @@ let keywords: Keyword[] = [
   {
     id: "kw_6",
     term: "LLM 서빙 최적화",
+    sourceType: "search" as const,
+    channelTitle: null,
     status: "pending",
     language: "ko",
     schedule: "daily",
@@ -124,6 +149,8 @@ let keywords: Keyword[] = [
   {
     id: "kw_7",
     term: "프론트엔드 렌더링",
+    sourceType: "search" as const,
+    channelTitle: null,
     status: "paused",
     language: "ko",
     schedule: "daily",
@@ -690,6 +717,8 @@ export const mockApi: Api = {
     const created: Keyword = {
       id: nextId("kw"),
       term,
+      sourceType: draft.sourceType,
+      channelTitle: draft.sourceType === "channel" ? term.replace(/^@/, "") : null,
       status: "pending",
       language: draft.language,
       schedule: draft.schedule,
@@ -851,6 +880,34 @@ export const mockApi: Api = {
       youtubeUnitLimit: 10_000,
       resetsAt: runAt(-1, 0),
     };
+  },
+
+  async listChannelBlocks() {
+    await delay();
+    return channelBlocks.map((b) => ({ ...b }));
+  },
+
+  async blockChannel(handle: string, reason?: string) {
+    await delay(320);
+    const name = handle.replace(/^@/, "");
+    if (channelBlocks.some((b) => b.channelTitle === name)) {
+      throw new ApiError(`${name} 은(는) 이미 차단되어 있습니다.`, 409, "ALREADY_BLOCKED");
+    }
+    const block: ChannelBlock = {
+      channelId: nextId("ch"),
+      channelTitle: name,
+      reason: reason?.trim() || "직접 차단했습니다.",
+      auto: false,
+      rejectedCount: 0,
+      createdAt: iso(new Date()),
+    };
+    channelBlocks = [block, ...channelBlocks];
+    return { ...block };
+  },
+
+  async unblockChannel(channelId: string) {
+    await delay();
+    channelBlocks = channelBlocks.filter((b) => b.channelId !== channelId);
   },
 
   async requestRun() {

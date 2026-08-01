@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.api.errors import ApiError
 from app.api.serializers import keyword_out
+from app.collector.youtube import YouTubeError, resolve_channel
 from app.db.models import Keyword, Lecture, VideoKeyword
 from app.db.session import get_db
 from config.time import now_kst
@@ -18,12 +19,16 @@ from config.time import now_kst
 router = APIRouter(prefix="/keywords", tags=["keywords"])
 
 STATUSES = {"pending", "active", "quota_wait", "paused", "archived"}
+SOURCES = {"search", "channel"}
 LANGUAGES = {"ko", "en", "any"}
 SCHEDULES = {"daily", "twice_weekly", "weekly"}
 
 
 class KeywordDraft(BaseModel):
     term: str
+    # search  — 검색어로 찾기 (검색 1회 100유닛)
+    # channel — 관심 채널 구독. term 에 @핸들을 넣습니다 (1유닛, 50배 쌈)
+    sourceType: str = "search"
     language: str = "ko"
     schedule: str = "daily"
     minDurationSec: int = Field(default=900, ge=0)
@@ -91,6 +96,17 @@ def create_keyword(draft: KeywordDraft, db: Session = Depends(get_db)):
 
     _validate(draft.language, LANGUAGES, "language")
     _validate(draft.schedule, SCHEDULES, "schedule")
+    _validate(draft.sourceType, SOURCES, "sourceType")
+
+    # 채널 구독이면 핸들을 지금 해석해 둡니다(1유닛). 등록 시점에 확인해야
+    # 오타를 바로 알려줄 수 있고, 수집할 때마다 다시 찾지 않아도 됩니다.
+    channel = None
+    if draft.sourceType == "channel":
+        try:
+            channel = resolve_channel(term)
+        except YouTubeError as e:
+            raise ApiError(404, "CHANNEL_NOT_FOUND", str(e)) from e
+        term = f"@{term.lstrip('@')}"
 
     existing = db.scalar(select(Keyword).where(Keyword.term == term))
     if existing is not None:
@@ -105,6 +121,10 @@ def create_keyword(draft: KeywordDraft, db: Session = Depends(get_db)):
 
     kw = Keyword(
         term=term,
+        source_type=draft.sourceType,
+        channel_id=channel.channel_id if channel else None,
+        channel_title=channel.title if channel else None,
+        uploads_playlist_id=channel.uploads_playlist_id if channel else None,
         status="pending",  # 이 상태가 수집 스케줄러의 트리거입니다
         language=draft.language,
         schedule=draft.schedule,

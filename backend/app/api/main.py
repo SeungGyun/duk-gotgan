@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import errors
-from app.api.routes import keywords, lectures, stats
+from app.api.routes import channels, keywords, lectures, stats
 from app.db.session import init_db
 from config.settings import settings
 
@@ -42,6 +42,7 @@ errors.install(app)
 app.include_router(keywords.router, prefix="/api/v1")
 app.include_router(lectures.router, prefix="/api/v1")
 app.include_router(stats.router, prefix="/api/v1")
+app.include_router(channels.router, prefix="/api/v1")
 
 
 @app.get("/api/v1/health")

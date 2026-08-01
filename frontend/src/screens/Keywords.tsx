@@ -9,6 +9,7 @@ import s from "./Keywords.module.css";
 
 const DEFAULT_DRAFT: KeywordDraft = {
   term: "",
+  sourceType: "search",
   language: "ko",
   schedule: "daily",
   // 20분. 유튜브 검색이 20분 경계로만 거를 수 있어서, 더 낮게 잡아도
@@ -47,13 +48,17 @@ export function Keywords({ list }: { list: ListState }) {
   const [justDeleted, setJustDeleted] = useState<Keyword | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
   const [binOpen, setBinOpen] = useState(false);
+  const [blocksOpen, setBlocksOpen] = useState(false);
+  const [blockHandle, setBlockHandle] = useState("");
 
   const usage = useAsync(() => api.getUsage(), []);
   const bin = useAsync(() => api.listArchivedKeywords(), []);
+  const blocks = useAsync(() => api.listChannelBlocks(), []);
 
   const reloadAll = () => {
     list.reload();
     bin.reload();
+    blocks.reload();
   };
 
   /** 행 단위 동작의 공통 처리 — 실패 문구를 표 위에 한 줄로 띄웁니다. */
@@ -78,6 +83,8 @@ export function Keywords({ list }: { list: ListState }) {
     setJustDeleted((cur) => (cur?.id === k.id ? null : cur));
     void rowAction(() => api.restoreKeyword(k.id));
   };
+
+  const isChannel = draft.sourceType === "channel";
 
   const set = <K extends keyof KeywordDraft>(k: K, v: KeywordDraft[K]) =>
     setDraft((d) => ({ ...d, [k]: v }));
@@ -129,34 +136,58 @@ export function Keywords({ list }: { list: ListState }) {
         }}
       >
         <div className={s.addHead}>
-          <span className="eyebrow">새 키워드 추가</span>
-          <span className={s.addHint}>등록하면 몇 분 안에 첫 수집이 돕니다</span>
+          <span className="eyebrow">새로 추가</span>
+          <div className={s.seg} role="group" aria-label="수집 방식">
+            {(
+              [
+                ["search", "검색어"],
+                ["channel", "관심 채널"],
+              ] as const
+            ).map(([v, label]) => (
+              <button
+                key={v}
+                type="button"
+                aria-pressed={draft.sourceType === v}
+                className={draft.sourceType === v ? s.segOn : undefined}
+                onClick={() => set("sourceType", v)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <span className={s.addHint}>
+            {isChannel
+              ? "채널의 새 영상을 그대로 가져옵니다 — 검색보다 50배 쌉니다"
+              : "등록하면 몇 분 안에 첫 수집이 돕니다"}
+          </span>
         </div>
 
         <div className={s.row}>
           <label className={`${s.fld} ${s.grow}`}>
-            <span className={s.label}>검색어</span>
+            <span className={s.label}>{isChannel ? "채널 핸들" : "검색어"}</span>
             <input
               type="text"
-              placeholder="예: 카프카 파티셔닝 전략"
+              placeholder={isChannel ? "예: @gaingetv" : "예: 카프카 파티셔닝 전략"}
               value={draft.term}
               onChange={(e) => set("term", e.target.value)}
               required
             />
           </label>
-          <label className={s.fld}>
-            <span className={s.label}>언어</span>
-            <select
-              value={draft.language}
-              onChange={(e) => set("language", e.target.value as Language)}
-            >
-              {(["ko", "en", "any"] as const).map((v) => (
-                <option key={v} value={v}>
-                  {languageLabel[v]}
-                </option>
-              ))}
-            </select>
-          </label>
+          {!isChannel && (
+            <label className={s.fld}>
+              <span className={s.label}>언어</span>
+              <select
+                value={draft.language}
+                onChange={(e) => set("language", e.target.value as Language)}
+              >
+                {(["ko", "en", "any"] as const).map((v) => (
+                  <option key={v} value={v}>
+                    {languageLabel[v]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className={s.fld}>
             <span className={s.label}>주기</span>
             <select
@@ -214,9 +245,18 @@ export function Keywords({ list }: { list: ListState }) {
           </label>
           <p className={s.hint}>
             기준 점수를 올리면 수집량이 줄고 토큰도 아낍니다. <strong>75점</strong>은 전문가
-            강의만, <strong>70점</strong>은 실무 튜토리얼까지 들어옵니다. 유튜브 검색이
-            20분 경계로만 걸러서, <strong>최소 길이</strong>를 그보다 낮게 잡아도 실제로는
-            20분 이상만 들어옵니다.
+            강의만, <strong>70점</strong>은 실무 튜토리얼까지 들어옵니다.{" "}
+            {isChannel ? (
+              <>
+                직접 고른 채널이므로 <strong>조회수 기준은 적용하지 않습니다</strong> — 올라온
+                지 얼마 안 된 영상도 들어옵니다.
+              </>
+            ) : (
+              <>
+                유튜브 검색이 20분 경계로만 걸러서, <strong>최소 길이</strong>를 그보다 낮게
+                잡아도 실제로는 20분 이상만 들어옵니다.
+              </>
+            )}
           </p>
           <Button variant="primary" type="submit" disabled={submitting || !draft.term.trim()}>
             {submitting ? "등록 중…" : "추가하고 바로 실행"}
@@ -271,9 +311,14 @@ export function Keywords({ list }: { list: ListState }) {
                     <Fragment key={k.id}>
                       <tr className={k.id === justAdded ? s.rowNew : undefined}>
                         <td>
-                          <div className={s.term}>{k.term}</div>
+                          <div className={s.term}>
+                            {k.sourceType === "channel" && <span className={s.kind}>채널</span>}
+                            {k.channelTitle || k.term}
+                          </div>
                           <div className={s.sub}>
-                            {k.language} · 1회 최대 {k.maxPerRun}편
+                            {k.sourceType === "channel"
+                              ? `${k.term} · 1회 최대 ${k.maxPerRun}편`
+                              : `${k.language} · 1회 최대 ${k.maxPerRun}편`}
                           </div>
                         </td>
                         <td>
@@ -389,6 +434,75 @@ export function Keywords({ list }: { list: ListState }) {
         </section>
       )}
 
+      {/* 차단한 채널 — 자동 차단은 오판할 수 있어 화면에서 풀 수 있어야 합니다 */}
+      <section className={s.bin}>
+        <button
+          type="button"
+          className={s.binHead}
+          onClick={() => setBlocksOpen((v) => !v)}
+          aria-expanded={blocksOpen}
+        >
+          <span className={s.binCaret}>{blocksOpen ? "▾" : "▸"}</span>
+          <span className="eyebrow">차단한 채널</span>
+          <span className={s.binCount}>{blocks.data?.length ?? 0}</span>
+          <span className={s.binHint}>
+            무관·홍보로 반복해서 걸린 채널은 자동으로 막힙니다. 여기서 풀 수 있습니다.
+          </span>
+        </button>
+
+        {blocksOpen && (
+          <>
+            <form
+              className={s.blockAdd}
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!blockHandle.trim()) return;
+                void rowAction(() => api.blockChannel(blockHandle.trim())).then(() =>
+                  setBlockHandle(""),
+                );
+              }}
+            >
+              <input
+                type="text"
+                placeholder="직접 막을 채널 — 예: @somechannel"
+                value={blockHandle}
+                onChange={(e) => setBlockHandle(e.target.value)}
+              />
+              <Button size="small" type="submit" disabled={!blockHandle.trim()}>
+                차단
+              </Button>
+            </form>
+
+            {(blocks.data?.length ?? 0) === 0 ? (
+              <p className={s.blockEmpty}>차단한 채널이 없습니다.</p>
+            ) : (
+              <ul className={s.binList}>
+                {blocks.data!.map((b) => (
+                  <li key={b.channelId}>
+                    <div>
+                      <div className={s.term}>
+                        {!b.auto && <span className={s.kind}>직접</span>}
+                        {b.channelTitle}
+                      </div>
+                      <div className={s.sub}>
+                        {b.reason}
+                        {b.rejectedCount > 0 && ` · 탈락 ${b.rejectedCount}회`}
+                      </div>
+                    </div>
+                    <Button
+                      size="small"
+                      onClick={() => void rowAction(() => api.unblockChannel(b.channelId))}
+                    >
+                      차단 해제
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+      </section>
+
       {usage.data && (
         <Panel title="쿼터 배분" className={s.quotaPanel}>
           <p className={s.quotaText}>
@@ -425,6 +539,7 @@ function EditForm({
 }) {
   const [d, setD] = useState<KeywordDraft>({
     term: keyword.term,
+    sourceType: keyword.sourceType,
     language: keyword.language,
     schedule: keyword.schedule,
     minDurationSec: keyword.minDurationSec,
@@ -432,6 +547,10 @@ function EditForm({
     maxPerRun: keyword.maxPerRun,
   });
   const [saving, setSaving] = useState(false);
+  // 종류는 등록 후에 바꾸지 않습니다 — 검색어를 채널로 바꾸면 지금까지
+  // 모은 강의와의 연결이 뜻을 잃습니다. 바꾸려면 새로 등록하는 편이 맞습니다.
+  const isChannel = keyword.sourceType === "channel";
+
   const set = <K extends keyof KeywordDraft>(k: K, v: KeywordDraft[K]) =>
     setD((prev) => ({ ...prev, [k]: v }));
 
@@ -453,7 +572,7 @@ function EditForm({
     >
       <div className={s.row}>
         <label className={`${s.fld} ${s.grow}`}>
-          <span className={s.label}>검색어</span>
+          <span className={s.label}>{isChannel ? "채널 핸들" : "검색어"}</span>
           <input
             type="text"
             value={d.term}
@@ -461,7 +580,7 @@ function EditForm({
             required
           />
         </label>
-        <label className={s.fld}>
+        <label className={s.fld} hidden={isChannel}>
           <span className={s.label}>언어</span>
           <select value={d.language} onChange={(e) => set("language", e.target.value as Language)}>
             {(["ko", "en", "any"] as const).map((v) => (

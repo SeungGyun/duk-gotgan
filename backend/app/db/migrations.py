@@ -29,6 +29,19 @@ def _index_exists(conn, table: str, index_name: str) -> bool:
     return (row or 0) > 0
 
 
+def _table_exists(conn, table: str) -> bool:
+    row = conn.execute(
+        text(
+            """
+            SELECT COUNT(*) FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :t
+            """
+        ),
+        {"t": table},
+    ).scalar()
+    return (row or 0) > 0
+
+
 def _column_exists(conn, table: str, column: str) -> bool:
     row = conn.execute(
         text(
@@ -77,6 +90,26 @@ def ensure_schema(engine: Engine) -> None:
                 )
             )
             logger.info("[db] evaluations.topic · keyword_relevance added")
+
+        # 차단 해제를 값으로 남깁니다 (행을 지우면 다시 자동 차단됨)
+        if _table_exists(conn, "channel_blocks") and not _column_exists(
+            conn, "channel_blocks", "active"
+        ):
+            conn.execute(
+                text("ALTER TABLE channel_blocks ADD COLUMN active TINYINT(1) NOT NULL DEFAULT 1")
+            )
+            logger.info("[db] channel_blocks.active added")
+
+        # 채널 구독 — 검색(101유닛) 대신 업로드 목록(2유닛)을 봅니다
+        if not _column_exists(conn, "keywords", "source_type"):
+            for ddl in (
+                "ALTER TABLE keywords ADD COLUMN source_type VARCHAR(10) NOT NULL DEFAULT 'search'",
+                "ALTER TABLE keywords ADD COLUMN channel_id VARCHAR(64) NULL",
+                "ALTER TABLE keywords ADD COLUMN channel_title VARCHAR(200) NULL",
+                "ALTER TABLE keywords ADD COLUMN uploads_playlist_id VARCHAR(64) NULL",
+            ):
+                conn.execute(text(ddl))
+            logger.info("[db] keywords 채널 구독 컬럼 추가")
 
         # 실행 시각을 키워드가 갖습니다 (크론 → 틱 방식 전환)
         if not _column_exists(conn, "keywords", "run_hour"):

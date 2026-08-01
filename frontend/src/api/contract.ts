@@ -1,4 +1,5 @@
 import type {
+  ChannelBlock,
   Keyword,
   KeywordDraft,
   LectureDetail,
@@ -44,6 +45,11 @@ export interface Api {
   listRuns(): Promise<Run[]>;
   /** "지금 실행" — 요청만 남깁니다. 워커가 다음 틱에 집어갑니다. */
   requestRun(): Promise<Run>;
+
+  // 채널
+  listChannelBlocks(): Promise<ChannelBlock[]>;
+  blockChannel(handle: string, reason?: string): Promise<ChannelBlock>;
+  unblockChannel(channelId: string): Promise<void>;
 }
 
 export class ApiError extends Error {

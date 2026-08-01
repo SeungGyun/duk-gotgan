@@ -156,6 +156,62 @@ def search_ids(
     return out
 
 
+# ── 채널 구독 ────────────────────────────────────────────────
+# 검색은 호출당 100유닛인데 업로드 목록은 1유닛입니다. **50배 차이**라,
+# 관심 채널이 분명하면 검색보다 구독이 압도적으로 쌉니다. 관련도 문제도
+# 없습니다 — 사용자가 채널을 직접 골랐으니까요.
+
+UNITS_CHANNELS = 1
+UNITS_PLAYLIST = 1
+
+
+@dataclass
+class ChannelInfo:
+    channel_id: str
+    title: str
+    uploads_playlist_id: str
+    subscriber_count: int
+
+
+def resolve_channel(handle: str) -> ChannelInfo:
+    """`@gaingetv` 같은 핸들을 채널로 바꿉니다 (1유닛)."""
+    handle = handle.strip()
+    if not handle.startswith("@"):
+        handle = "@" + handle
+
+    data = _get("channels", {"part": "snippet,contentDetails,statistics", "forHandle": handle})
+    items = data.get("items") or []
+    if not items:
+        raise YouTubeError(
+            f"{handle} 채널을 찾지 못했습니다. 유튜브 채널 주소의 @이름을 그대로 넣어 주세요."
+        )
+    it = items[0]
+    uploads = ((it.get("contentDetails") or {}).get("relatedPlaylists") or {}).get("uploads")
+    if not uploads:
+        raise YouTubeError(f"{handle} 채널의 업로드 목록을 읽을 수 없습니다.")
+    return ChannelInfo(
+        channel_id=it["id"],
+        title=(it.get("snippet") or {}).get("title", handle),
+        uploads_playlist_id=uploads,
+        subscriber_count=int((it.get("statistics") or {}).get("subscriberCount", 0) or 0),
+    )
+
+
+def playlist_video_ids(playlist_id: str, limit: int = 50) -> list[str]:
+    """업로드 목록의 최신 영상 id (1유닛). 최신순으로 옵니다."""
+    data = _get(
+        "playlistItems",
+        {"part": "contentDetails", "playlistId": playlist_id, "maxResults": min(limit, 50)},
+    )
+    out = []
+    for item in data.get("items", []):
+        vid = (item.get("contentDetails") or {}).get("videoId")
+        if vid:
+            out.append(vid)
+    logger.info("[youtube] 업로드 목록 %s → %d건", playlist_id, len(out))
+    return out
+
+
 def fetch_details(video_ids: list[str]) -> list[Candidate]:
     """상세를 채웁니다. 50개까지 한 번에 (1유닛)."""
     if not video_ids:

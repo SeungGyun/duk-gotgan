@@ -10,9 +10,12 @@
 .addHead {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
   margin-bottom: 13px;
+}
+.addHead .addHint {
+  margin-left: auto;
 }
 .addHint {
   font-size: 12px;
@@ -299,4 +302,69 @@
   color: var(--muted);
   margin: 12px 0 0;
   line-height: 1.6;
+}
+
+/* 종류 뱃지 — 검색어와 채널을 한눈에 가릅니다 */
+.kind {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: 2px;
+  padding: 0 5px;
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+
+/* 수집 방식 선택 */
+.seg {
+  display: flex;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.seg button {
+  border: 0;
+  background: var(--surface);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 4px 12px;
+  cursor: pointer;
+  border-right: 1px solid var(--border);
+}
+.seg button:last-child {
+  border-right: 0;
+}
+.segOn {
+  background: var(--accent-soft) !important;
+  color: var(--accent) !important;
+  font-weight: 600;
+}
+
+.blockAdd {
+  display: flex;
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+}
+.blockAdd input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 10px;
+}
+.blockEmpty {
+  margin: 0;
+  padding: 0 14px 14px;
+  font-size: 12.5px;
+  color: var(--muted);
 }

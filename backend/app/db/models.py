@@ -59,7 +59,15 @@ class Keyword(Base):
     __tablename__ = "keywords"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    # 검색어이거나 채널 핸들(@gaingetv). 사용자가 입력한 그대로 둡니다.
     term: Mapped[str] = mapped_column(String(190), nullable=False)
+    # search  — 키워드로 검색 (search.list 100유닛)
+    # channel — 채널의 업로드를 그대로 (playlistItems 1유닛, **50배 쌉니다**)
+    source_type: Mapped[str] = mapped_column(String(10), nullable=False, default="search")
+    # 채널 구독일 때만. 등록 시 핸들을 해석해 채워 둡니다.
+    channel_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    channel_title: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    uploads_playlist_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # pending | active | quota_wait | paused | archived
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     # ko | en | any
@@ -288,6 +296,10 @@ class ChannelBlock(Base):
     reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
     # True = 판정 이력으로 자동 차단, False = 사용자가 직접 막음
     auto: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # 차단을 풀면 행을 지우지 않고 이 값을 내립니다. 지워 버리면 다음 탈락
+    # 때 처음부터 세기 시작해 같은 채널이 또 자동 차단됩니다 — 사용자가
+    # 한 번 "괜찮다"고 한 채널을 계속 되막는 셈입니다.
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=now_kst)
 
 

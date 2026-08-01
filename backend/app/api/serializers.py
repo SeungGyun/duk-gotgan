@@ -13,6 +13,9 @@ def keyword_out(k: Keyword, lecture_count: int = 0) -> dict:
     return {
         "id": k.id,
         "term": k.term,
+        "sourceType": k.source_type,
+        # 채널 구독이면 해석된 채널명. 화면은 이걸 제목으로 보여줍니다.
+        "channelTitle": k.channel_title,
         "status": k.status,
         "language": k.language,
         "schedule": k.schedule,

@@ -49,7 +49,11 @@ def evaluate(c: Candidate, kw: Keyword, blocked: set[str] | None = None) -> Verd
 
     # 조회수 — 아무도 안 본 강의를 전문가 강의로 보기는 어렵습니다.
     # 다만 이 기준은 좋은 신규 강의를 떨어뜨리는 부작용이 있어 낮게 잡습니다.
-    if c.view_count < settings.rule_min_view_count:
+    #
+    # **구독한 채널에는 적용하지 않습니다.** 사용자가 그 채널을 직접 골랐으니
+    # 조회수로 다시 검증할 이유가 없고, 올라온 지 얼마 안 된 영상이 조회수
+    # 때문에 떨어지면 구독의 의미가 없습니다.
+    if kw.source_type != "channel" and c.view_count < settings.rule_min_view_count:
         return Verdict(
             False, f"조회수 미달 · {c.view_count:,}회 (기준 {settings.rule_min_view_count:,})"
         )

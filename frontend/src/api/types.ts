@@ -15,9 +15,26 @@ export type KeywordStatus =
 export type Schedule = "daily" | "twice_weekly" | "weekly";
 export type Language = "ko" | "en" | "any";
 
+/** search — 검색어로 찾기 (검색 1회 100유닛)
+ *  channel — 관심 채널 구독. term 에 @핸들. 1유닛이라 50배 쌉니다 */
+export type SourceType = "search" | "channel";
+
+/** 차단한 채널. 자동(판정 이력) 또는 사용자가 직접. */
+export interface ChannelBlock {
+  channelId: string;
+  channelTitle: string;
+  reason: string;
+  auto: boolean;
+  rejectedCount: number;
+  createdAt: string;
+}
+
 export interface Keyword {
   id: string;
   term: string;
+  sourceType: SourceType;
+  /** 채널 구독일 때 해석된 채널명 */
+  channelTitle: string | null;
   status: KeywordStatus;
   language: Language;
   schedule: Schedule;
@@ -38,6 +55,7 @@ export interface Keyword {
 /** 키워드 등록 폼이 보내는 값. id·상태·집계는 서버가 채운다. */
 export interface KeywordDraft {
   term: string;
+  sourceType: SourceType;
   language: Language;
   schedule: Schedule;
   minDurationSec: number;

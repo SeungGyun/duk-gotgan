@@ -16,7 +16,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.collector import channels, quota, rules
-from app.collector.youtube import Candidate, YouTubeError, fetch_details, search_ids
+from app.collector.youtube import (
+    UNITS_PLAYLIST,
+    Candidate,
+    YouTubeError,
+    fetch_details,
+    playlist_video_ids,
+    search_ids,
+)
 from app.db.models import CrawlRun, Keyword, PipelineEvent, Video, VideoKeyword
 from config.settings import settings
 from config.time import now_kst
@@ -54,30 +61,37 @@ def discover_keyword(db: Session, kw: Keyword, run: CrawlRun) -> DiscoverResult:
     result = DiscoverResult(keyword_term=kw.term)
 
     # 쿼터를 먼저 확인하고 차감합니다. 호출하고 나서 재면 이미 늦습니다.
-    _spend(db, run, quota.UNITS_SEARCH)
-
-    published_after = now_kst() - timedelta(days=settings.rule_max_age_days)
-    if kw.published_after:
-        published_after = max(
-            published_after,
-            now_kst().replace(
-                year=kw.published_after.year,
-                month=kw.published_after.month,
-                day=kw.published_after.day,
-                hour=0,
-                minute=0,
-                second=0,
-                microsecond=0,
-            ),
+    if kw.source_type == "channel":
+        # 업로드 목록은 1유닛 — 검색(100유닛)의 1/100 입니다.
+        _spend(db, run, UNITS_PLAYLIST)
+        if not kw.uploads_playlist_id:
+            result.error = "채널 정보가 없습니다. 키워드를 다시 등록해 주세요."
+            return result
+        ids = playlist_video_ids(kw.uploads_playlist_id, limit=SEARCH_PAGE_SIZE)
+    else:
+        _spend(db, run, quota.UNITS_SEARCH)
+        published_after = now_kst() - timedelta(days=settings.rule_max_age_days)
+        if kw.published_after:
+            published_after = max(
+                published_after,
+                now_kst().replace(
+                    year=kw.published_after.year,
+                    month=kw.published_after.month,
+                    day=kw.published_after.day,
+                    hour=0,
+                    minute=0,
+                    second=0,
+                    microsecond=0,
+                ),
+            )
+        ids = search_ids(
+            kw.term,
+            language=kw.language,
+            published_after=published_after,
+            limit=SEARCH_PAGE_SIZE,
+            min_duration_sec=kw.min_duration_sec,
         )
 
-    ids = search_ids(
-        kw.term,
-        language=kw.language,
-        published_after=published_after,
-        limit=SEARCH_PAGE_SIZE,
-        min_duration_sec=kw.min_duration_sec,
-    )
     if not ids:
         return result
 
@@ -225,7 +239,10 @@ def run_discovery(
     if owns_run:
         run = CrawlRun(trigger=trigger, status="running", started_at=now_kst(), stats={})
         db.add(run)
-    run.label = f"키워드 {len(targets)}개 · {'수동' if trigger == 'manual' else '정기'} 실행"
+    chans = sum(1 for k in targets if k.source_type == "channel")
+    what = f"키워드 {len(targets) - chans}개" if len(targets) - chans else ""
+    what = " · ".join(filter(None, [what, f"채널 {chans}개" if chans else ""])) or "대상 없음"
+    run.label = f"{what} · {'수동' if trigger == 'manual' else '정기'} 실행"
     run.status = "running"
     # 루프 전에 커밋합니다. flush 만 하면 키워드 하나가 실패해 롤백할 때
     # **실행 이력 자체가 사라져**, 정작 실패를 기록해야 할 행이 없어집니다.

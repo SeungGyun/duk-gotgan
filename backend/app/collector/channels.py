@@ -38,14 +38,23 @@ BAD_VERDICTS = ("promotional", "irrelevant")
 
 
 def is_blocked(db: Session, channel_id: str | None) -> ChannelBlock | None:
+    """차단 중인 것만. 해제된 행은 None 을 돌려줍니다."""
     if not channel_id:
         return None
-    return db.get(ChannelBlock, channel_id)
+    row = db.get(ChannelBlock, channel_id)
+    return row if row is not None and row.active else None
+
+
+def has_record(db: Session, channel_id: str | None) -> bool:
+    """해제된 것까지 포함해 이력이 있는가. 자동 차단을 막는 근거입니다."""
+    return bool(channel_id) and db.get(ChannelBlock, channel_id) is not None
 
 
 def blocked_ids(db: Session) -> set[str]:
     """룰 필터가 한 번에 읽어 갑니다 — 후보마다 조회하면 N+1 입니다."""
-    return set(db.scalars(select(ChannelBlock.channel_id)).all())
+    return set(
+        db.scalars(select(ChannelBlock.channel_id).where(ChannelBlock.active.is_(True))).all()
+    )
 
 
 def consider_block(db: Session, video: Video, ev: Evaluation) -> ChannelBlock | None:
@@ -55,7 +64,8 @@ def consider_block(db: Session, video: Video, ev: Evaluation) -> ChannelBlock | 
     채널도 가끔 주제에서 벗어난 영상을 올리는데, 그걸로 막아버리면 이후의
     좋은 강의까지 통째로 놓칩니다.
     """
-    if not video.channel_id or is_blocked(db, video.channel_id):
+    # 해제된 채널도 건너뜁니다 — 사용자가 "괜찮다"고 한 것을 되막지 않습니다.
+    if not video.channel_id or has_record(db, video.channel_id):
         return None
 
     published = db.scalar(
