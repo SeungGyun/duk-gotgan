@@ -15,7 +15,7 @@ from datetime import timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.collector import quota, rules
+from app.collector import channels, quota, rules
 from app.collector.youtube import Candidate, YouTubeError, fetch_details, search_ids
 from app.db.models import CrawlRun, Keyword, PipelineEvent, Video, VideoKeyword
 from config.settings import settings
@@ -85,6 +85,9 @@ def discover_keyword(db: Session, kw: Keyword, run: CrawlRun) -> DiscoverResult:
     candidates = fetch_details(ids)
     result.discovered = len(candidates)
 
+    # 차단 목록은 후보마다 조회하면 N+1 이라 한 번만 읽습니다
+    blocked = channels.blocked_ids(db)
+
     # 1회 실행당 자막·AI 로 넘길 편수 상한. **비용 가드입니다.**
     # 이게 없으면 첫 실행에서 백로그 50건이 통째로 AI 로 넘어갑니다.
     budget = kw.max_per_run
@@ -105,7 +108,7 @@ def discover_keyword(db: Session, kw: Keyword, run: CrawlRun) -> DiscoverResult:
                 result.rule_passed += 1
             continue
 
-        verdict = rules.evaluate(c, kw)
+        verdict = rules.evaluate(c, kw, blocked)
         if not verdict.ok:
             state, reason = "REJECTED_RULE", verdict.reason
             result.rejected.append((c.title, verdict.reason))

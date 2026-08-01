@@ -65,6 +65,19 @@ def ensure_schema(engine: Engine) -> None:
             conn.execute(text("ALTER TABLE lectures ADD COLUMN closing TEXT NULL"))
             logger.info("[db] lectures.closing added")
 
+        # 관련도·주제를 값으로 남깁니다 (채널 차단의 근거)
+        if not _column_exists(conn, "evaluations", "keyword_relevance"):
+            conn.execute(
+                text("ALTER TABLE evaluations ADD COLUMN topic VARCHAR(300) NOT NULL DEFAULT ''")
+            )
+            conn.execute(
+                text(
+                    "ALTER TABLE evaluations "
+                    "ADD COLUMN keyword_relevance INT NOT NULL DEFAULT 100"
+                )
+            )
+            logger.info("[db] evaluations.topic · keyword_relevance added")
+
         # 실행 시각을 키워드가 갖습니다 (크론 → 틱 방식 전환)
         if not _column_exists(conn, "keywords", "run_hour"):
             conn.execute(

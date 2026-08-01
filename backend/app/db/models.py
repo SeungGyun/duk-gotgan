@@ -233,6 +233,10 @@ class Evaluation(Base):
     expert_score: Mapped[int] = mapped_column(Integer, nullable=False)
     # low | medium | high
     confidence: Mapped[str] = mapped_column(String(10), nullable=False, default="medium")
+    # AI 가 본 실제 주제와 검색 키워드와의 관련도. 예전에는 red_flags 텍스트에만
+    # 남기고 버렸는데, 채널 차단을 데이터로 굴리려면 값으로 있어야 합니다.
+    topic: Mapped[str] = mapped_column(String(300), nullable=False, default="")
+    keyword_relevance: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     # [{criterion, score, evidence}] — 6항목 고정
     criteria: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     red_flags: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
@@ -262,6 +266,29 @@ class PipelineEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=now_kst)
 
     __table_args__ = (Index("ix_pipeline_events_video_created", "video_id", "created_at"),)
+
+
+class ChannelBlock(Base):
+    """이 채널의 영상은 앞으로 수집하지 않습니다.
+
+    유튜브 검색은 넓은 키워드에서 엉뚱한 채널을 계속 물어옵니다. 검색어를
+    다듬어서는 안 됐습니다 — 실측에서 제외 연산자(`-노코드`)를 넣으니 관련도
+    랭킹 자체가 무너졌습니다.
+
+    대신 **AI 가 이미 내린 판정을 재사용합니다.** 같은 채널이 반복해서 무관·
+    홍보로 걸리면 다음부터 룰 단계에서 거릅니다. AI 호출 한 번의 값이
+    "이 영상 탈락"에서 "이 채널 영구 제외"로 커집니다.
+    """
+
+    __tablename__ = "channel_blocks"
+
+    channel_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    channel_title: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    # 사람에게 보여줄 차단 사유
+    reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # True = 판정 이력으로 자동 차단, False = 사용자가 직접 막음
+    auto: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=now_kst)
 
 
 # ── 정식 층 (사용자가 보는 유일한 테이블) ────────────────────

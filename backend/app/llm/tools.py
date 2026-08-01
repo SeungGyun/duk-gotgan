@@ -21,6 +21,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 
 from app.db.models import Evaluation, Keyword, Lecture, PipelineEvent, Video, VideoKeyword
+from app.collector.channels import consider_block
 from app.db.session import SessionLocal
 from app.llm.schemas import LectureReview, flat_schema, weighted_score
 from config.time import now_kst
@@ -112,11 +113,19 @@ def build_server(video_id: str, outcome: ReviewOutcome):
                 verdict=review.verdict,
                 expert_score=computed,
                 confidence=review.confidence,
+                topic=review.topic[:300],
+                keyword_relevance=review.keyword_relevance,
                 criteria=[c.model_dump() for c in review.criteria],
                 red_flags=_red_flags(review, gap),
                 speaker_credentials=review.speaker_credentials,
             )
             db.add(ev)
+            db.flush()
+
+            # 이 판정으로 채널을 막을지 다시 봅니다. 검색이 계속 물어오는
+            # 엉뚱한 채널을 여기서 끊어야 다음 수집에서 AI 를 안 부릅니다.
+            if not passed:
+                consider_block(db, video, ev)
 
             if passed:
                 _publish(db, video, review, computed)

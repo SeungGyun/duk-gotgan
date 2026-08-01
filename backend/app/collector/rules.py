@@ -24,13 +24,18 @@ class Verdict:
     reason: str = ""
 
 
-def evaluate(c: Candidate, kw: Keyword) -> Verdict:
+def evaluate(c: Candidate, kw: Keyword, blocked: set[str] | None = None) -> Verdict:
     """후보 1건이 자막 수집 단계로 갈 자격이 있는지.
 
     사유 문구는 화면에 그대로 나갑니다 — 숫자를 같이 적어야 기준을
     조정할 때 판단이 됩니다("15분 미만"이 아니라 "12분 · 기준 15분").
     """
     title = (c.title or "").lower()
+
+    # 차단한 채널 — AI 가 이미 무관·홍보로 여러 번 판정한 곳입니다.
+    # 여기서 걸러야 자막도 AI 도 부르지 않습니다.
+    if blocked and c.channel_id in blocked:
+        return Verdict(False, f"차단한 채널 · {c.channel_title}")
 
     # 길이 — 키워드별 설정이 우선
     min_sec = kw.min_duration_sec or 0

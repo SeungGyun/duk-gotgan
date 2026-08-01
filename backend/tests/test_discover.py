@@ -184,3 +184,50 @@ def test_사이클이_준_기록에는_손대지_않는다(db, monkeypatch):
     assert run.status == "running", "사이클이 마감할 때까지 열려 있어야 합니다"
     assert run.finished_at is None
     assert run.stats["discovered"] == 1
+
+
+def test_차단한_채널은_룰에서_걸린다(db, monkeypatch):
+    """검색어를 다듬는 방법은 실패했습니다 — 제외 연산자를 넣으니 관련도
+    랭킹 자체가 무너졌습니다. 대신 AI 판정을 재사용해 채널을 막습니다."""
+    from app.db.models import ChannelBlock
+
+    add_keyword(db)
+    db.add(ChannelBlock(channel_id="ch_bad", channel_title="코인 뉴스", reason="무관 2회"))
+    db.commit()
+
+    patch_youtube(monkeypatch, [
+        fake_candidate("good0000001", channel_id="ch_ok"),
+        fake_candidate("blocked00001", channel_id="ch_bad", channel_title="코인 뉴스"),
+    ])
+    run, results = D.run_discovery(db)
+
+    assert run.stats["rulePassed"] == 1
+    blocked = db.get(Video, "blocked00001")
+    assert blocked.state == "REJECTED_RULE"
+    assert "차단한 채널" in blocked.state_reason
+
+
+def test_좋은_강의를_낸_채널은_막지_않는다(db):
+    """좋은 채널도 가끔 주제에서 벗어난 영상을 올립니다. 그걸로 막으면
+    이후의 좋은 강의까지 통째로 놓칩니다."""
+    from app.collector.channels import consider_block
+    from app.db.models import Evaluation, Lecture
+
+    good = Video(id="pub00000001", title="좋은 강의", channel_id="ch_mixed",
+                 channel_title="괜찮은 채널", state="PUBLISHED", duration_sec=3000)
+    off = Video(id="off00000001", title="딴 얘기", channel_id="ch_mixed",
+                channel_title="괜찮은 채널", state="REVIEWING", duration_sec=3000)
+    db.add_all([good, off])
+    db.flush()
+    db.add(Lecture(video_id=good.id, version=1, expert_score=88, verdict="expert",
+                   one_liner="ok", sections=[], tags=[]))
+    for i in range(3):
+        db.add(Evaluation(video_id=off.id, model="m", verdict="irrelevant",
+                          expert_score=20, keyword_relevance=10, criteria=[]))
+    db.flush()
+    ev = Evaluation(video_id=off.id, model="m", verdict="irrelevant",
+                    expert_score=20, keyword_relevance=10, criteria=[])
+    db.add(ev)
+    db.flush()
+
+    assert consider_block(db, off, ev) is None, "공개 이력이 있으면 막지 않아야 합니다"
