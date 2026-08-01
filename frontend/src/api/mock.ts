@@ -183,6 +183,7 @@ const lectures: Seed[] = [
     tags: ["결제", "멱등성", "분산시스템", "장애대응"],
     keyPointOffsets: [682, 1661, 3364, 4470],
     isFavorite: true,
+    isRead: false,
     keywordIds: ["kw_2"],
     detail: {
       youtubeUrl: "https://youtu.be/aX7kQ2mN9pL",
@@ -315,6 +316,7 @@ const lectures: Seed[] = [
     tags: ["쿠버네티스", "네트워킹", "CNI", "Calico"],
     keyPointOffsets: [723, 1481, 2210, 3105, 3940],
     isFavorite: false,
+    isRead: false,
     keywordIds: ["kw_1"],
     detail: {
       youtubeUrl: "https://youtu.be/bK4rT8wY1zQ",
@@ -424,6 +426,7 @@ const lectures: Seed[] = [
     tags: ["PostgreSQL", "인덱스", "쿼리튜닝"],
     keyPointOffsets: [395, 1240, 2115],
     isFavorite: false,
+    isRead: false,
     keywordIds: ["kw_3"],
     detail: {
       youtubeUrl: "https://youtu.be/cM9nP3vB7hR",
@@ -514,6 +517,7 @@ const lectures: Seed[] = [
     tags: ["브라우저", "렌더링", "성능"],
     keyPointOffsets: [512, 1420, 2380, 3350],
     isFavorite: false,
+    isRead: false,
     keywordIds: ["kw_4"],
     detail: {
       youtubeUrl: "https://youtu.be/dW2jL6xF4tG",
@@ -611,6 +615,7 @@ const lectures: Seed[] = [
     tags: ["LLM", "파인튜닝", "RAG"],
     keyPointOffsets: [440, 1590, 2705],
     isFavorite: false,
+    isRead: false,
     keywordIds: ["kw_6"],
     detail: {
       youtubeUrl: "https://youtu.be/eR5tY8uI0oP",
@@ -801,9 +806,11 @@ export const mockApi: Api = {
       );
     }
 
-    const sort = query.sort ?? "recent";
+    const sort = query.sort ?? "unread";
     rows.sort((a, b) => {
-      if (sort === "recent") return b.publishedAt.localeCompare(a.publishedAt);
+      const fresh = (b.publishedAt ?? "").localeCompare(a.publishedAt ?? "");
+      if (sort === "unread") return Number(a.isRead) - Number(b.isRead) || fresh;
+      if (sort === "recent") return fresh;
       if (sort === "duration") return b.durationSec - a.durationSec;
       return b.expertScore - a.expertScore;
     });
@@ -821,6 +828,12 @@ export const mockApi: Api = {
     await delay(80);
     const found = lectures.find((l) => l.videoId === videoId);
     if (found) found.isFavorite = isFavorite;
+  },
+
+  async markRead(videoId) {
+    await delay(60);
+    const found = lectures.find((l) => l.videoId === videoId);
+    if (found) found.isRead = true;
   },
 
   async getOverview(): Promise<Overview> {

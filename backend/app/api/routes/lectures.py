@@ -13,6 +13,7 @@ from app.api.errors import ApiError
 from app.api.serializers import lecture_detail_out, lecture_summary_out
 from app.db.models import Evaluation, Lecture, Transcript, Video, VideoKeyword
 from app.db.session import get_db
+from config.time import now_kst
 
 router = APIRouter(prefix="/lectures", tags=["lectures"])
 
@@ -20,19 +21,30 @@ router = APIRouter(prefix="/lectures", tags=["lectures"])
 # 같은 실행에서 여러 편이 한꺼번에 올라오면 값이 같아지므로, 뒤에 점수와
 # id 를 붙여 순서를 고정합니다 — 안 그러면 새로고침마다 줄이 뒤바뀝니다.
 _STABLE = (Lecture.expert_score.desc(), Lecture.id)
+
+# **"최신"은 유튜브에 올라온 날짜입니다** (Video.published_at). 곳간에
+# 들어온 날(Lecture.published_at)이 아닙니다 — 어제 수집했더라도 3년 전
+# 영상이면 최신이 아니니까요.
+_FRESH = Video.published_at.desc()
+
 SORTS = {
-    "recent": (Lecture.published_at.desc(), *_STABLE),
-    "score": (Lecture.expert_score.desc(), Lecture.published_at.desc(), Lecture.id),
+    # 안 읽은 것이 먼저, 각 묶음 안에서는 유튜브 최신순.
+    # MySQL 에서 불리언은 1/0 이라 DESC 면 참(안 읽음)이 앞섭니다.
+    "unread": (Lecture.read_at.is_(None).desc(), _FRESH, *_STABLE),
+    "recent": (_FRESH, *_STABLE),
+    "added": (Lecture.published_at.desc(), *_STABLE),
+    "score": (Lecture.expert_score.desc(), _FRESH, Lecture.id),
     "duration": (Lecture.duration_sec.desc(), *_STABLE),
 }
 
-# 기본은 최신 등록순입니다. 점수순으로 두면 새로 들어온 것이 아래에 묻혀,
-# 매번 목록을 훑어야 뭐가 새로 왔는지 알 수 있습니다.
-DEFAULT_SORT = "recent"
+# 기본은 "안 읽은 것부터". 읽은 것이 위에 남아 있으면 새로 온 것을 찾으려고
+# 매번 목록을 훑게 됩니다.
+DEFAULT_SORT = "unread"
 
 
 class LecturePatch(BaseModel):
     isFavorite: bool | None = None
+    isRead: bool | None = None
 
 
 def _keyword_map(db: Session, video_ids: list[str]) -> dict[str, list[str]]:
@@ -137,14 +149,25 @@ def get_lecture(video_id: str, db: Session = Depends(get_db)):
 
 @router.patch("/{video_id}", status_code=204)
 def patch_lecture(video_id: str, patch: LecturePatch, db: Session = Depends(get_db)):
-    if patch.isFavorite is None:
+    values: dict = {}
+    if patch.isFavorite is not None:
+        values["is_favorite"] = patch.isFavorite
+    if patch.isRead is not None:
+        # 이미 읽은 것을 다시 읽어도 시각을 덮지 않습니다 — "처음 읽은 때"가
+        # 남아야 나중에 "이번 주에 새로 본 것" 같은 걸 셀 수 있습니다.
+        values["read_at"] = now_kst() if patch.isRead else None
+    if not values:
         return
-    # 재요약본이 여러 개여도 즐겨찾기는 영상 단위 개념이라 전부 맞춥니다
+
+    # 재요약본이 여러 개여도 읽음·즐겨찾기는 영상 단위 개념이라 전부 맞춥니다
+    where = [Lecture.video_id == video_id]
+    if "read_at" in values and patch.isRead:
+        where.append(Lecture.read_at.is_(None))
     updated = db.execute(
-        Lecture.__table__.update()
-        .where(Lecture.video_id == video_id)
-        .values(is_favorite=patch.isFavorite)
+        Lecture.__table__.update().where(*where).values(**values)
     ).rowcount
+    if not updated and patch.isRead:
+        return  # 이미 읽음으로 되어 있습니다 — 실패가 아닙니다
     if not updated:
         raise ApiError(404, "LECTURE_NOT_FOUND", "해당 강의를 찾을 수 없습니다.")
     db.commit()

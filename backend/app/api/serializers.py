@@ -44,6 +44,7 @@ def lecture_summary_out(lec: Lecture, keyword_ids: list[str]) -> dict:
         "tags": lec.tags or [],
         "keyPointOffsets": [p.get("timestampSec", 0) for p in (lec.key_points or [])],
         "isFavorite": bool(lec.is_favorite),
+        "isRead": lec.read_at is not None,
         "keywordIds": keyword_ids,
     }
 

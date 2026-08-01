@@ -122,3 +122,14 @@ def ensure_schema(engine: Engine) -> None:
         if not _column_exists(conn, "keywords", "archived_at"):
             conn.execute(text("ALTER TABLE keywords ADD COLUMN archived_at DATETIME NULL"))
             logger.info("[db] keywords.archived_at added")
+
+        # 읽음 표시. NULL 이면 안 읽은 것 — 기본 정렬이 이걸로 앞뒤를 가릅니다.
+        if not _column_exists(conn, "lectures", "read_at"):
+            conn.execute(text("ALTER TABLE lectures ADD COLUMN read_at DATETIME NULL"))
+            logger.info("[db] lectures.read_at added")
+        # 기본 정렬(안 읽은 것 먼저 · 유튜브 최신순)이 매번 전체를 훑지 않게.
+        if not _index_exists(conn, "lectures", "ix_lectures_read"):
+            conn.execute(
+                text("CREATE INDEX ix_lectures_read ON lectures (is_hidden, read_at)")
+            )
+            logger.info("[db] ix_lectures_read created")

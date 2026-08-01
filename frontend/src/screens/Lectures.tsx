@@ -35,11 +35,21 @@ const LENGTH_BANDS = [
 /** 첫 항목이 기본값입니다. **최신 등록순이 먼저**인 이유는, 점수순으로 두면
     새로 들어온 덕질이 아래에 묻혀 매번 목록을 훑어야 하기 때문입니다.
     여기서 말하는 "최신"은 영상 공개일이 아니라 곳간에 들어온 순서입니다. */
+/** 첫 항목이 기본값입니다.
+
+    **안 읽은 것이 먼저**입니다. 읽은 것이 위에 남아 있으면 새로 온 걸 찾으려고
+    매번 목록을 훑게 됩니다. 각 묶음 안에서는 유튜브에 올라온 날짜 최신순 —
+    어제 수집했더라도 3년 전 영상이면 최신이 아니니까요. */
 const SORTS: { value: LectureSort; label: string }[] = [
+  { value: "unread", label: "안 본 것 먼저" },
   { value: "recent", label: "최신순" },
   { value: "score", label: "점수순" },
   { value: "duration", label: "긴 순" },
 ];
+
+/** 이만큼 머물러야 "읽었다"로 봅니다. 스크롤로 스쳐 간 것까지 읽음으로
+    만들면, 안 본 것 먼저 정렬이 첫 스크롤 한 번에 무의미해집니다. */
+const READ_DWELL_MS = 4000;
 
 /** 목록이 비었을 때 매 렌더 새 배열이 생기지 않게 — 이어보기 옵저버의 의존값 */
 const NO_ROWS: LectureSummary[] = [];
@@ -57,6 +67,8 @@ export function Lectures() {
   const [lengthBand, setLengthBand] = useState(0);
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<LectureSort>(SORTS[0]!.value);
+  // 이번 화면에서 읽은 것. 서버 응답을 기다리지 않고 점을 지웁니다.
+  const [readIds, setReadIds] = useState<Set<string>>(() => new Set());
 
   // 읽기에 집중하고 싶을 때 양옆 패널을 접습니다. 둘 다 접으면 본문이 화면 정중앙.
   const [listOpen, toggleList] = usePersistentToggle("ui.lectures.list", true);
@@ -161,6 +173,23 @@ export function Lectures() {
     }
     return () => obs.disconnect();
   }, [stack, navigate]);
+
+  // 보고 있는 강의를 읽음으로 표시합니다.
+  //
+  // **목록을 다시 부르지 않습니다.** 읽는 순간 다시 부르면 "안 본 것 먼저"
+  // 정렬이 발밑에서 순서를 바꿔, 읽던 글이 화면 밖으로 튑니다. 표시는
+  // 서버와 화면에만 반영하고, 순서는 다음에 목록을 열 때 맞춰집니다.
+  const readSent = useRef(new Set<string>());
+  useEffect(() => {
+    if (!currentId || readSent.current.has(currentId)) return;
+    const id = currentId;
+    const timer = window.setTimeout(() => {
+      readSent.current.add(id);
+      void api.markRead(id).catch(() => readSent.current.delete(id));
+      setReadIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+    }, READ_DWELL_MS);
+    return () => window.clearTimeout(timer);
+  }, [currentId]);
 
   // 목록에서 다른 강의를 고르면 읽던 위치가 아니라 그 강의의 머리로 보냅니다
   const scrollToFeed = useCallback(() => {
@@ -299,6 +328,12 @@ export function Lectures() {
                 onClick={scrollToFeed}
                 title={`${l.title}\n${l.channelTitle} · ${duration(l.durationSec)} · 전문성 ${l.expertScore}`}
               >
+                {/* 안 본 것에만 점을 찍습니다. 본 것에 표시를 하면 목록
+                    대부분에 표식이 붙어 아무것도 구분되지 않습니다. */}
+                <span
+                  className={`${s.dot} ${l.isRead || readIds.has(l.videoId) ? s.dotRead : ""}`}
+                  aria-hidden="true"
+                />
                 <span className={s.rowTitle}>{l.title}</span>
               </Link>
             ))}

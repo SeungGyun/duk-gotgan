@@ -155,7 +155,9 @@
 /* 목록은 제목만. 읽는 동안 시선을 뺏지 않는 것이 목적이라
    점수·채널·길이 트랙을 모두 덜어냈습니다. */
 .row {
-  display: block;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
   width: 100%;
   text-align: left;
   padding: 9px 10px 9px 9px;
@@ -168,6 +170,20 @@
 }
 .row:last-child {
   border-bottom: 0;
+}
+
+/* 안 본 표시. 본 것은 자리만 남기고 투명하게 둡니다 — 점을 지우면 제목
+   시작선이 어긋나서 목록이 들쭉날쭉해 보입니다. */
+.dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.dotRead {
+  background: transparent;
 }
 .row:hover {
   background: var(--surface-2);

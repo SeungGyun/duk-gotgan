@@ -122,6 +122,8 @@ export interface LectureSummary {
   /** 길이 트랙의 눈금 위치 (초) */
   keyPointOffsets: number[];
   isFavorite: boolean;
+  /** 읽었는지. 기본 정렬이 안 읽은 것을 앞에 둡니다. */
+  isRead: boolean;
   keywordIds: string[];
 }
 
@@ -241,7 +243,7 @@ export interface Usage {
 }
 
 // ── 목록 조회 ─────────────────────────────────────────────
-export type LectureSort = "score" | "recent" | "duration";
+export type LectureSort = "unread" | "recent" | "score" | "duration";
 
 export interface LectureQuery {
   keywordIds?: string[];

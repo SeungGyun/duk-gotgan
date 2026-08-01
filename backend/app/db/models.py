@@ -327,6 +327,9 @@ class Lecture(Base):
     duration_sec: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     published_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=now_kst)
     is_favorite: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # 읽은 시각. **불리언 대신 시각으로 둡니다** — 비용은 같은데 "언제 읽었나"를
+    # 나중에 쓸 수 있고, NULL 하나로 "안 읽음"이 자연스럽게 표현됩니다.
+    read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     model: Mapped[str] = mapped_column(String(64), nullable=False, default="")

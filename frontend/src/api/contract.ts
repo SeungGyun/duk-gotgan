@@ -38,6 +38,8 @@ export interface Api {
   listLectures(query: LectureQuery): Promise<LectureSummary[]>;
   getLecture(videoId: string): Promise<LectureDetail>;
   setFavorite(videoId: string, isFavorite: boolean): Promise<void>;
+  /** 읽음 표시. 목록을 다시 부르지 않으므로 보는 중에 순서가 흔들리지 않습니다. */
+  markRead(videoId: string): Promise<void>;
 
   // 운영
   getOverview(): Promise<Overview>;

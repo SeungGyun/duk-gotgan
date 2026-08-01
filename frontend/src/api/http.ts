@@ -79,6 +79,12 @@ export const httpApi: Api = {
       body: JSON.stringify({ isFavorite }),
     }),
 
+  markRead: (videoId) =>
+    req<void>(`/lectures/${videoId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ isRead: true }),
+    }),
+
   getOverview: () => req("/stats/overview"),
   getUsage: () => req("/stats/usage"),
   listRuns: () => req("/runs"),
