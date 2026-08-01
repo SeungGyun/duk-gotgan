@@ -7,9 +7,12 @@
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api import errors
 from app.api.routes import channels, keywords, lectures, stats
@@ -48,3 +51,32 @@ app.include_router(channels.router, prefix="/api/v1")
 @app.get("/api/v1/health")
 def health():
     return {"ok": True}
+
+
+# ── 화면 ─────────────────────────────────────────────────────
+# 빌드된 프론트를 **같은 포트에서** 냅니다. 상시 서비스로 돌릴 때 프로세스가
+# 둘이면 재시작마다 한쪽이 빠질 여지가 생기고, 주소도 둘이 됩니다.
+#
+# 개발은 그대로 `npm run dev`(5173, /api 를 여기로 프록시)를 쓰면 됩니다 —
+# 이 마운트는 dist 가 있을 때만 붙어서 개발 흐름을 건드리지 않습니다.
+
+DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
+
+if DIST.is_dir():
+    app.mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def spa(path: str):
+        """SPA 폴백. `/lectures/abc` 같은 깊은 주소도 index.html 로 받습니다.
+
+        **`/api` 는 넘기지 않습니다.** 없는 API 를 부르면 HTML 이 돌아와,
+        프론트가 JSON 파싱에서 엉뚱하게 죽습니다 — 404 로 끝내야 원인이 보입니다.
+        """
+        if path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        target = DIST / path
+        if path and target.is_file():
+            return FileResponse(target)
+        return FileResponse(DIST / "index.html")
+else:
+    logging.warning("[api] frontend/dist 가 없습니다 — 화면은 vite dev(5173)로만 열립니다.")

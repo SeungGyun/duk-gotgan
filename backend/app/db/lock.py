@@ -35,6 +35,16 @@ def try_lock(name: str = CYCLE_LOCK):
             yield acquired
         finally:
             if acquired:
-                conn.execute(text("SELECT RELEASE_LOCK(:n)"), {"n": name})
+                # **놓기는 최선을 다할 뿐입니다.** 커넥션이 이미 죽었으면
+                # RELEASE_LOCK 도 실패하는데, 그 예외를 그대로 올리면 사이클의
+                # 진짜 결과가 스택트레이스에 묻힙니다. 어차피 커넥션이 끊기면
+                # 락은 서버가 알아서 풉니다 — 그게 GET_LOCK 을 고른 이유입니다.
+                try:
+                    conn.execute(text("SELECT RELEASE_LOCK(:n)"), {"n": name})
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("[lock] 놓기 실패 — 끊기면 자동으로 풀립니다 (%s)", type(e).__name__)
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass

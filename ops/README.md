@@ -1,0 +1,63 @@
+# 상시 기동 (launchd)
+
+로그인하면 세 서비스가 알아서 올라옵니다. 재부팅 후 아무것도 누를 필요가 없습니다.
+
+```
+ops/install.sh           설치하고 바로 띄웁니다
+ops/status.sh            살아 있는지 확인
+ops/install.sh restart   다시 띄웁니다
+ops/install.sh remove    해제 (파일은 남습니다)
+ops/rebuild-ui.sh        화면을 고친 뒤 8000 번에 반영
+```
+
+## 서비스 셋
+
+| 이름 | 하는 일 | 형태 |
+|---|---|---|
+| `com.dukgotgan.mysql` | 도커를 깨우고 컨테이너를 지킵니다 | 60초마다 확인하는 지킴이 |
+| `com.dukgotgan.api` | 웹 서비스 — 화면과 API (`:8000`) | 상주 |
+| `com.dukgotgan.worker` | 수집 스케줄러 — 1분마다 확인 | 상주 |
+
+**주소는 http://localhost:8000 하나입니다.** 화면과 API 를 한 포트에서 냅니다.
+프로세스가 둘이면 재시작마다 한쪽이 빠질 여지가 생기고 주소도 둘이 됩니다.
+
+## 왜 이렇게 만들었는가
+
+**launchd 에는 의존 순서 개념이 없습니다.** 세 서비스가 동시에 시작되므로,
+각자 "될 때까지 기다린다"를 직접 합니다 — api·worker 는 도커와 MySQL 이
+응답할 때까지 기다렸다가 뜹니다.
+
+**도커 데스크톱까지 직접 띄웁니다.** 로그인 항목을 켜 두었는지에 기대지
+않습니다. 부팅 직후에는 데몬이 응답하기까지 수십 초가 걸리므로 최대 5분
+기다립니다.
+
+**MySQL 은 한 번 띄우고 끝내지 않습니다.** 그러면 로그인 시점에는 잘
+올라오지만, 도중에 도커를 껐다 켜면 아무도 다시 올려 주지 않습니다.
+compose 의 `restart: unless-stopped` 는 도커가 떠 있을 때만 유효합니다.
+
+**plist 는 심볼릭 링크입니다.** 복사해 두면 저장소의 정의를 고쳐도 반영되지
+않아, 두 벌이 어긋난 채 "왜 안 바뀌지"를 하게 됩니다.
+
+실측 복구 시간: 프로세스를 강제 종료하고 컨테이너를 내린 뒤 **20초**에 정상화.
+
+## 개발할 때
+
+상시 서비스를 끄지 않아도 됩니다. `npm run dev`(5173)는 `/api` 를 8000 번으로
+프록시하므로 그대로 쓰면 되고, 8000 번 화면은 `ops/rebuild-ui.sh` 로 갱신합니다.
+
+워커를 손으로 돌려보려면 상시 워커를 먼저 내려야 합니다 — 같은 DB 락을
+두고 다투면 한쪽이 계속 건너뜁니다.
+
+```
+launchctl bootout gui/$(id -u)/com.dukgotgan.worker
+python -m scripts.worker --once
+ops/install.sh restart
+```
+
+## 로그
+
+```
+~/Library/Logs/dukgotgan/mysql.log
+~/Library/Logs/dukgotgan/api.log
+~/Library/Logs/dukgotgan/worker.log
+```

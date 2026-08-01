@@ -77,3 +77,28 @@ def test_멈춘_키워드는_대상이_아니다(status):
 def test_run_hour_범위를_벗어나도_깨지지_않는다():
     k = kw(run_hour=99, last_run_at=datetime(2026, 7, 31, 4, 0))
     assert next_due_at(k) == datetime(2026, 8, 1, 23, 0)
+
+
+def test_락_놓기가_실패해도_예외로_번지지_않는다(monkeypatch):
+    """MySQL 이 내려가면 RELEASE_LOCK 도 실패합니다. 그 예외를 그대로 올리면
+    사이클의 진짜 결과가 스택트레이스에 묻힙니다. 커넥션이 끊기면 락은
+    서버가 알아서 푸는데(그게 GET_LOCK 을 고른 이유), 굳이 시끄러울 이유가
+    없습니다."""
+    from app.db import lock
+
+    class DeadConn:
+        def __init__(self):
+            self.calls = 0
+
+        def execute(self, *a, **k):
+            self.calls += 1
+            if self.calls == 1:  # GET_LOCK 은 성공
+                return type("R", (), {"scalar": staticmethod(lambda: 1)})()
+            raise RuntimeError("Lost connection to MySQL server")
+
+        def close(self):
+            raise RuntimeError("이미 죽었습니다")
+
+    monkeypatch.setattr(lock, "engine", type("E", (), {"connect": staticmethod(DeadConn)})())
+    with lock.try_lock() as acquired:
+        assert acquired  # 여기까지 왔으면 잡은 것
