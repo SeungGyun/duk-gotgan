@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+
 import { api } from "../api";
 import type { Run, RunStats } from "../api";
 import { Screen } from "../components/Screen";
@@ -29,8 +31,26 @@ function clock(iso: string): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+/** 도는 중일 때 새로 고치는 간격. 한 사이클이 몇 분씩 걸려서, 화면이
+    멈춰 있으면 "눌렀는데 아무 일도 안 일어난다"로 보입니다. */
+const POLL_ACTIVE_MS = 5_000;
+/** 놀고 있을 때. 정기 실행이 언제 시작될지 몰라 아주 끊지는 않습니다. */
+const POLL_IDLE_MS = 30_000;
+
 export function Runs() {
   const runs = useAsync(() => api.listRuns(), []);
+
+  // **한 번만 불러오면 안 됩니다.** "지금 실행"은 요청만 남기고 워커가
+  // 다음 틱에 집어가는 구조라, 눌러 놓고 이 화면을 봐도 대기 중인 실행이
+  // 나타나지 않았습니다. 진행 중인 것이 있으면 자주, 없으면 뜸하게 봅니다.
+  const active = (runs.data ?? []).some(
+    (r) => r.status === "queued" || r.status === "running",
+  );
+  const { reload } = runs;
+  useEffect(() => {
+    const id = window.setInterval(reload, active ? POLL_ACTIVE_MS : POLL_IDLE_MS);
+    return () => window.clearInterval(id);
+  }, [active, reload]);
 
   if (runs.error) {
     return (
@@ -39,7 +59,9 @@ export function Runs() {
       </Screen>
     );
   }
-  if (runs.loading || !runs.data) {
+  // **첫 로딩에만** 스피너를 보입니다. `loading` 을 그대로 보면 5초마다
+  // 화면이 통째로 깜빡여서, 새로 고치지 않는 것보다 읽기 나쁩니다.
+  if (!runs.data) {
     return (
       <Screen title="실행 로그">
         <Loading />
