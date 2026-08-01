@@ -73,6 +73,10 @@ class Keyword(Base):
     min_expert_score: Mapped[int] = mapped_column(Integer, nullable=False, default=75)
     max_per_run: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
     published_after: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # 실행 시각(0~23). 주기(schedule)와 시각을 나눠 둡니다 — 크론 하나로는
+    # "이 키워드만 정오에" 같은 요구를 받을 수 없고, 키워드마다 크론을
+    # 붙였다 떼는 것도 등록·삭제 때마다 사고가 납니다.
+    run_hour: Mapped[int] = mapped_column(Integer, nullable=False, default=4)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=now_kst)
     # 삭제(보관)한 시각. 삭제 영역에서 "언제 지웠는지"를 보여주고, 복구하면 다시 비웁니다.

@@ -65,6 +65,13 @@ def ensure_schema(engine: Engine) -> None:
             conn.execute(text("ALTER TABLE lectures ADD COLUMN closing TEXT NULL"))
             logger.info("[db] lectures.closing added")
 
+        # 실행 시각을 키워드가 갖습니다 (크론 → 틱 방식 전환)
+        if not _column_exists(conn, "keywords", "run_hour"):
+            conn.execute(
+                text("ALTER TABLE keywords ADD COLUMN run_hour INT NOT NULL DEFAULT 4")
+            )
+            logger.info("[db] keywords.run_hour added")
+
         # 삭제 영역에서 "언제 지웠는지"를 보여주기 위한 컬럼
         if not _column_exists(conn, "keywords", "archived_at"):
             conn.execute(text("ALTER TABLE keywords ADD COLUMN archived_at DATETIME NULL"))

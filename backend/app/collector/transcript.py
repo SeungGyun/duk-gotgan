@@ -18,7 +18,7 @@ import random
 import re
 import time
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -90,35 +90,40 @@ def fetch(video: Video) -> Fetched:
     api = YouTubeTranscriptApi()
     langs = _pick_languages(video)
 
+    # 차단은 **목록 조회와 본문 다운로드 양쪽에서** 납니다. 한쪽만 감싸면
+    # 다른 쪽에서 새어 나가 "차단"으로 인식되지 않고, 그러면 백오프가 걸리지
+    # 않아 워커가 1분마다 계속 두드립니다 — 차단이 더 심해집니다.
     try:
-        available = api.list(video.id)
-    except (TranscriptsDisabled, NoTranscriptFound) as e:
-        raise TranscriptUnavailable("자막이 제공되지 않는 영상입니다.") from e
+        try:
+            available = api.list(video.id)
+        except (TranscriptsDisabled, NoTranscriptFound) as e:
+            raise TranscriptUnavailable("자막이 제공되지 않는 영상입니다.") from e
+        except VideoUnavailable as e:
+            raise TranscriptUnavailable("영상을 볼 수 없습니다(비공개·삭제).") from e
+
+        # 수동 자막 우선. 언어 선호 순서대로.
+        for finder, source in (
+            (available.find_manually_created_transcript, "youtube_manual"),
+            (available.find_generated_transcript, "youtube_auto"),
+        ):
+            for lang in langs:
+                try:
+                    found = finder([lang])
+                except NoTranscriptFound:
+                    continue
+                data = found.fetch().to_raw_data()
+                if data:
+                    return Fetched(source=source, language=lang, segments=data)
+
+        raise TranscriptUnavailable(f"쓸 수 있는 자막이 없습니다(찾은 언어: {langs}).")
+
     except (RequestBlocked, IpBlocked) as e:
         raise Blocked(
-            "유튜브가 자막 요청을 차단했습니다. 잠시 후 다시 시도하거나 "
-            "요청 간격을 늘려 주세요."
+            "유튜브가 자막 요청을 차단했습니다. 요청 간격을 늘리거나 "
+            "잠시 뒤에 다시 시도합니다."
         ) from e
-    except VideoUnavailable as e:
-        raise TranscriptUnavailable("영상을 볼 수 없습니다(비공개·삭제).") from e
     except CouldNotRetrieveTranscript as e:
         raise TranscriptUnavailable(f"자막을 가져오지 못했습니다. ({type(e).__name__})") from e
-
-    # 수동 자막 우선. 언어 선호 순서대로.
-    for finder, source in (
-        (available.find_manually_created_transcript, "youtube_manual"),
-        (available.find_generated_transcript, "youtube_auto"),
-    ):
-        for lang in langs:
-            try:
-                t = finder([lang])
-            except NoTranscriptFound:
-                continue
-            data = t.fetch().to_raw_data()
-            if data:
-                return Fetched(source=source, language=lang, segments=data)
-
-    raise TranscriptUnavailable(f"쓸 수 있는 자막이 없습니다(찾은 언어: {langs}).")
 
 
 # ── 전처리 ───────────────────────────────────────────────────
@@ -200,20 +205,40 @@ def store(db: Session, video: Video, fetched: Fetched) -> Transcript:
     return row
 
 
+# 차단당한 뒤 다시 시도하기까지 쉬는 시간. 차단은 분 단위가 아니라 시간
+# 단위 문제라, 1분 뒤에 다시 두드리면 차단만 길어집니다.
+BLOCK_COOLDOWN_MIN = 60
+_blocked_until: datetime | None = None
+
+
+def blocked_until() -> datetime | None:
+    """차단 냉각이 걸려 있으면 언제까지인지. 워커가 건너뛸 근거로 씁니다."""
+    return _blocked_until
+
+
 def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) -> dict:
     """자막 대기 중인 영상을 순서대로 처리합니다.
 
     **일부러 순차 처리합니다.** 동시에 던지면 IP 가 막히고, 한 번 막히면
     그날 수집 전체가 멈춥니다. 20건에 1~2분 걸리는 편이 훨씬 쌉니다.
     """
+    global _blocked_until
+
+    result = {"attempted": 0, "ok": 0, "failed": 0, "blocked": False, "rows": []}
+
+    if _blocked_until and now_kst() < _blocked_until:
+        result["blocked"] = True
+        result["error"] = (
+            f"유튜브 차단으로 자막 수집을 쉬는 중입니다 — {_blocked_until:%H:%M} 이후 재개."
+        )
+        return result
+
     videos = db.scalars(
         select(Video)
         .where(Video.state == "TRANSCRIPT_PENDING")
         .order_by(Video.discovered_at)
         .limit(limit)
     ).all()
-
-    result = {"attempted": 0, "ok": 0, "failed": 0, "blocked": False, "rows": []}
 
     for i, video in enumerate(videos):
         if i:
@@ -222,9 +247,13 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
         try:
             fetched = _fetch_with_retry(video)
         except Blocked as e:
-            logger.error("[transcript] 차단 — 남은 %d건 중단", len(videos) - i)
+            _blocked_until = now_kst() + timedelta(minutes=BLOCK_COOLDOWN_MIN)
+            logger.error(
+                "[transcript] 차단 — 남은 %d건 중단, %d분간 쉽니다",
+                len(videos) - i, BLOCK_COOLDOWN_MIN,
+            )
             result["blocked"] = True
-            result["error"] = str(e)
+            result["error"] = f"{e} ({BLOCK_COOLDOWN_MIN}분 후 재개)"
             break
         except TranscriptUnavailable as e:
             video.state = "FAILED_TRANSCRIPT"

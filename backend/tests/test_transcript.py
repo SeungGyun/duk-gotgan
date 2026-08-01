@@ -4,6 +4,8 @@
 타임스탬프 줄만 수천 개가 되고, 그 자체가 입력 토큰입니다.
 """
 
+import pytest
+
 from app.collector.transcript import (
     CHARS_PER_TOKEN,
     merge_segments,
@@ -70,3 +72,30 @@ def test_토큰_추정이_실측_범위_안에_있다():
     body = to_markdown(merge_segments([seg(i * 15, line) for i in range(240)]))
     per_min = int(len(body) / CHARS_PER_TOKEN) / 60
     assert 200 <= per_min <= 330, f"분당 {per_min:.0f} 토큰 — 실측(204~322)을 벗어났습니다"
+
+
+def test_다운로드_단계_차단도_Blocked_로_잡힌다():
+    """목록 조회만 감싸면 다운로드에서 난 차단이 새어 나가고, 그러면
+    백오프가 안 걸려 워커가 1분마다 계속 두드립니다."""
+    from unittest.mock import patch
+
+    from youtube_transcript_api._errors import IpBlocked
+
+    from app.collector import transcript as T
+    from app.db.models import Video
+
+    class FakeFound:
+        def fetch(self):
+            raise IpBlocked("x")
+
+    class FakeList:
+        def find_manually_created_transcript(self, langs):
+            return FakeFound()
+
+        def find_generated_transcript(self, langs):
+            return FakeFound()
+
+    video = Video(id="x", title="t", channel_title="c", duration_sec=100)
+    with patch.object(T.YouTubeTranscriptApi, "list", lambda self, vid: FakeList()):
+        with pytest.raises(T.Blocked):
+            T.fetch(video)
