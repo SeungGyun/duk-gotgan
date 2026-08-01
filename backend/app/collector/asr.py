@@ -32,7 +32,20 @@ logger = logging.getLogger(__name__)
 
 
 class AsrUnavailable(Exception):
-    """받아쓰기를 쓸 수 없습니다. 사유는 사람 말로 씁니다."""
+    """받아쓰기 **자체**를 쓸 수 없습니다 (ffmpeg 없음, 모델 없음 등).
+
+    이건 모든 영상에 해당하는 문제라, 다음 영상으로 넘어가도 똑같이 실패합니다.
+    """
+
+
+class AudioUnavailable(Exception):
+    """**이 영상의** 소리를 받을 수 없습니다 (403, 비공개, 멤버십 전용 등).
+
+    `AsrUnavailable` 과 갈라 두는 이유가 있습니다. 이걸 구분하지 않았더니
+    영상 한 편의 403 이 사이클 전체를 죽였습니다 — 자막도 검토도 못 하고
+    실행 기록이 `running` 인 채로 남았습니다. 영상 하나의 문제는 그 영상만
+    실패로 적고 다음으로 넘어가야 합니다.
+    """
 
 
 @dataclass
@@ -102,16 +115,16 @@ def _download_audio(video_id: str, workdir: str) -> str:
         "outtmpl": f"{workdir}/%(id)s.%(ext)s",
         "socket_timeout": 30,
     }
-    with yt_dlp.YoutubeDL(opts) as y:
-        info = y.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
-    path = y.prepare_filename(info)
-    size = 0
-    try:
-        import os
+    import os
 
+    try:
+        with yt_dlp.YoutubeDL(opts) as y:
+            info = y.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
+            path = y.prepare_filename(info)
         size = os.path.getsize(path)
-    except OSError as e:
-        raise AsrUnavailable(f"오디오를 받지 못했습니다 — {e}") from e
+    except Exception as e:  # noqa: BLE001 — yt-dlp 는 예외를 세분화하지 않습니다
+        # 403·비공개·지역제한·멤버십 전용 등. **이 영상만의 문제입니다.**
+        raise AudioUnavailable(f"오디오를 받지 못했습니다 ({type(e).__name__})") from e
     logger.info(
         "[asr] %s 오디오 %.1fMB · %.0f초", video_id, size / 1e6, time.time() - t0
     )

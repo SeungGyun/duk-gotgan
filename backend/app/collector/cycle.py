@@ -137,6 +137,23 @@ async def run_cycle(db: Session) -> CycleResult:
         db.add(run)
         db.commit()
 
+    try:
+        await _pipeline(db, run, r, targets)
+    except Exception as e:  # noqa: BLE001
+        # **무슨 일이 있어도 실행 기록은 마감합니다.** 안 그러면 running 인
+        # 채로 남아 실행 로그가 미완성 줄로 쌓입니다. 실제로 그랬습니다 —
+        # 영상 하나의 403 이 사이클을 죽여 기록 여섯 개가 열린 채였습니다.
+        db.rollback()
+        r.notes.append(f"사이클이 중단됐습니다 — {type(e).__name__}: {e}")
+        logger.exception("[cycle] 예기치 못한 오류")
+        _finish(db, run, r, tokens=(0, 0))
+        raise
+    return r
+
+
+async def _pipeline(
+    db: Session, run: CrawlRun, r: CycleResult, targets: list[Keyword]
+) -> None:
     # 2) 수집 — 쿼터가 모자라면 알아서 멈춥니다
     if targets:
         try:
@@ -172,7 +189,6 @@ async def run_cycle(db: Session) -> CycleResult:
             r.notes.append(f"{x.title[:30]} — {x.error}")
 
     _finish(db, run, r, tokens=(sum(x.input_weighted for x in done), sum(x.output_tokens for x in done)))
-    return r
 
 
 def _finish(db: Session, run: CrawlRun, r: CycleResult, tokens: tuple[int, int]) -> None:

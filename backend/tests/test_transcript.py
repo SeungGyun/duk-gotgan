@@ -176,3 +176,45 @@ def test_연속_차단이면_대기가_배로_늘어난다():
 
     assert [cooldown_minutes(n) for n in (1, 2, 3, 4)] == [60, 120, 240, 480]
     assert cooldown_minutes(9) == 480  # 8시간에서 멈춥니다
+
+
+def test_영상_하나의_오디오_실패는_사이클을_죽이지_않는다(monkeypatch):
+    """실제로 있었던 일: 영상 한 편의 403 이 yt-dlp DownloadError 로 새어
+    나가 사이클 전체를 죽였습니다. 자막도 검토도 못 하고 실행 기록 여섯
+    개가 `running` 인 채로 남았습니다.
+
+    영상 하나의 문제는 그 영상만 실패로 적고 넘어가야 합니다 — 차단으로
+    다루면 멀쩡한 나머지까지 60분씩 멈춥니다."""
+    import pytest
+
+    from app.collector import asr, transcript
+
+    monkeypatch.setattr(
+        asr, "transcribe",
+        lambda *a, **k: (_ for _ in ()).throw(asr.AudioUnavailable("오디오를 받지 못했습니다 (DownloadError)")),
+    )
+
+    class V:
+        id, duration_sec, default_language, title = "v", 600, "ko", "t"
+
+    with pytest.raises(transcript.TranscriptUnavailable):
+        transcript.fetch_via_asr(V())
+
+
+def test_받아쓰기_자체가_안_되면_차단으로_다룬다(monkeypatch):
+    """ffmpeg 가 없는 것은 모든 영상에 해당합니다. 이걸 '자막 없음'으로
+    적으면 나중에 고쳐도 다시 시도하지 않습니다."""
+    import pytest
+
+    from app.collector import asr, transcript
+
+    monkeypatch.setattr(
+        asr, "transcribe",
+        lambda *a, **k: (_ for _ in ()).throw(asr.AsrUnavailable("ffmpeg 가 없습니다.")),
+    )
+
+    class V:
+        id, duration_sec, default_language, title = "v", 600, "ko", "t"
+
+    with pytest.raises(transcript.Blocked):
+        transcript.fetch_via_asr(V())

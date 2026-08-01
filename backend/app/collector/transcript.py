@@ -452,6 +452,10 @@ def fetch_via_asr(video: Video) -> Fetched:
     langs = _pick_languages(video)
     try:
         r = asr.transcribe(video.id, video.duration_sec or 0, language=langs[0] if langs else "ko")
+    except asr.AudioUnavailable as e:
+        # 이 영상만의 문제입니다. 자막 없음으로 적고 다음 영상으로 넘어갑니다 —
+        # 차단으로 다루면 멀쩡한 나머지까지 60분씩 멈춥니다.
+        raise TranscriptUnavailable(str(e)) from None
     except asr.AsrUnavailable as e:
         # 받아쓰기까지 못 하면 **차단으로 다룹니다.** 이 영상만의 문제인지
         # IP 문제인지 구분할 수 없는데, 자막 없음으로 기록해 버리면 나중에
