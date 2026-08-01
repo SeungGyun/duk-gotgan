@@ -95,6 +95,9 @@ def _download_audio(video_id: str, workdir: str) -> str:
     opts = {
         "quiet": True,
         "no_warnings": True,
+        # 진행바를 끕니다. `quiet` 만으로는 안 꺼지는데, 켜 두면 영상 한 편이
+        # 로그 40줄을 먹어서 하룻밤 로그가 읽을 수 없게 됩니다.
+        "noprogress": True,
         "format": "bestaudio",
         "outtmpl": f"{workdir}/%(id)s.%(ext)s",
         "socket_timeout": 30,
