@@ -164,3 +164,23 @@ def test_API_키가_없으면_쿼터를_깎기_전에_멈춘다(db, monkeypatch)
     with pytest.raises(YouTubeError, match="API 키"):
         D.run_discovery(db)
     assert db.get(UsageLedger, now_kst().date()) is None
+
+
+def test_사이클이_준_기록에는_손대지_않는다(db, monkeypatch):
+    """실행 기록을 사이클이 만들었으면 마감도 사이클이 합니다. 여기서
+    succeeded 로 닫아버리면 뒤이어 도는 자막·검토 결과가 못 들어갑니다."""
+    from app.db.models import CrawlRun
+    from config.time import now_kst
+
+    add_keyword(db)
+    patch_youtube(monkeypatch, [fake_candidate()])
+    outer = CrawlRun(trigger="scheduled", status="running", started_at=now_kst(), stats={})
+    db.add(outer)
+    db.commit()
+
+    run, _ = D.run_discovery(db, run=outer)
+
+    assert run.id == outer.id
+    assert run.status == "running", "사이클이 마감할 때까지 열려 있어야 합니다"
+    assert run.finished_at is None
+    assert run.stats["discovered"] == 1

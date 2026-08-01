@@ -29,6 +29,9 @@ const atHour = (n: number, h: number, min = 0) => {
 /** n일 전 04:mm — 정기 실행은 새벽에 돈다 */
 const runAt = (n: number, min = 0) => atHour(n, 4, min);
 
+/** 목에서 "지금 실행"으로 쌓인 요청 — 워커가 없으니 대기 상태로 남습니다 */
+let queuedRuns: Run[] = [];
+
 let seq = 100;
 const nextId = (p: string) => `${p}_${++seq}`;
 
@@ -850,9 +853,28 @@ export const mockApi: Api = {
     };
   },
 
+  async requestRun() {
+    await delay(320);
+    const run: Run = {
+      id: nextId("run"),
+      label: "실행 대기 중",
+      trigger: "manual",
+      status: "queued",
+      startedAt: iso(new Date()),
+      finishedAt: null,
+      stats: { discovered: 0, rulePassed: 0, transcribed: 0, reviewed: 0, published: 0 },
+      tokens: 0,
+      youtubeUnits: 0,
+      error: null,
+    };
+    queuedRuns = [run, ...queuedRuns];
+    return { ...run };
+  },
+
   async listRuns(): Promise<Run[]> {
     await delay();
     return [
+      ...queuedRuns,
       {
         id: "run_3",
         label: "키워드 10개 · 정기 실행",

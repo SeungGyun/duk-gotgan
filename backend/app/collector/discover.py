@@ -192,7 +192,10 @@ def _event(db, video_id, run_id, frm, to, stage, ok, detail) -> None:
 
 
 def run_discovery(
-    db: Session, keyword_ids: list[str] | None = None, trigger: str = "manual"
+    db: Session,
+    keyword_ids: list[str] | None = None,
+    trigger: str = "manual",
+    run: CrawlRun | None = None,
 ) -> tuple[CrawlRun, list[DiscoverResult]]:
     """대상 키워드를 골라 한 번 실행합니다.
 
@@ -212,14 +215,15 @@ def run_discovery(
             "Google Cloud Console → API 및 서비스 → YouTube Data API v3 사용 설정 → 사용자 인증 정보에서 발급합니다."
         )
 
-    run = CrawlRun(
-        label=f"키워드 {len(targets)}개 · {'수동' if trigger == 'manual' else '정기'} 실행",
-        trigger=trigger,
-        status="running",
-        started_at=now_kst(),
-        stats={},
-    )
-    db.add(run)
+    # 사이클이 이미 만들어 둔 실행 기록이 있으면 거기에 이어 씁니다.
+    # 없을 때만 새로 만들고, **만든 쪽이 마감까지 책임집니다** — 안 그러면
+    # CLI 로 직접 부를 때 기록이 running 인 채로 남습니다.
+    owns_run = run is None
+    if owns_run:
+        run = CrawlRun(trigger=trigger, status="running", started_at=now_kst(), stats={})
+        db.add(run)
+    run.label = f"키워드 {len(targets)}개 · {'수동' if trigger == 'manual' else '정기'} 실행"
+    run.status = "running"
     # 루프 전에 커밋합니다. flush 만 하면 키워드 하나가 실패해 롤백할 때
     # **실행 이력 자체가 사라져**, 정작 실패를 기록해야 할 행이 없어집니다.
     # 진행 중인 실행이 화면에 보이는 것도 맞는 동작입니다.
@@ -253,14 +257,18 @@ def run_discovery(
             failures.append(f'"{kw.term}" — {e}')
             logger.error("[discover] %s 실패: %s", kw.term, e)
 
-    run.stats = totals
-    run.finished_at = now_kst()
-    if failures and not totals["discovered"]:
-        run.status = "failed"
-    elif failures:
-        run.status = "partial"
-    else:
-        run.status = "succeeded"
-    run.error = " / ".join(failures) if failures else None
+    stats = dict(run.stats or {})
+    stats.update(totals)
+    run.stats = stats
+    if failures:
+        run.error = " / ".join(failures)
+    if owns_run:
+        run.finished_at = now_kst()
+        if failures and not totals["discovered"]:
+            run.status = "failed"
+        elif failures:
+            run.status = "partial"
+        else:
+            run.status = "succeeded"
     db.commit()
     return run, results

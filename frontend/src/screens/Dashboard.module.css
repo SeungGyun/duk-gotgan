@@ -251,3 +251,15 @@
   color: var(--muted);
   font-family: var(--mono);
 }
+
+/* "지금 실행" 결과 안내 — 요청만 남기는 동작이라 무슨 일이 일어났는지
+   한 줄로 말해 줘야 합니다. 안 그러면 버튼이 먹통인 줄 압니다. */
+.runNote {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r);
+  background: var(--accent-soft);
+  color: var(--ink-2);
+  font-size: 13px;
+}

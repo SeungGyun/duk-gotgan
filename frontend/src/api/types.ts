@@ -155,7 +155,8 @@ export interface LectureDetail extends LectureSummary {
 }
 
 // ── 실행 이력 ─────────────────────────────────────────────
-export type RunStatus = "running" | "succeeded" | "partial" | "failed";
+/** queued = "지금 실행" 요청이 접수되어 워커를 기다리는 중 */
+export type RunStatus = "queued" | "running" | "succeeded" | "partial" | "failed";
 export type RunTrigger = "initial" | "scheduled" | "manual";
 
 export interface RunStats {

@@ -1,3 +1,6 @@
+import { useState } from "react";
+
+import { api } from "../api";
 import type { Failure, Overview, Usage } from "../api";
 import { Screen } from "../components/Screen";
 import { Button, Chip, ErrorState, Loading, Meter, Panel } from "../components/ui";
@@ -22,6 +25,26 @@ export function Dashboard({
   error: string | null;
   onRetry: () => void;
 }) {
+  // "지금 실행"은 요청만 남깁니다. 워커가 다음 틱에 집어가므로 버튼을 누른
+  // 뒤 몇 초 안에 실행 로그에 나타납니다 — 여기서 결과를 기다리지 않습니다.
+  const [requesting, setRequesting] = useState(false);
+  const [runNote, setRunNote] = useState<string | null>(null);
+
+  const requestRun = async () => {
+    setRequesting(true);
+    setRunNote(null);
+    try {
+      await api.requestRun();
+      setRunNote("실행을 요청했습니다. 곧 시작됩니다 — 실행 로그에서 진행을 볼 수 있습니다.");
+      onRetry();
+    } catch (e) {
+      setRunNote(e instanceof Error ? e.message : "요청에 실패했습니다.");
+    } finally {
+      setRequesting(false);
+      window.setTimeout(() => setRunNote(null), 6000);
+    }
+  };
+
   if (error) {
     return (
       <Screen title="대시보드">
@@ -61,8 +84,18 @@ export function Dashboard({
     <Screen
       title="대시보드"
       subtitle={`마지막 실행 ${when(overview.lastRunAt)}`}
-      actions={<Button>지금 실행</Button>}
+      actions={
+        <Button variant="primary" onClick={() => void requestRun()} disabled={requesting}>
+          {requesting ? "요청 중…" : "지금 실행"}
+        </Button>
+      }
     >
+      {runNote && (
+        <p className={s.runNote} role="status">
+          {runNote}
+        </p>
+      )}
+
       <Panel bodyless>
         <div className={s.stats}>
           <div className={s.stat}>

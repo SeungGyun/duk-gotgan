@@ -21,6 +21,7 @@ const statusChip: Record<Run["status"], { tone: "pass" | "warn" | "fail" | "neut
     partial: { tone: "warn", label: "일부 실패" },
     failed: { tone: "fail", label: "실패" },
     running: { tone: "neutral", label: "진행 중" },
+    queued: { tone: "neutral", label: "대기 중" },
   };
 
 function clock(iso: string): string {

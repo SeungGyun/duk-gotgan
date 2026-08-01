@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.api.errors import ApiError
 from app.api.serializers import run_out
 from app.db.models import CrawlRun, Keyword, Lecture, UsageLedger, Video, VideoKeyword
 from app.db.session import get_db
@@ -113,6 +114,31 @@ def usage(db: Session = Depends(get_db)):
 def list_runs(db: Session = Depends(get_db)):
     rows = db.scalars(select(CrawlRun).order_by(CrawlRun.started_at.desc()).limit(50)).all()
     return [run_out(r) for r in rows]
+
+
+@router.post("/runs", status_code=202)
+def request_run(db: Session = Depends(get_db)):
+    """"지금 실행" — **요청만 남깁니다.** 워커가 다음 틱에 집어갑니다.
+
+    여기서 직접 돌리지 않는 이유: 한 사이클이 몇 분씩 걸려서 HTTP 요청이
+    그동안 매달려 있게 되고, 브라우저가 먼저 끊으면 진행 상황을 알 수
+    없습니다. 요청을 기록으로 남기면 실행 로그에 바로 보이고, 워커가
+    집어가면서 상태가 이어집니다.
+    """
+    waiting = db.scalar(select(CrawlRun).where(CrawlRun.status == "queued"))
+    if waiting is not None:
+        raise ApiError(409, "RUN_ALREADY_QUEUED", "이미 실행을 기다리는 요청이 있습니다.")
+
+    run = CrawlRun(
+        trigger="manual",
+        status="queued",
+        started_at=now_kst(),
+        label="실행 대기 중",
+        stats={},
+    )
+    db.add(run)
+    db.commit()
+    return run_out(run)
 
 
 # ── 내부 ──────────────────────────────────────────────────
