@@ -17,6 +17,7 @@ from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.collector import queue
 from app.db.models import Keyword, PipelineEvent, Transcript, Video, VideoKeyword
 from app.llm import usage, workspace
 from app.llm.guard import make_path_guard, make_pretool_hook
@@ -181,14 +182,29 @@ def _absorb(run: ReviewRun, msg: ResultMessage, transcript_tokens: int) -> None:
     run.early_exit = transcript_tokens > 0 and read < transcript_tokens * EARLY_EXIT_RATIO
 
 
+# 영상 탓이 아닌 고장들. 다음 사이클에 그대로 다시 시도합니다.
+_TRANSIENT = (
+    "control request timeout",
+    "initialize",
+    "timed out",
+    "timeout",
+    "connection",
+    "broken pipe",
+    "econnreset",
+    "lost connection",
+)
+
+
+def _is_transient(error: str | None) -> bool:
+    low = (error or "").lower()
+    return any(sig in low for sig in _TRANSIENT)
+
+
 async def review_pending(db: Session, limit: int = 10) -> list[ReviewRun]:
     """검토 대기 중인 영상을 연속으로 처리합니다."""
-    videos = db.scalars(
-        select(Video)
-        .where(Video.state == "TRANSCRIBED")
-        .order_by(Video.discovered_at)
-        .limit(limit)
-    ).all()
+    # 자막과 같은 이유로 키워드끼리 번갈아 집습니다 (queue.py 참고).
+    videos = [db.get(Video, i) for i in queue.next_ids(db, "TRANSCRIBED", limit)]
+    videos = [v for v in videos if v is not None]
 
     runs: list[ReviewRun] = []
     for video in videos:
@@ -209,8 +225,16 @@ async def review_pending(db: Session, limit: int = 10) -> list[ReviewRun]:
         runs.append(run)
 
         if not run.ok:
-            video.state = "FAILED_REVIEW"
-            video.state_reason = run.error
+            # **일시적 고장은 탈락이 아닙니다.** 받아쓰기가 GPU 를 붙들고 있는
+            # 동안 SDK 가 시작 시간을 못 맞춰 `Control request timeout:
+            # initialize` 로 죽는 일이 밤새 18번 있었습니다. 이걸 FAILED_REVIEW
+            # 로 적었더니 그 영상들은 두 번 다시 검토되지 않았습니다 —
+            # 영상에는 아무 문제가 없는데도요.
+            transient = _is_transient(run.error)
+            video.state = "TRANSCRIBED" if transient else "FAILED_REVIEW"
+            video.state_reason = None if transient else run.error
+            if transient:
+                logger.warning("[review] 일시적 실패 — 다음 사이클에 다시 봅니다: %s", run.error)
             db.add(
                 PipelineEvent(
                     video_id=video.id,

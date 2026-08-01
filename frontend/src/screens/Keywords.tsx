@@ -24,7 +24,7 @@ import s from "./Keywords.module.css";
  *  보니 채널은 보통 "5분 미만 클립"과 "10분 이상 본편"으로 갈립니다
  *  (가인지TV 50건: ~5분 35건, 5~10분 0건, 10분 이상 15건). 20분으로 두면
  *  10~20분대 본편이 통째로 버려집니다. */
-const MIN_DURATION: Record<SourceType, number> = { search: 600, channel: 600 };
+const MIN_DURATION: Record<SourceType, number> = { search: 0, channel: 0 };
 
 const DEFAULT_DRAFT: KeywordDraft = {
   term: "",
@@ -278,13 +278,14 @@ export function Keywords({ list }: { list: ListState }) {
             올릴수록 전문 강의만 남습니다.{" "}
             {isChannel ? (
               <>
-                직접 고른 채널이라 <strong>조회수는 보지 않습니다</strong>. 채널은 보통 짧은
-                클립과 본편으로 갈려서 <strong>최소 길이 10분</strong>이면 본편만 들어옵니다.
+                직접 고른 채널이라 <strong>조회수는 보지 않습니다</strong>. 최근{" "}
+                <strong>6개월</strong> 안에 올라온 영상만 봅니다.
               </>
             ) : (
               <>
-                <strong>최소 길이를 20분 미만</strong>으로 두면 유튜브 검색에 길이 조건을 걸지
-                않고 직접 거릅니다 — 짧은 영상도 들어오는 대신 후보에 쇼츠가 섞입니다.
+                최근 <strong>6개월</strong> 안에 올라온 영상만 봅니다. 최소 길이가{" "}
+                <strong>0이면 쇼츠도</strong> 들어오고, 20분 이상으로 올리면 유튜브 검색
+                단계에서부터 긴 영상만 받아 후보가 알차집니다.
               </>
             )}
           </p>

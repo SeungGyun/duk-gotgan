@@ -32,6 +32,7 @@ from youtube_transcript_api._errors import (
     VideoUnavailable,
 )
 
+from app.collector import queue
 from app.db.models import PipelineEvent, Transcript, Video
 from config.settings import settings
 from config.time import now_kst
@@ -334,12 +335,11 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
             "[transcript] 자막 경로 냉각 중(%s 재개) — 받아쓰기로 갑니다", f"{_blocked_until:%H:%M}"
         )
 
-    videos = db.scalars(
-        select(Video)
-        .where(Video.state == "TRANSCRIPT_PENDING")
-        .order_by(Video.discovered_at)
-        .limit(limit)
-    ).all()
+    # 키워드끼리 번갈아 집습니다. 먼저 온 순서대로 하면 첫 키워드가 줄의
+    # 앞을 통째로 차지해 나머지는 영원히 차례가 안 옵니다 (queue.py 참고).
+    ids = queue.next_ids(db, "TRANSCRIPT_PENDING", limit)
+    videos = [db.get(Video, i) for i in ids]
+    videos = [v for v in videos if v is not None]
 
     spent = 0.0  # 이번 사이클에 받아쓰기로 쓴 시간
     for i, video in enumerate(videos):

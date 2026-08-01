@@ -102,3 +102,17 @@ def test_락_놓기가_실패해도_예외로_번지지_않는다(monkeypatch):
     monkeypatch.setattr(lock, "engine", type("E", (), {"connect": staticmethod(DeadConn)})())
     with lock.try_lock() as acquired:
         assert acquired  # 여기까지 왔으면 잡은 것
+
+
+def test_일시적_실패는_탈락이_아니다():
+    """밤새 `Control request timeout: initialize` 가 18번 났습니다. 받아쓰기가
+    GPU 를 붙들고 있는 동안 SDK 가 시작 시간을 못 맞춘 것으로, 영상에는 아무
+    문제가 없습니다. 그런데 FAILED_REVIEW 로 적어 두 번 다시 검토되지
+    않았습니다."""
+    from app.llm.runner import _is_transient
+
+    assert _is_transient("Control request timeout: initialize")
+    assert _is_transient("Lost connection to MySQL server")
+    # 진짜 실패는 그대로 탈락이어야 합니다
+    assert not _is_transient("형식 오류 3회 — sections 가 문자열입니다")
+    assert not _is_transient(None)
