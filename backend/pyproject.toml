@@ -10,6 +10,8 @@ dependencies = [
     "pymysql>=1.1.0",
     "cryptography>=43.0.0",
     "pydantic-settings>=2.6.0",
+    "youtube-transcript-api>=1.2",
+    "yt-dlp>=2026.7",
 ]
 
 [project.optional-dependencies]

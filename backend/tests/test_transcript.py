@@ -99,3 +99,33 @@ def test_다운로드_단계_차단도_Blocked_로_잡힌다():
     with patch.object(T.YouTubeTranscriptApi, "list", lambda self, vid: FakeList()):
         with pytest.raises(T.Blocked):
             T.fetch(video)
+
+
+def test_ytdlp_는_번역본이_아니라_원본을_고른다():
+    """자동 자막 목록에는 원본(ko-orig)과 157개 언어 기계번역이 섞여
+    있습니다. 번역본을 집으면 기계번역을 요약하게 됩니다."""
+    from app.collector.transcript import _ytdlp_pick
+
+    tracks = {
+        "en": [{"ext": "json3", "url": "en-translated"}],
+        "ko": [{"ext": "json3", "url": "ko-translated"}],
+        "ko-orig": [{"ext": "json3", "url": "ko-original"}],
+    }
+    url, lang = _ytdlp_pick(tracks, ["ko", "en"])
+    assert url == "ko-original"
+    assert lang == "ko-orig"
+
+
+def test_ytdlp_json3_파싱():
+    from app.collector.transcript import _ytdlp_parse
+
+    payload = {
+        "events": [
+            {"tStartMs": 0, "dDurationMs": 2500, "segs": [{"utf8": "안녕"}, {"utf8": "하세요"}]},
+            {"tStartMs": 3000, "dDurationMs": 1000, "segs": [{"utf8": "\n"}]},  # 빈 줄
+            {"tStartMs": 4000, "dDurationMs": 2000, "segs": [{"utf8": "본문"}]},
+        ]
+    }
+    out = _ytdlp_parse(payload)
+    assert [s["text"] for s in out] == ["안녕하세요", "본문"]
+    assert out[0]["start"] == 0 and out[1]["start"] == 4.0

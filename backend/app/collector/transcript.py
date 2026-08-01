@@ -44,10 +44,10 @@ TTL_DAYS = 30
 # 너무 크게 묶으면 타임스탬프 링크가 부정확해집니다.
 MERGE_WINDOW_SEC = 15
 
-# 요청 간 지연. youtube-transcript-api 는 공식 API 가 아니라, 빠르게
-# 연속 호출하면 IP 가 막힙니다. 한 번 막히면 그날 수집이 통째로 멈추므로
-# 넉넉히 쉬는 편이 쌉니다.
-DELAY_RANGE = (3.0, 5.0)
+# 요청 간 지연. 공식 API 가 아니라 빠르게 연속 호출하면 IP 가 막힙니다.
+# 3~5초로 두었다가 실제로 차단당했습니다(자막 30여 건 뒤). 넉넉히 쉬는 쪽이
+# 훨씬 쌉니다 — 20건에 10분 걸려도 하루 1~2건 규모에선 문제가 안 됩니다.
+DELAY_RANGE = (15.0, 30.0)
 MAX_RETRY = 3
 
 # 한국어 토큰 추정치. 실제 값은 M4 에서 실측해 바로잡습니다.
@@ -124,6 +124,88 @@ def fetch(video: Video) -> Fetched:
         ) from e
     except CouldNotRetrieveTranscript as e:
         raise TranscriptUnavailable(f"자막을 가져오지 못했습니다. ({type(e).__name__})") from e
+
+
+# ── 폴백: yt-dlp ─────────────────────────────────────────────
+# 자막에는 **공식 무료 경로가 없습니다.** Data API 의 captions.download 는
+# OAuth + 영상 소유권이 필요해 남의 영상은 못 받습니다.
+#
+# ⚠️ **IP 차단에는 답이 아닙니다.** 두 라이브러리 모두 결국 같은
+# `youtube.com/api/timedtext` 를 부릅니다. 실측해 보니 그 엔드포인트가 429 를
+# 주는 동안에는 클라이언트를 바꿔도, 포맷을 json3→srv1→vtt 로 바꿔도 전부
+# 막힙니다. 차단 대책은 요청 간격(DELAY_RANGE)과 냉각(BLOCK_COOLDOWN_MIN)입니다.
+#
+# 그래도 두는 이유는 **고장의 종류가 다르기 때문**입니다. 유튜브가 내부 구조를
+# 바꾸면 youtube-transcript-api 는 며칠씩 깨져 있는 반면 yt-dlp 는 보통 하루
+# 안에 고쳐집니다. 파싱이 깨진 경우에는 이쪽이 살립니다.
+
+
+def _ytdlp_pick(tracks: dict, langs: list[str]) -> tuple[str, str] | None:
+    """(자막 URL, 언어). **원본 음성인식을 우선**합니다.
+
+    자동 자막 목록에는 원본(`ko-orig`)과 157개 언어로 기계번역된 것(`ko`,
+    `en`, …)이 섞여 있습니다. 번역본을 집으면 기계번역을 요약하게 됩니다.
+    """
+    for lang in langs:
+        for key in (f"{lang}-orig", lang):
+            for track in tracks.get(key) or []:
+                if track.get("ext") == "json3" and track.get("url"):
+                    return track["url"], key
+    return None
+
+
+def _ytdlp_parse(payload: dict) -> list[dict]:
+    """json3 → [{start, dur, text}]."""
+    out = []
+    for ev in payload.get("events") or []:
+        segs = ev.get("segs") or []
+        text = "".join(s.get("utf8", "") for s in segs).strip()
+        if not text:
+            continue
+        out.append(
+            {
+                "start": (ev.get("tStartMs") or 0) / 1000,
+                "dur": (ev.get("dDurationMs") or 0) / 1000,
+                "text": text,
+            }
+        )
+    return out
+
+
+def fetch_via_ytdlp(video: Video) -> Fetched:
+    import json as _json
+
+    import yt_dlp
+
+    langs = _pick_languages(video)
+    opts = {"quiet": True, "no_warnings": True, "skip_download": True, "socket_timeout": 20}
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(
+                f"https://www.youtube.com/watch?v={video.id}", download=False
+            )
+
+            for tracks, source in (
+                (info.get("subtitles") or {}, "youtube_manual"),
+                (info.get("automatic_captions") or {}, "youtube_auto"),
+            ):
+                picked = _ytdlp_pick(tracks, langs)
+                if not picked:
+                    continue
+                url, lang = picked
+                # **yt-dlp 의 세션으로 받습니다.** 맨몸 urlopen 은 User-Agent 가
+                # "Python-urllib" 이라 봇으로 보여 429 를 맞습니다 (실제로 맞았습니다).
+                # ydl 은 브라우저 헤더와 쿠키를 이미 들고 있습니다.
+                raw = ydl.urlopen(url).read().decode("utf-8")
+                segments = _ytdlp_parse(_json.loads(raw))
+                if segments:
+                    return Fetched(
+                        source=source, language=lang.replace("-orig", ""), segments=segments
+                    )
+    except Exception as e:  # noqa: BLE001 — 라이브러리가 예외를 세분화하지 않습니다
+        raise TranscriptUnavailable(f"yt-dlp 로도 받지 못했습니다. ({type(e).__name__})") from e
+
+    raise TranscriptUnavailable(f"yt-dlp 에도 쓸 수 있는 자막이 없습니다(찾은 언어: {langs}).")
 
 
 # ── 전처리 ───────────────────────────────────────────────────
@@ -278,18 +360,32 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
 
 
 def _fetch_with_retry(video: Video) -> Fetched:
-    """차단은 재시도로 못 풉니다 — 간격을 벌려야 합니다."""
+    """1차 경로로 받고, 막히면 yt-dlp 로 넘어갑니다.
+
+    차단은 재시도로 풀리지 않습니다 — 같은 경로로 다시 두드리면 차단만
+    길어집니다. 그래서 짧게 두 번만 더 시도해 보고, 안 되면 **경로를 바꿉니다.**
+    """
     delay = 5.0
     for attempt in range(MAX_RETRY):
         try:
             return fetch(video)
         except Blocked:
             if attempt == MAX_RETRY - 1:
-                raise
+                break
             logger.warning("[transcript] 차단 감지 — %.0f초 후 재시도", delay)
             time.sleep(delay)
             delay *= 2
-    raise Blocked("반복 차단으로 중단했습니다.")
+
+    logger.warning("[transcript] %s — 1차 경로 차단, yt-dlp 로 시도합니다", video.id)
+    try:
+        fetched = fetch_via_ytdlp(video)
+    except TranscriptUnavailable:
+        # 폴백까지 못 받으면 **차단으로 다룹니다.** 이 영상만의 문제인지
+        # IP 문제인지 구분할 수 없는데, 자막 없음으로 기록해 버리면 나중에
+        # 차단이 풀려도 다시 시도하지 않습니다.
+        raise Blocked("두 경로 모두 자막을 받지 못했습니다.") from None
+    logger.info("[transcript] %s — yt-dlp 폴백 성공", video.id)
+    return fetched
 
 
 def _event(db: Session, video: Video, run_id, frm: str, to: str, ok: bool, detail: str) -> None:
