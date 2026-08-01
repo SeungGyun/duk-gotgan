@@ -167,3 +167,12 @@ def test_차단은_실패가_아니라_보류로_쌓인다():
     r = CycleResult()
     r.paused.append("유튜브 차단으로 자막 수집을 쉬는 중입니다")
     assert not r.notes  # 실패로 새지 않아야 합니다
+
+
+def test_연속_차단이면_대기가_배로_늘어난다():
+    """실측: 60분 고정으로 5시간 동안 매시간 두드려 전부 429 를 받았습니다.
+    풀리지 않는 차단에 규칙적으로 노크하면 차단만 갱신됩니다."""
+    from app.collector.transcript import cooldown_minutes
+
+    assert [cooldown_minutes(n) for n in (1, 2, 3, 4)] == [60, 120, 240, 480]
+    assert cooldown_minutes(9) == 480  # 8시간에서 멈춥니다

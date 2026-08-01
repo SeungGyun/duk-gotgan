@@ -289,8 +289,20 @@ def store(db: Session, video: Video, fetched: Fetched) -> Transcript:
 
 # 차단당한 뒤 다시 시도하기까지 쉬는 시간. 차단은 분 단위가 아니라 시간
 # 단위 문제라, 1분 뒤에 다시 두드리면 차단만 길어집니다.
+#
+# **연속으로 막히면 배로 늘립니다.** 60분 고정으로 두고 관찰해 보니, 매시간
+# 정확히 한 번 두드리고 매번 429 를 받았습니다 — 5시간 동안 성공 0건.
+# 풀리지 않는 차단에 규칙적으로 노크하는 것은 차단을 갱신시킬 뿐입니다.
+# 성공하면 다시 기본값으로 돌아갑니다.
 BLOCK_COOLDOWN_MIN = 60
+BLOCK_COOLDOWN_MAX_MIN = 8 * 60
 _blocked_until: datetime | None = None
+_block_streak = 0
+
+
+def cooldown_minutes(streak: int) -> int:
+    """연속 차단 횟수에 따른 대기 시간 — 60 · 120 · 240 · 480분에서 멈춥니다."""
+    return min(BLOCK_COOLDOWN_MIN * 2 ** max(0, streak - 1), BLOCK_COOLDOWN_MAX_MIN)
 
 
 def blocked_until() -> datetime | None:
@@ -304,7 +316,7 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
     **일부러 순차 처리합니다.** 동시에 던지면 IP 가 막히고, 한 번 막히면
     그날 수집 전체가 멈춥니다. 20건에 1~2분 걸리는 편이 훨씬 쌉니다.
     """
-    global _blocked_until
+    global _blocked_until, _block_streak
 
     result = {"attempted": 0, "ok": 0, "failed": 0, "blocked": False, "rows": []}
 
@@ -329,13 +341,15 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
         try:
             fetched = _fetch_with_retry(video)
         except Blocked as e:
-            _blocked_until = now_kst() + timedelta(minutes=BLOCK_COOLDOWN_MIN)
+            _block_streak += 1
+            wait = cooldown_minutes(_block_streak)
+            _blocked_until = now_kst() + timedelta(minutes=wait)
             logger.error(
-                "[transcript] 차단 — 남은 %d건 중단, %d분간 쉽니다",
-                len(videos) - i, BLOCK_COOLDOWN_MIN,
+                "[transcript] 차단 %d회 연속 — 남은 %d건 중단, %d분간 쉽니다 (%s 재개)",
+                _block_streak, len(videos) - i, wait, f"{_blocked_until:%H:%M}",
             )
             result["blocked"] = True
-            result["error"] = f"{e} ({BLOCK_COOLDOWN_MIN}분 후 재개)"
+            result["error"] = f"{e} ({wait}분 후 재개)"
             break
         except TranscriptUnavailable as e:
             video.state = "FAILED_TRANSCRIPT"
@@ -352,6 +366,7 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
         _event(db, video, run_id, "TRANSCRIPT_PENDING", video.state, True, fetched.source)
         db.commit()
         result["ok"] += 1
+        _block_streak = 0  # 한 건이라도 받았으면 차단이 풀린 것 — 대기를 되돌립니다
         result["rows"].append(
             (video.title, "○", f"{fetched.source} {fetched.language} · {row.est_tokens:,} 토큰")
         )
