@@ -144,3 +144,18 @@ def test_언어_무관이면_영어도_통과한다():
     요약은 어차피 한국어로 쓰므로, 원하면 받을 수 있어야 합니다."""
     kw = make_keyword(language="any")
     assert evaluate(make_candidate(default_language="en-US"), kw).ok
+
+
+def test_지운_키워드는_기준을_쥐지_않는다():
+    """실제로 있었던 일: `결제 시스템 설계`(기준 80점)를 삭제했는데, 그
+    키워드가 데려온 영상들이 계속 80점으로 판정돼 58점짜리가 탈락했습니다.
+    살아 있는 키워드 기준은 45점이었는데도요.
+
+    여기서는 쿼리 조건만 잠급니다 — 판정과 프롬프트 양쪽이 같은 집합을
+    봐야 하는데, 한쪽만 고치면 AI 가 요약을 생략해 조용히 어긋납니다."""
+    import inspect
+
+    from app.llm import runner, tools
+
+    for src in (inspect.getsource(tools._keywords_of), inspect.getsource(runner.review_video)):
+        assert "Keyword.archived_at.is_(None)" in src

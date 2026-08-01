@@ -120,11 +120,14 @@ async def review_video(db: Session, video: Video) -> ReviewRun:
         run.error = "자막이 없습니다."
         return run
 
+    # **살아 있는 키워드만.** 지운 키워드의 기준 점수가 프롬프트의
+    # summary_threshold 로 들어가면, AI 가 "미달"로 보고 요약을 생략해
+    # 판정 쪽을 고쳐도 소용이 없습니다. 두 곳이 같은 집합을 봐야 합니다.
     keywords = list(
         db.scalars(
             select(Keyword)
             .join(VideoKeyword, VideoKeyword.keyword_id == Keyword.id)
-            .where(VideoKeyword.video_id == video.id)
+            .where(VideoKeyword.video_id == video.id, Keyword.archived_at.is_(None))
         ).all()
     )
 

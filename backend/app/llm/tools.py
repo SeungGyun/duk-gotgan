@@ -189,11 +189,21 @@ def _model_name() -> str:
 
 
 def _keywords_of(db, video_id: str) -> list[Keyword]:
+    """이 영상을 데려온 키워드 중 **살아 있는 것만**.
+
+    지운 키워드가 기준을 쥐고 있으면 안 됩니다. 실제로 그랬습니다 —
+    `결제 시스템 설계`(기준 80점)를 삭제했는데, 그 키워드가 데려온 영상들이
+    계속 80점 기준으로 판정돼 58점짜리가 탈락했습니다. 활성 키워드 기준은
+    45점이었는데도요.
+
+    전부 지워졌으면 기본값으로 봅니다. 영상은 이미 자막까지 받아 뒀으니
+    "데려온 키워드가 없다"는 이유로 버리는 것이 더 아깝습니다.
+    """
     return list(
         db.scalars(
             select(Keyword)
             .join(VideoKeyword, VideoKeyword.keyword_id == Keyword.id)
-            .where(VideoKeyword.video_id == video_id)
+            .where(VideoKeyword.video_id == video_id, Keyword.archived_at.is_(None))
         ).all()
     )
 
