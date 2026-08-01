@@ -11,6 +11,7 @@ import pytest
 from app.collector.rules import evaluate
 from app.collector.youtube import Candidate, duration_bucket, parse_duration
 from app.db.models import Keyword
+from config.settings import settings
 from config.time import now_kst
 
 
@@ -60,10 +61,8 @@ def test_통과하는_후보():
     [
         ({"duration_sec": 900}, "길이 미달"),
         ({"duration_sec": 20000}, "길이 초과"),
-        ({"view_count": 120}, "조회수 미달"),
         ({"published_at": now_kst() - timedelta(days=1000)}, "오래됨"),
         ({"title": "무료특강 신청하세요"}, "홍보성 제목"),
-        ({"title": "쿠버네티스 쇼츠 모음"}, "홍보성 제목"),
         ({"default_language": "en"}, "언어 불일치"),
     ],
 )
@@ -108,9 +107,40 @@ def test_기간_파싱(iso, sec):
     assert parse_duration(iso) == sec
 
 
-@pytest.mark.parametrize("min_sec,bucket", [(0, "any"), (240, "long"), (900, "long"), (3600, "long")])
+@pytest.mark.parametrize(
+    "min_sec,bucket",
+    [(0, "any"), (240, "any"), (900, "any"), (1200, "long"), (3600, "long")],
+)
 def test_검색_길이_구간(min_sec, bucket):
-    """medium 을 쓰면 안 됩니다 — 20분에서 잘려 긴 강의가 통째로 사라집니다.
-    실제로 그렇게 넣었다가 50건 전부 탈락했습니다."""
+    """유튜브는 short(4분 미만)·medium(4~20분)·long(20분 초과) 세 칸뿐입니다.
+
+    **medium 은 절대 쓰지 않습니다** — 20분에서 잘려 긴 강의가 통째로
+    사라집니다. 실제로 그렇게 넣었다가 50건 전부 탈락했습니다.
+
+    **20분 미만을 원하면 조건을 아예 안 겁니다.** long 을 걸면 5~20분대가
+    검색 단계에서 사라지는데, 우리가 직접 거르는 편이 정확합니다.
+    """
     assert duration_bucket(min_sec) == bucket
     assert duration_bucket(min_sec) != "medium"
+
+
+def test_조회수는_기본으로_보지_않는다():
+    """300회로 두었더니 룰 탈락 330건 중 157건이 여기서 걸렸고, 걸린 것들이
+    하필 틈새 전문 콘텐츠였습니다(287회 24분짜리 인프라 해설 등). 틈새
+    강의는 정의상 조회수가 적어서, 품질 신호로 쓰면 목적과 반대로 걸립니다."""
+    assert settings.rule_min_view_count == 0
+    assert evaluate(make_candidate(view_count=3), make_keyword()).ok
+
+
+def test_조회수_기준을_켜면_다시_걸린다(monkeypatch):
+    """끈 것이지 없앤 것이 아닙니다 — .env 로 되돌릴 수 있어야 합니다."""
+    monkeypatch.setattr(settings, "rule_min_view_count", 300)
+    v = evaluate(make_candidate(view_count=120), make_keyword())
+    assert not v.ok and "조회수 미달" in v.reason
+
+
+def test_언어_무관이면_영어도_통과한다():
+    """룰 탈락 124건이 전부 영어였습니다(en·en-US·en-GB·en-IN·en-CA).
+    요약은 어차피 한국어로 쓰므로, 원하면 받을 수 있어야 합니다."""
+    kw = make_keyword(language="any")
+    assert evaluate(make_candidate(default_language="en-US"), kw).ok

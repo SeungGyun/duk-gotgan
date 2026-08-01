@@ -86,5 +86,5 @@ export const scheduleLabel: Record<string, string> = {
 export const languageLabel: Record<string, string> = {
   ko: "한국어",
   en: "영어",
-  any: "전체",
+  any: "언어 무관",
 };

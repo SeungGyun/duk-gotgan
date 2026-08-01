@@ -23,6 +23,7 @@ from sqlalchemy import select
 from app.db.models import Evaluation, Keyword, Lecture, PipelineEvent, Video, VideoKeyword
 from app.collector.channels import consider_block
 from app.db.session import SessionLocal
+from app.llm.policy import BLOCKED_VERDICTS, DEFAULT_THRESHOLD
 from app.llm.schemas import LectureReview, flat_schema, weighted_score
 from config.time import now_kst
 
@@ -103,8 +104,12 @@ def build_server(video_id: str, outcome: ReviewOutcome):
                 )
 
             keywords = _keywords_of(db, video_id)
-            threshold = min((k.min_expert_score for k in keywords), default=75)
-            passed = computed >= threshold and review.summary is not None
+            threshold = min((k.min_expert_score for k in keywords), default=DEFAULT_THRESHOLD)
+            passed = (
+                review.verdict not in BLOCKED_VERDICTS
+                and computed >= threshold
+                and review.summary is not None
+            )
 
             ev = Evaluation(
                 video_id=video_id,
@@ -202,7 +207,18 @@ def _red_flags(review: LectureReview, gap: int) -> list[str]:
     return flags
 
 
+_LABEL = {
+    "expert": "전문가 강의",
+    "practical": "실무 튜토리얼",
+    "introductory": "개론 수준",
+    "promotional": "홍보물",
+    "irrelevant": "주제 무관",
+}
+
+
 def _reject_reason(review: LectureReview, score: int, threshold: int) -> str:
+    if review.verdict in BLOCKED_VERDICTS:
+        return f"{_LABEL.get(review.verdict, review.verdict)} — 점수와 무관하게 담지 않습니다."
     if review.summary is None and score >= threshold:
         return f"판정은 통과({score}점)했으나 요약이 오지 않았습니다."
     label = {

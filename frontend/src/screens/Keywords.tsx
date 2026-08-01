@@ -24,15 +24,15 @@ import s from "./Keywords.module.css";
  *  보니 채널은 보통 "5분 미만 클립"과 "10분 이상 본편"으로 갈립니다
  *  (가인지TV 50건: ~5분 35건, 5~10분 0건, 10분 이상 15건). 20분으로 두면
  *  10~20분대 본편이 통째로 버려집니다. */
-const MIN_DURATION: Record<SourceType, number> = { search: 1200, channel: 600 };
+const MIN_DURATION: Record<SourceType, number> = { search: 600, channel: 600 };
 
 const DEFAULT_DRAFT: KeywordDraft = {
   term: "",
   sourceType: "search",
-  language: "ko",
+  language: "any",
   schedule: "daily",
   minDurationSec: MIN_DURATION.search,
-  minExpertScore: 75,
+  minExpertScore: 45,
   maxPerRun: 10,
 };
 
@@ -273,18 +273,18 @@ export function Keywords({ list }: { list: ListState }) {
             </span>
           </label>
           <p className={s.hint}>
-            기준 점수를 올리면 수집량이 줄고 토큰도 아낍니다. <strong>75점</strong>은 전문가
-            강의만, <strong>70점</strong>은 실무 튜토리얼까지 들어옵니다.{" "}
+            홍보물과 주제 무관은 <strong>점수와 상관없이</strong> 빠집니다. 나머지는 기준
+            점수만 넘으면 담기므로, <strong>45점</strong>이면 개론·실무 영상까지 들어오고
+            올릴수록 전문 강의만 남습니다.{" "}
             {isChannel ? (
               <>
-                직접 고른 채널이므로 <strong>조회수 기준은 적용하지 않습니다</strong>. 채널은
-                보통 짧은 클립과 본편으로 갈려서 <strong>최소 길이 10분</strong>이면 본편만
-                들어옵니다.
+                직접 고른 채널이라 <strong>조회수는 보지 않습니다</strong>. 채널은 보통 짧은
+                클립과 본편으로 갈려서 <strong>최소 길이 10분</strong>이면 본편만 들어옵니다.
               </>
             ) : (
               <>
-                유튜브 검색이 20분 경계로만 걸러서, <strong>최소 길이</strong>를 그보다 낮게
-                잡아도 실제로는 20분 이상만 들어옵니다.
+                <strong>최소 길이를 20분 미만</strong>으로 두면 유튜브 검색에 길이 조건을 걸지
+                않고 직접 거릅니다 — 짧은 영상도 들어오는 대신 후보에 쇼츠가 섞입니다.
               </>
             )}
           </p>
