@@ -20,3 +20,6 @@ __pycache__/
 .playwright-mcp/
 .DS_Store
 *.log
+
+# 워커 로그
+backend/worker.log

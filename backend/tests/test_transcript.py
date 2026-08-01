@@ -129,3 +129,41 @@ def test_ytdlp_json3_파싱():
     out = _ytdlp_parse(payload)
     assert [s["text"] for s in out] == ["안녕하세요", "본문"]
     assert out[0]["start"] == 0 and out[1]["start"] == 4.0
+
+
+# ── 차단 냉각 중의 사이클 판단 ──────────────────────────────
+#
+# 실제로 있었던 일: 대기 28건이 남은 채 유튜브가 막히자, 워커가 1분마다
+# "할 일 있음"으로 판단해 실행 기록을 만들고 곧바로 "차단으로 쉬는 중"으로
+# 실패 처리했습니다. 6분 만에 실패 6줄이 쌓였습니다. 냉각은 실패가 아닙니다.
+
+
+def test_냉각_중에는_자막_대기를_할_일로_세지_않는다(monkeypatch):
+    from datetime import timedelta
+
+    from app.collector import cycle
+    from app.collector import transcript as T
+    from config.time import now_kst
+
+    monkeypatch.setattr(T, "_blocked_until", now_kst() + timedelta(minutes=30))
+    assert cycle.workable_states() == ["TRANSCRIBED"]
+
+
+def test_냉각이_풀리면_다시_집어간다(monkeypatch):
+    from datetime import timedelta
+
+    from app.collector import cycle
+    from app.collector import transcript as T
+    from config.time import now_kst
+
+    monkeypatch.setattr(T, "_blocked_until", now_kst() - timedelta(minutes=1))
+    assert "TRANSCRIPT_PENDING" in cycle.workable_states()
+
+
+def test_차단은_실패가_아니라_보류로_쌓인다():
+    """상태 판정의 근거가 되는 자리를 갈라 둡니다 — notes 는 실패, paused 는 대기."""
+    from app.collector.cycle import CycleResult
+
+    r = CycleResult()
+    r.paused.append("유튜브 차단으로 자막 수집을 쉬는 중입니다")
+    assert not r.notes  # 실패로 새지 않아야 합니다

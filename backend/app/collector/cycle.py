@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from app.collector import discover as D
 from app.collector import quota
 from app.collector.schedule import due_keywords
-from app.collector.transcript import transcribe_pending
+from app.collector.transcript import blocked_until, transcribe_pending
 from app.collector.youtube import YouTubeError
 from app.db.models import CrawlRun, Keyword, Video
 from app.llm.runner import recover_zombies, review_pending
@@ -52,7 +52,8 @@ class CycleResult:
     transcribed: int = 0
     reviewed: int = 0
     published: int = 0
-    notes: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)  # 실패 — 사람이 봐야 합니다
+    paused: list[str] = field(default_factory=list)  # 보류 — 기다리면 풀립니다
 
     @property
     def did_anything(self) -> bool:
@@ -86,12 +87,25 @@ def take_queued_run(db: Session) -> CrawlRun | None:
 
 
 def _has_pipeline_work(db: Session) -> bool:
-    n = db.scalar(
-        select(func.count())
-        .select_from(Video)
-        .where(Video.state.in_(("TRANSCRIPT_PENDING", "TRANSCRIBED")))
-    )
+    """지금 **실제로 할 수 있는** 일이 있는지.
+
+    자막 냉각 중이면 대기 중인 `TRANSCRIPT_PENDING` 은 할 일이 아닙니다.
+    이걸 일로 세면 냉각 60분 동안 매분 실행 기록이 하나씩 생기고, 전부
+    "차단으로 쉬는 중"이라는 같은 사유로 실패 표시가 됩니다 — 실행 로그가
+    정상적인 대기로 뒤덮여 정작 진짜 실패가 안 보입니다.
+    """
+    n = db.scalar(select(func.count()).select_from(Video).where(Video.state.in_(workable_states())))
     return bool(n)
+
+
+def workable_states() -> list[str]:
+    """지금 손댈 수 있는 영상 상태."""
+    return ["TRANSCRIBED"] if _cooling() else ["TRANSCRIBED", "TRANSCRIPT_PENDING"]
+
+
+def _cooling() -> bool:
+    until = blocked_until()
+    return bool(until and now_kst() < until)
 
 
 async def run_cycle(db: Session) -> CycleResult:
@@ -142,7 +156,11 @@ async def run_cycle(db: Session) -> CycleResult:
     t = transcribe_pending(db, limit=TRANSCRIBE_PER_CYCLE, run_id=run.id)
     r.transcribed = t["ok"]
     if t.get("blocked"):
-        r.notes.append(t.get("error", "자막 요청이 차단되었습니다."))
+        # 차단은 실패가 아니라 **뒤로 미룸**입니다. 영상은 대기 상태 그대로라
+        # 냉각이 풀리면 다음 틱이 이어받습니다. 실패로 적으면 손댈 것이 있는
+        # 것처럼 보이는데, 사실 기다리는 것 말고 할 일이 없습니다.
+        r.paused.append(t.get("error", "자막 요청이 차단되었습니다."))
+        logger.info("[cycle] 자막 보류 — %s", r.paused[-1])
 
     # 4) 검토 — 몰아서 순차. 프롬프트 캐시가 살아 있어야 사용량이 1/18 입니다.
     runs = await review_pending(db, limit=REVIEW_PER_CYCLE)

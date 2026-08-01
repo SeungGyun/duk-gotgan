@@ -1,20 +1,37 @@
 import { Fragment, useState } from "react";
 import { api } from "../api";
-import type { Keyword, KeywordDraft, KeywordStatus, Language, Schedule } from "../api";
+import type {
+  Keyword,
+  KeywordDraft,
+  KeywordStatus,
+  Language,
+  Schedule,
+  SourceType,
+} from "../api";
 import { Screen } from "../components/Screen";
 import { Button, Chip, ErrorState, Loading, Meter, Panel } from "../components/ui";
 import { useAsync } from "../hooks/useAsync";
 import { languageLabel, num, scheduleLabel, when } from "../lib/format";
 import s from "./Keywords.module.css";
 
+/** 수집 방식마다 최소 길이 기본값이 다릅니다.
+ *
+ *  검색(20분) — 유튜브 검색이 short/medium/long 세 칸으로만 걸러서, 20분보다
+ *  낮게 잡아도 실제로는 20분 초과만 들어옵니다. **API 제약에서 나온 숫자**이지
+ *  강의 품질 기준이 아닙니다.
+ *
+ *  채널(10분) — 업로드 목록에는 그 제약이 없어 우리가 직접 거릅니다. 실측해
+ *  보니 채널은 보통 "5분 미만 클립"과 "10분 이상 본편"으로 갈립니다
+ *  (가인지TV 50건: ~5분 35건, 5~10분 0건, 10분 이상 15건). 20분으로 두면
+ *  10~20분대 본편이 통째로 버려집니다. */
+const MIN_DURATION: Record<SourceType, number> = { search: 1200, channel: 600 };
+
 const DEFAULT_DRAFT: KeywordDraft = {
   term: "",
   sourceType: "search",
   language: "ko",
   schedule: "daily",
-  // 20분. 유튜브 검색이 20분 경계로만 거를 수 있어서, 더 낮게 잡아도
-  // 실제로는 20분 이상만 들어옵니다 — 설정과 동작을 맞춰 둡니다.
-  minDurationSec: 1200,
+  minDurationSec: MIN_DURATION.search,
   minExpertScore: 75,
   maxPerRun: 10,
 };
@@ -89,6 +106,18 @@ export function Keywords({ list }: { list: ListState }) {
   const set = <K extends keyof KeywordDraft>(k: K, v: KeywordDraft[K]) =>
     setDraft((d) => ({ ...d, [k]: v }));
 
+  /** 방식을 바꾸면 최소 길이 기본값도 따라갑니다. 다만 직접 고쳐 둔 값은
+   *  건드리지 않습니다 — 손댄 설정을 말없이 되돌리면 신뢰를 잃습니다. */
+  const switchSource = (next: SourceType) =>
+    setDraft((d) => ({
+      ...d,
+      sourceType: next,
+      minDurationSec:
+        d.minDurationSec === MIN_DURATION[d.sourceType]
+          ? MIN_DURATION[next]
+          : d.minDurationSec,
+    }));
+
   async function submit() {
     setSubmitting(true);
     setFormError(null);
@@ -149,7 +178,7 @@ export function Keywords({ list }: { list: ListState }) {
                 type="button"
                 aria-pressed={draft.sourceType === v}
                 className={draft.sourceType === v ? s.segOn : undefined}
-                onClick={() => set("sourceType", v)}
+                onClick={() => switchSource(v)}
               >
                 {label}
               </button>
@@ -248,8 +277,9 @@ export function Keywords({ list }: { list: ListState }) {
             강의만, <strong>70점</strong>은 실무 튜토리얼까지 들어옵니다.{" "}
             {isChannel ? (
               <>
-                직접 고른 채널이므로 <strong>조회수 기준은 적용하지 않습니다</strong> — 올라온
-                지 얼마 안 된 영상도 들어옵니다.
+                직접 고른 채널이므로 <strong>조회수 기준은 적용하지 않습니다</strong>. 채널은
+                보통 짧은 클립과 본편으로 갈려서 <strong>최소 길이 10분</strong>이면 본편만
+                들어옵니다.
               </>
             ) : (
               <>
