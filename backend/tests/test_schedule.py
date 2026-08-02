@@ -128,3 +128,16 @@ def test_같은_오류가_이어지면_사이클을_접는다():
 
     src = inspect.getsource(runner.review_pending)
     assert "STOP_AFTER" in src and "streak" in src
+
+
+def test_막는_잡은_스레드로_보낸다():
+    """셋을 asyncio.gather 로 띄워 놓고 동기 함수를 그대로 부르면 이벤트
+    루프가 멈춥니다. 받아쓰기 한 편이 5~13분인데 그동안 검토도 검색도
+    한 발짝을 못 나갑니다 — 나눈 의미가 사라집니다."""
+    import inspect
+
+    from scripts import worker
+
+    src = inspect.getsource(worker)
+    assert "asyncio.to_thread(_transcript_blocking)" in src
+    assert "asyncio.to_thread(_discover_blocking)" in src

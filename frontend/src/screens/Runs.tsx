@@ -36,6 +36,14 @@ const statusChip: Record<Run["status"], { tone: "pass" | "warn" | "fail" | "neut
     interrupted: { tone: "neutral", label: "중단됨" },
   };
 
+/** 잡 이름. 실행 로그에 셋이 섞여 나오므로 한눈에 갈려야 합니다. */
+const jobLabel: Record<string, string> = {
+  discover: "검색",
+  transcript: "자막",
+  review: "요약",
+  cycle: "통합",
+};
+
 const stageLabel: Record<string, string> = {
   discover: "발견",
   transcript: "자막",
@@ -191,7 +199,10 @@ function RunRow({ run: r, scaleMax }: { run: Run; scaleMax: number }) {
             {r.startedAt.slice(0, 10)} {clock(r.startedAt)}
             {r.finishedAt && ` → ${clock(r.finishedAt)}`}
           </div>
-          <div className={s.label}>{r.label}</div>
+          <div className={s.label}>
+            <span className={s.job}>{jobLabel[r.job] ?? r.job}</span>
+            {r.label}
+          </div>
           <Chip tone={st.tone}>{st.label}</Chip>
           <div className={s.cost}>
             {tokens(r.tokens)} 토큰 · {num(r.youtubeUnits)} 유닛

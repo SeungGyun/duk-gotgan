@@ -220,7 +220,11 @@ export interface RunStats {
   published: number;
 }
 
+/** 어느 잡이 만든 기록인가. 셋을 따로 돌리므로 구분이 필요합니다. */
+export type RunJob = "discover" | "transcript" | "review" | "cycle";
+
 export interface Run {
+  job: RunJob;
   id: string;
   label: string;
   trigger: RunTrigger;

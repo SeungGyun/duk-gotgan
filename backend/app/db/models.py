@@ -109,6 +109,10 @@ class CrawlRun(Base):
     )
     label: Mapped[str] = mapped_column(String(200), nullable=False, default="")
     # initial | scheduled | manual
+    # 어느 잡이 만든 기록인가 — discover · transcript · review.
+    # 셋을 따로 돌리므로, 이게 없으면 실행 로그에서 무엇이 무엇인지
+    # 구분되지 않고 끊긴 기록 정리도 남의 잡을 건드립니다.
+    job: Mapped[str] = mapped_column(String(16), nullable=False, default="cycle")
     trigger: Mapped[str] = mapped_column(String(20), nullable=False, default="scheduled")
     # running | succeeded | partial | failed
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="running")

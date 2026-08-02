@@ -131,49 +131,34 @@ def test_ytdlp_json3_파싱():
     assert out[0]["start"] == 0 and out[1]["start"] == 4.0
 
 
-# ── 차단 냉각 중의 사이클 판단 ──────────────────────────────
+# ── 차단 냉각 ───────────────────────────────────────────────
 #
-# 실제로 있었던 일: 대기 28건이 남은 채 유튜브가 막히자, 워커가 1분마다
-# "할 일 있음"으로 판단해 실행 기록을 만들고 곧바로 "차단으로 쉬는 중"으로
-# 실패 처리했습니다. 6분 만에 실패 6줄이 쌓였습니다. 냉각은 실패가 아닙니다.
+# 실제로 있었던 일: 대기가 남은 채 유튜브가 막히자, 워커가 주기마다
+# "할 일 있음"으로 판단해 실행 기록을 만들고 곧바로 실패 처리했습니다.
+# 6분 만에 실패 6줄이 쌓였습니다. 냉각은 실패가 아닙니다.
+#
+# 지금은 냉각 중에도 받아쓰기로 처리하므로 대개 일이 됩니다. 정말 아무것도
+# 못 하는 경우에만 기록을 남기지 않습니다.
 
 
-def test_냉각_중에는_자막_대기를_할_일로_세지_않는다(monkeypatch):
-    from datetime import timedelta
+def test_아무것도_못_하면_기록을_남기지_않는다():
+    """30초마다 빈 기록이 쌓이면 실행 로그가 덮입니다."""
+    import inspect
 
-    from app.collector import cycle
-    from config.time import now_kst
+    from app.collector import jobs
 
-    monkeypatch.setattr(cycle, "blocked_until", lambda db: now_kst() + timedelta(minutes=30))
-    assert cycle.workable_states(None) == ["TRANSCRIBED"]
-
-
-def test_냉각이_풀리면_다시_집어간다(monkeypatch):
-    from datetime import timedelta
-
-    from app.collector import cycle
-    from config.time import now_kst
-
-    monkeypatch.setattr(cycle, "blocked_until", lambda db: now_kst() - timedelta(minutes=1))
-    assert "TRANSCRIPT_PENDING" in cycle.workable_states(None)
+    src = inspect.getsource(jobs.transcript_job)
+    assert "db.delete(run)" in src
 
 
-def test_차단은_실패가_아니라_보류로_쌓인다():
-    """상태 판정의 근거가 되는 자리를 갈라 둡니다 — notes 는 실패, paused 는 대기."""
-    from app.collector.cycle import CycleResult
+def test_차단은_실패가_아니라_보류다():
+    """상태 판정의 근거가 되는 자리를 갈라 둡니다."""
+    from app.collector.jobs import JobResult
 
-    r = CycleResult()
-    r.paused.append("유튜브 차단으로 자막 수집을 쉬는 중입니다")
-    assert not r.notes  # 실패로 새지 않아야 합니다
-
-
-def test_연속_차단이면_대기가_배로_늘어난다():
-    """실측: 60분 고정으로 5시간 동안 매시간 두드려 전부 429 를 받았습니다.
-    풀리지 않는 차단에 규칙적으로 노크하면 차단만 갱신됩니다."""
-    from app.collector.transcript import cooldown_minutes
-
-    assert [cooldown_minutes(n) for n in (1, 2, 3, 4)] == [60, 120, 240, 480]
-    assert cooldown_minutes(9) == 480  # 8시간에서 멈춥니다
+    r = JobResult(job="transcript")
+    r.notes.append("")
+    r.notes.clear()
+    assert not r.notes and not r.did_work
 
 
 def test_영상_하나의_오디오_실패는_사이클을_죽이지_않는다(monkeypatch):

@@ -127,6 +127,12 @@ def ensure_schema(engine: Engine) -> None:
         if not _column_exists(conn, "lectures", "read_at"):
             conn.execute(text("ALTER TABLE lectures ADD COLUMN read_at DATETIME NULL"))
             logger.info("[db] lectures.read_at added")
+        if not _column_exists(conn, "crawl_runs", "job"):
+            conn.execute(
+                text("ALTER TABLE crawl_runs ADD COLUMN job VARCHAR(16) NOT NULL DEFAULT 'cycle'")
+            )
+            logger.info("[db] crawl_runs.job added")
+
         # 프로세스 밖에 남아야 하는 값(자막 냉각 등).
         if not _table_exists(conn, "app_state"):
             conn.execute(

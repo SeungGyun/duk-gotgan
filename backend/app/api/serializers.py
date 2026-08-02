@@ -111,6 +111,7 @@ def run_out(r: CrawlRun) -> dict:
         "id": r.id,
         "label": r.label,
         "trigger": r.trigger,
+        "job": r.job or "cycle",
         "status": r.status,
         "startedAt": to_utc_iso(r.started_at),
         "finishedAt": to_utc_iso(r.finished_at),

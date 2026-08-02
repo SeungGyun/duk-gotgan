@@ -958,6 +958,7 @@ export const mockApi: Api = {
     const run: Run = {
       id: nextId("run"),
       label: "실행 대기 중",
+      job: "cycle",
       trigger: "manual",
       status: "queued",
       startedAt: iso(new Date()),
@@ -1016,6 +1017,7 @@ export const mockApi: Api = {
       {
         id: "run_3",
         label: "키워드 10개 · 정기 실행",
+        job: "cycle",
         trigger: "scheduled",
         status: "succeeded",
         startedAt: runAt(0, 0),
@@ -1028,6 +1030,7 @@ export const mockApi: Api = {
       {
         id: "run_2",
         label: "키워드 10개 · 정기 실행",
+        job: "cycle",
         trigger: "scheduled",
         status: "partial",
         startedAt: runAt(1, 0),
@@ -1040,6 +1043,7 @@ export const mockApi: Api = {
       {
         id: "run_1",
         label: '"LLM 서빙 최적화" · 수동 실행',
+        job: "cycle",
         trigger: "manual",
         status: "failed",
         startedAt: atHour(2, 14, 12),

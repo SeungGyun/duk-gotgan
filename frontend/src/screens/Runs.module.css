@@ -238,3 +238,17 @@
 .eventBad .eventTo {
   color: var(--fail);
 }
+
+/* 잡 딱지. 실행 로그에 검색·자막·요약이 섞여 나오므로, 무엇이 만든
+   기록인지 제목보다 먼저 눈에 들어와야 합니다. */
+.job {
+  display: inline-block;
+  margin-right: 7px;
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  font-size: 10.5px;
+  font-weight: 650;
+  color: var(--muted);
+  vertical-align: 1px;
+}
