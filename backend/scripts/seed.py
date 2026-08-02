@@ -265,8 +265,42 @@ def run(do_reset: bool = False) -> None:
         db.close()
 
 
+def _has_real_data() -> bool:
+    """실제로 수집한 덕질이 이미 있는가."""
+    from sqlalchemy import func, select
+
+    from app.db.models import Lecture
+    from app.db.session import SessionLocal
+
+    db = SessionLocal()
+    try:
+        fake = {d["videoId"] for d in json.loads(SEED_PATH.read_text())["details"]}
+        n = db.scalar(
+            select(func.count()).select_from(Lecture).where(Lecture.video_id.notin_(fake))
+        )
+        return bool(n)
+    finally:
+        db.close()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="목 데이터를 DB 에 적재")
     parser.add_argument("--reset", action="store_true", help="기존 데이터를 지우고 다시 넣기")
+    parser.add_argument(
+        "--force", action="store_true", help="실제 데이터가 있어도 강행합니다"
+    )
     args = parser.parse_args()
+
+    # **실제 데이터가 있으면 막습니다.**
+    #
+    # 여기 영상 id 는 손으로 만든 자리표시자(aX7kQ2mN9pL 처럼 a·b·c·d·e 로
+    # 시작)라 유튜브에 존재하지 않습니다. 화면을 만들던 시절의 예시인데,
+    # 실제 수집이 도는 DB 에 섞이면 **링크를 눌러도 없는 영상**이 나오고
+    # 평균 점수 같은 통계까지 흐려집니다. 실제로 그런 일이 있었습니다.
+    if _has_real_data() and not args.force:
+        raise SystemExit(
+            "실제로 수집한 덕질이 이미 있습니다. 이 스크립트는 유튜브에 없는\n"
+            "예시 영상을 심으므로, 섞이면 링크가 깨진 덕질이 생깁니다.\n"
+            "정말 넣으려면 --force 를 붙이세요."
+        )
     run(do_reset=args.reset)
