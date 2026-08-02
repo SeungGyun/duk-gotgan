@@ -142,7 +142,6 @@ def build_server(video_id: str, outcome: ReviewOutcome):
                     detail={
                         "verdict": review.verdict,
                         "score": computed,
-                        "threshold": threshold,
                         "topic": review.topic,
                     },
                 )
@@ -155,11 +154,8 @@ def build_server(video_id: str, outcome: ReviewOutcome):
             outcome.verdict = review.verdict
 
             if passed:
-                return _ok(f"공개했습니다. 전문성 {computed}점 (기준 {threshold}점).")
-            return _ok(
-                f"기록했습니다. 전문성 {computed}점으로 기준 {threshold}점에 미달하여 "
-                "공개하지 않습니다."
-            )
+                return _ok(f"담았습니다. 전문성 {computed}점 · {review.verdict}.")
+            return _ok("요약이 없어 담지 못했습니다. 재시도하지 마세요.")
         except Exception as e:  # noqa: BLE001 — 도구는 절대 죽으면 안 됩니다
             db.rollback()
             outcome.error = str(e)

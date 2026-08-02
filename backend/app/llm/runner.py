@@ -206,6 +206,15 @@ async def review_pending(db: Session, limit: int = 10) -> list[ReviewRun]:
     videos = [db.get(Video, i) for i in queue.next_ids(db, "TRANSCRIBED", limit)]
     videos = [v for v in videos if v is not None]
 
+    # **같은 오류가 이어지면 멈춥니다.**
+    #
+    # `name 'threshold' is not defined` 가 여섯 시간 동안 매 사이클 열 건씩
+    # 실패하며 토큰만 태웠습니다. 코드 버그는 다음 영상이라고 나아지지
+    # 않습니다 — 같은 사유로 세 번 연속 실패하면 그 사이클은 접습니다.
+    # 자막 없음처럼 영상마다 다른 실패는 여기 걸리지 않습니다.
+    STOP_AFTER = 3
+    streak: tuple[str, int] = ("", 0)
+
     runs: list[ReviewRun] = []
     for video in videos:
         try:
@@ -223,6 +232,12 @@ async def review_pending(db: Session, limit: int = 10) -> list[ReviewRun]:
 
         run = await review_video(db, video)
         runs.append(run)
+
+        if run.ok:
+            streak = ("", 0)
+        else:
+            same = run.error or ""
+            streak = (same, streak[1] + 1) if same == streak[0] else (same, 1)
 
         if not run.ok:
             # **일시적 고장은 탈락이 아닙니다.** 받아쓰기가 GPU 를 붙들고 있는
@@ -246,6 +261,19 @@ async def review_pending(db: Session, limit: int = 10) -> list[ReviewRun]:
                 )
             )
             db.commit()
+
+        if streak[1] >= STOP_AFTER:
+            logger.error(
+                "[review] 같은 오류로 %d회 연속 실패 — 이번 사이클은 접습니다: %s",
+                streak[1], streak[0],
+            )
+            usage.record(
+                db,
+                input_tokens=run.input_weighted,
+                output_tokens=run.output_tokens,
+                cost_usd=run.cost_usd,
+            )
+            break
 
         usage.record(
             db,

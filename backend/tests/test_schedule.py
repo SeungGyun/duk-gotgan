@@ -116,3 +116,15 @@ def test_일시적_실패는_탈락이_아니다():
     # 진짜 실패는 그대로 탈락이어야 합니다
     assert not _is_transient("형식 오류 3회 — sections 가 문자열입니다")
     assert not _is_transient(None)
+
+
+def test_같은_오류가_이어지면_사이클을_접는다():
+    """`name 'threshold' is not defined` 가 여섯 시간 동안 매 사이클 열
+    건씩 실패하며 토큰만 태웠습니다. 코드 버그는 다음 영상이라고 나아지지
+    않습니다 — 영상마다 다른 실패(자막 없음 등)는 여기 걸리지 않습니다."""
+    import inspect
+
+    from app.llm import runner
+
+    src = inspect.getsource(runner.review_pending)
+    assert "STOP_AFTER" in src and "streak" in src
