@@ -27,6 +27,18 @@ services:
       # 한국어 전문 검색용. FULLTEXT ... WITH PARSER ngram 이 2글자 단위로
       # 쪼개므로 "멱등" 같은 두 글자 질의부터 걸립니다.
       - --ngram-token-size=2
+      # ── 메모리 ────────────────────────────────────────────
+      # 16GB 기계에서 받아쓰기(위스퍼)와 요약(클로드)이 같이 도는데, 스왑이
+      # 94% 까지 차서 요약 프로세스가 뜨지 못하고 60건이 죽었습니다.
+      # MySQL 기본값은 서버용이라 이 규모에 과합니다 — 실측 570MB.
+      #
+      # 데이터가 26MB 라 버퍼 풀 64MB 면 통째로 캐시됩니다.
+      - --innodb-buffer-pool-size=64M
+      # 진단용 계측인데 그것만 200MB 넘게 씁니다. 개인 아카이브에서
+      # 쿼리 성능을 뜯어볼 일이 없어 끕니다.
+      - --performance-schema=OFF
+      # 실제로는 워커·API 합쳐 다섯 손가락입니다.
+      - --max-connections=30
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-pdukgotgan_root"]
       interval: 5s
