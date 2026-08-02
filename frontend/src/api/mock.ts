@@ -971,6 +971,31 @@ export const mockApi: Api = {
     return { ...run };
   },
 
+  async getPipeline() {
+    await delay();
+    return {
+      stages: [
+        { key: "discovered", label: "발견", count: 4 },
+        { key: "transcript", label: "자막 대기", count: 3 },
+        { key: "review", label: "검토 대기", count: 2 },
+        { key: "working", label: "처리 중", count: 1 },
+        { key: "published", label: "공개", count: lectures.length },
+      ],
+      stuck: [
+        { key: "failedTranscript", label: "자막 실패", count: 0 },
+        { key: "failedReview", label: "검토 실패", count: 0 },
+      ],
+      current: null,
+      lastEvent: null,
+      transcriptCoolingUntil: null,
+    };
+  },
+
+  async listRunEvents(_runId: string) {
+    await delay();
+    return [];
+  },
+
   async listRuns(): Promise<Run[]> {
     await delay();
     return [

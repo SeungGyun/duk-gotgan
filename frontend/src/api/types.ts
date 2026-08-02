@@ -180,7 +180,36 @@ export interface LectureDetail extends LectureSummary {
 
 // ── 실행 이력 ─────────────────────────────────────────────
 /** queued = "지금 실행" 요청이 접수되어 워커를 기다리는 중 */
-export type RunStatus = "queued" | "running" | "succeeded" | "partial" | "failed";
+/** interrupted = 워커가 사이클 도중 멈춤. **실패가 아닙니다** — 남은 일은
+ *  다음 사이클이 이어받으므로 사람이 손댈 것이 없습니다. */
+export type RunStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "partial"
+  | "failed"
+  | "interrupted";
+
+/** 파이프라인의 지금 상태. "기다리면 되는가, 손대야 하는가"의 근거. */
+export interface Pipeline {
+  stages: { key: string; label: string; count: number }[];
+  stuck: { key: string; label: string; count: number }[];
+  current: { runId: string; status: RunStatus; startedAt: string; label: string } | null;
+  lastEvent: { at: string; stage: string; toState: string; ok: boolean; title: string } | null;
+  transcriptCoolingUntil: string | null;
+}
+
+/** 실행 하나가 실제로 옮긴 것들. */
+export interface RunEvent {
+  at: string;
+  stage: string;
+  fromState: string | null;
+  toState: string;
+  ok: boolean;
+  videoId: string;
+  title: string;
+  detail: string;
+}
 export type RunTrigger = "initial" | "scheduled" | "manual";
 
 export interface RunStats {

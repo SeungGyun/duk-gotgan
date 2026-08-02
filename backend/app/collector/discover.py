@@ -244,9 +244,12 @@ def run_discovery(
     if owns_run:
         run = CrawlRun(trigger=trigger, status="running", started_at=now_kst(), stats={})
         db.add(run)
-    chans = sum(1 for k in targets if k.source_type == "channel")
-    what = f"키워드 {len(targets) - chans}개" if len(targets) - chans else ""
-    what = " · ".join(filter(None, [what, f"채널 {chans}개" if chans else ""])) or "대상 없음"
+    # **어떤 키워드로 돌았는지 이름을 남깁니다.** "키워드 8개"만으로는
+    # 실행 로그를 봐도 무엇 때문에 돈 것인지 알 수 없습니다. 많으면
+    # 앞 세 개만 적고 나머지는 수로 줄입니다 — 한 줄에 들어가야 읽힙니다.
+    names = [k.channel_title or k.term for k in targets]
+    head = ", ".join(names[:3])
+    what = head + (f" 외 {len(names) - 3}개" if len(names) > 3 else "") or "대상 없음"
     run.label = f"{what} · {'수동' if trigger == 'manual' else '정기'} 실행"
     run.status = "running"
     # 루프 전에 커밋합니다. flush 만 하면 키워드 하나가 실패해 롤백할 때

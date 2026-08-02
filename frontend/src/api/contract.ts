@@ -6,7 +6,9 @@ import type {
   LectureQuery,
   LectureSummary,
   Overview,
+  Pipeline,
   Run,
+  RunEvent,
   Usage,
 } from "./types";
 
@@ -51,6 +53,10 @@ export interface Api {
   getOverview(): Promise<Overview>;
   getUsage(): Promise<Usage>;
   listRuns(): Promise<Run[]>;
+  /** 지금 파이프라인 상태 — 각 칸의 대기 수와 지금 하는 일. */
+  getPipeline(): Promise<Pipeline>;
+  /** 실행 하나의 상세 흐름. */
+  listRunEvents(runId: string): Promise<RunEvent[]>;
   /** "지금 실행" — 요청만 남깁니다. 워커가 다음 틱에 집어갑니다. */
   requestRun(): Promise<Run>;
 

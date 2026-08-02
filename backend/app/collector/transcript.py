@@ -355,9 +355,20 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
             time.sleep(random.uniform(2.0, 5.0) if skip_youtube else random.uniform(*DELAY_RANGE))
         result["attempted"] += 1
         started = time.time()
+
+        # **지금 붙들고 있다는 표시를 남깁니다.** 받아쓰기 한 편이 2~7분인데
+        # 그동안 아무 기록이 없으면, 화면에서는 "자막 대기 107" 이 멈춘
+        # 건지 도는 건지 구분되지 않습니다. 워커가 죽으면 좀비 회수가
+        # 대기로 되돌립니다.
+        video.state = "TRANSCRIBING"
+        video.updated_at = now_kst()
+        db.commit()
+
         try:
             fetched = _fetch_with_retry(video, skip_youtube=skip_youtube)
         except Blocked as e:
+            video.state = "TRANSCRIPT_PENDING"  # 붙들고 있던 표시를 풉니다
+            db.commit()
             _block_streak += 1
             wait = cooldown_minutes(_block_streak)
             _blocked_until = now_kst() + timedelta(minutes=wait)
@@ -371,7 +382,7 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
         except TranscriptUnavailable as e:
             video.state = "FAILED_TRANSCRIPT"
             video.state_reason = f"자막 없음 · {e}"
-            _event(db, video, run_id, "TRANSCRIPT_PENDING", video.state, False, str(e))
+            _event(db, video, run_id, "TRANSCRIBING", video.state, False, str(e))
             db.commit()
             result["failed"] += 1
             result["rows"].append((video.title, "✕", str(e)))
@@ -380,7 +391,7 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
         row = store(db, video, fetched)
         video.state = "TRANSCRIBED"
         video.state_reason = None
-        _event(db, video, run_id, "TRANSCRIPT_PENDING", video.state, True, fetched.source)
+        _event(db, video, run_id, "TRANSCRIBING", video.state, True, fetched.source)
         db.commit()
         result["ok"] += 1
         result["rows"].append(

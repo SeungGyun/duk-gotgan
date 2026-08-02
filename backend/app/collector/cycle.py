@@ -18,6 +18,7 @@
 
 import logging
 from dataclasses import dataclass, field
+from datetime import timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -74,6 +75,32 @@ class CycleResult:
         return " · ".join(parts) if parts else "할 일 없음"
 
 
+def recover_stale_runs(db: Session) -> int:
+    """끊긴 실행 기록을 닫습니다.
+
+    영상에는 좀비 회수가 있었는데 **실행 기록에는 없었습니다.** 워커가
+    사이클 도중에 죽으면(재시작·강제 종료) 기록이 `running` 인 채로 영원히
+    남고, 화면에는 "진행 중"이 여러 줄 쌓여 지금 정말 도는 것이 무엇인지
+    알 수 없게 됩니다. 실제로 여덟 줄이 그렇게 남았습니다.
+
+    **시간으로 재지 않습니다.** 락(GET_LOCK) 때문에 사이클은 동시에 하나
+    뿐이라, 새 사이클이 시작하는 이 시점에 `running` 인 것은 예외 없이
+    죽은 기록입니다. 몇 분이 지났는지 추측할 필요가 없습니다.
+
+    **실패와 구분합니다.** 끊긴 것은 사람이 손댈 일이 아니라 다음 사이클이
+    이어받는 상태입니다. 실패로 적으면 조치할 것이 있는 것처럼 보입니다.
+    """
+    stuck = db.scalars(select(CrawlRun).where(CrawlRun.status == "running")).all()
+    for r in stuck:
+        r.status = "interrupted"
+        r.finished_at = now_kst()
+        r.error = r.error or "워커가 사이클 도중에 멈췄습니다 — 남은 일은 다음 사이클이 이어받습니다."
+    if stuck:
+        db.commit()
+        logger.info("[cycle] 끊긴 실행 기록 %d건 정리", len(stuck))
+    return len(stuck)
+
+
 def take_queued_run(db: Session) -> CrawlRun | None:
     """"지금 실행" 요청이 있으면 집어옵니다."""
     run = db.scalar(
@@ -115,6 +142,7 @@ async def run_cycle(db: Session) -> CycleResult:
     # 1) 죽은 워커가 잡아둔 것부터 풀어줍니다. 이게 먼저여야 이번 사이클에서
     #    다시 처리됩니다.
     r.zombies = recover_zombies(db)
+    recover_stale_runs(db)
 
     requested = take_queued_run(db)
     # "지금 실행"은 주기를 무시하고 활성 키워드를 전부 돌립니다.
@@ -200,7 +228,13 @@ def _finish(db: Session, run: CrawlRun, r: CycleResult, tokens: tuple[int, int])
     run.input_tokens += tokens[0]
     run.output_tokens += tokens[1]
     run.finished_at = now_kst()
-    run.label = _label(r, run.trigger)
+    done = _label(r, run.trigger)
+    # 발견 단계가 지어 둔 키워드 이름을 살립니다.
+    if r.keywords_run and run.label and "실행" in run.label:
+        who = run.label.rsplit(" · ", 2)[0]
+        run.label = f"{who} → {done}"
+    else:
+        run.label = done
 
     if r.notes and not r.did_anything:
         run.status = "failed"
@@ -214,12 +248,18 @@ def _finish(db: Session, run: CrawlRun, r: CycleResult, tokens: tuple[int, int])
 
 
 def _label(r: CycleResult, trigger: str) -> str:
+    """실행 이름은 **무엇을 했는지**로 짓습니다.
+
+    발견이 있었으면 run_discovery 가 이미 키워드 이름으로 적어 둡니다 —
+    그 이름을 덮지 않고 뒤에 결과를 붙입니다. "정기 실행" 만 줄줄이
+    쌓이면 실행 로그를 봐도 무엇 때문에 돈 것인지 알 수 없습니다.
+    """
     kind = "수동" if trigger == "manual" else "정기"
     bits = []
-    if r.keywords_run:
-        bits.append(f"키워드 {r.keywords_run}개")
     if r.transcribed:
         bits.append(f"자막 {r.transcribed}건")
     if r.reviewed:
         bits.append(f"검토 {r.reviewed}건")
+    if r.zombies:
+        bits.append(f"좀비회수 {r.zombies}건")
     return f"{' · '.join(bits) or '점검'} · {kind} 실행"

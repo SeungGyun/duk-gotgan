@@ -218,3 +218,16 @@ def test_받아쓰기_자체가_안_되면_차단으로_다룬다(monkeypatch):
 
     with pytest.raises(transcript.Blocked):
         transcript.fetch_via_asr(V())
+
+
+def test_좀비_회수는_되돌릴_자리를_가른다():
+    """검토 중이던 것은 자막이 이미 있고, 받아쓰기 중이던 것은 없습니다.
+    한꺼번에 TRANSCRIBED 로 밀면 자막 없는 영상이 검토로 넘어가 AI 를
+    자막 없이 부릅니다."""
+    import inspect
+
+    from app.llm import runner
+
+    src = inspect.getsource(runner.recover_zombies)
+    assert '"REVIEWING": "TRANSCRIBED"' in src
+    assert '"TRANSCRIBING": "TRANSCRIPT_PENDING"' in src

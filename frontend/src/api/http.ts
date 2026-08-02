@@ -106,6 +106,8 @@ export const httpApi: Api = {
   getOverview: () => req("/stats/overview"),
   getUsage: () => req("/stats/usage"),
   listRuns: () => req("/runs"),
+  getPipeline: () => req("/stats/pipeline"),
+  listRunEvents: (runId) => req(`/runs/${runId}/events`),
 
   requestRun: () => req<Run>("/runs", { method: "POST" }),
 

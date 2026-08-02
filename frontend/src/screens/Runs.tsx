@@ -1,12 +1,18 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { api } from "../api";
-import type { Run, RunStats } from "../api";
+import type { Pipeline, Run, RunEvent, RunStats } from "../api";
 import { Screen } from "../components/Screen";
 import { Chip, Empty, ErrorState, Loading, Panel } from "../components/ui";
 import { useAsync } from "../hooks/useAsync";
 import { num, tokens } from "../lib/format";
 import s from "./Runs.module.css";
+
+/** 도는 중일 때 새로 고치는 간격. 한 사이클이 몇 분씩 걸려서, 화면이
+    멈춰 있으면 "눌렀는데 아무 일도 안 일어난다"로 보입니다. */
+const POLL_ACTIVE_MS = 5_000;
+/** 놀고 있을 때. 정기 실행이 언제 시작될지 몰라 아주 끊지는 않습니다. */
+const POLL_IDLE_MS = 30_000;
 
 const MAX_BAR_PX = 40;
 const STAGES: { key: keyof RunStats; label: string; seq: string }[] = [
@@ -17,6 +23,9 @@ const STAGES: { key: keyof RunStats; label: string; seq: string }[] = [
   { key: "published", label: "공개", seq: "var(--seq-5)" },
 ];
 
+/** **`interrupted` 는 실패가 아닙니다.** 워커가 사이클 도중에 멈춘 것이고
+    (재시작·강제 종료), 남은 일은 다음 사이클이 그대로 이어받습니다.
+    실패로 칠하면 손댈 것이 있는 것처럼 보여 헛걸음을 시킵니다. */
 const statusChip: Record<Run["status"], { tone: "pass" | "warn" | "fail" | "neutral"; label: string }> =
   {
     succeeded: { tone: "pass", label: "완료" },
@@ -24,42 +33,48 @@ const statusChip: Record<Run["status"], { tone: "pass" | "warn" | "fail" | "neut
     failed: { tone: "fail", label: "실패" },
     running: { tone: "neutral", label: "진행 중" },
     queued: { tone: "neutral", label: "대기 중" },
+    interrupted: { tone: "neutral", label: "중단됨" },
   };
+
+const stageLabel: Record<string, string> = {
+  discover: "발견",
+  transcript: "자막",
+  review: "검토",
+};
 
 function clock(iso: string): string {
   const d = new Date(iso);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-/** 도는 중일 때 새로 고치는 간격. 한 사이클이 몇 분씩 걸려서, 화면이
-    멈춰 있으면 "눌렀는데 아무 일도 안 일어난다"로 보입니다. */
-const POLL_ACTIVE_MS = 5_000;
-/** 놀고 있을 때. 정기 실행이 언제 시작될지 몰라 아주 끊지는 않습니다. */
-const POLL_IDLE_MS = 30_000;
+function ago(iso: string): string {
+  const sec = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (sec < 60) return `${sec}초 전`;
+  if (sec < 3600) return `${Math.round(sec / 60)}분 전`;
+  return `${Math.round(sec / 3600)}시간 전`;
+}
 
 export function Runs() {
   const runs = useAsync(() => api.listRuns(), []);
+  const pipe = useAsync(() => api.getPipeline(), []);
 
   // **한 번만 불러오면 안 됩니다.** "지금 실행"은 요청만 남기고 워커가
   // 다음 틱에 집어가는 구조라, 눌러 놓고 이 화면을 봐도 대기 중인 실행이
   // 나타나지 않았습니다. 진행 중인 것이 있으면 자주, 없으면 뜸하게 봅니다.
-  const active = (runs.data ?? []).some(
-    (r) => r.status === "queued" || r.status === "running",
-  );
-  const { reload } = runs;
+  const active = Boolean(pipe.data?.current);
+  const { reload: reloadRuns } = runs;
+  const { reload: reloadPipe } = pipe;
   useEffect(() => {
-    const id = window.setInterval(reload, active ? POLL_ACTIVE_MS : POLL_IDLE_MS);
+    const tick = () => {
+      reloadRuns();
+      reloadPipe();
+    };
+    const id = window.setInterval(tick, active ? POLL_ACTIVE_MS : POLL_IDLE_MS);
     return () => window.clearInterval(id);
-  }, [active, reload]);
+  }, [active, reloadRuns, reloadPipe]);
 
-  if (runs.error) {
-    return (
-      <Screen title="실행 로그">
-        <ErrorState message={runs.error} onRetry={runs.reload} />
-      </Screen>
-    );
-  }
-  // **첫 로딩에만** 스피너를 보입니다. `loading` 을 그대로 보면 5초마다
+  if (runs.error) return <ErrorState message={runs.error} onRetry={runs.reload} />;
+  // 첫 로딩에만 스피너를 보입니다. `loading` 을 그대로 보면 5초마다
   // 화면이 통째로 깜빡여서, 새로 고치지 않는 것보다 읽기 나쁩니다.
   if (!runs.data) {
     return (
@@ -70,67 +85,168 @@ export function Runs() {
   }
 
   const rows = runs.data;
-  const failCount = rows.filter((r) => r.status !== "succeeded").length;
-
-  // 실행 간 비교가 목적이라 모든 실행이 같은 축척을 씁니다
   const scaleMax = Math.max(1, ...rows.map((r) => r.stats.discovered));
 
   return (
     <Screen
       title="실행 로그"
-      subtitle={`최근 ${rows.length}회 · 실패 ${failCount}건`}
+      subtitle="지금 어디까지 왔는지, 기다리면 되는지"
     >
-      {rows.length === 0 ? (
-        <Empty>아직 실행 이력이 없습니다.</Empty>
-      ) : (
-        <Panel bodyless>
-          {rows.map((r) => {
-            const st = statusChip[r.status];
-            return (
-              <div key={r.id} className={s.run}>
-                <div>
-                  <div className={s.when}>
-                    {r.startedAt.slice(0, 10)} {clock(r.startedAt)}
-                    {r.finishedAt && ` → ${clock(r.finishedAt)}`}
-                  </div>
-                  <div className={s.label}>{r.label}</div>
-                  <Chip tone={st.tone}>{st.label}</Chip>
-                  <div className={s.cost}>
-                    {tokens(r.tokens)} 토큰 · {num(r.youtubeUnits)} 유닛
-                  </div>
-                </div>
+      {pipe.data && <Now p={pipe.data} />}
 
-                <div>
-                  <div className={s.mini}>
-                    {STAGES.map((stage) => {
-                      const v = r.stats[stage.key];
-                      const h = Math.max(2, Math.round((v / scaleMax) * MAX_BAR_PX));
-                      return (
-                        <div key={stage.key} className={s.col}>
-                          <span className={s.count}>{v}</span>
-                          <span
-                            className={s.bar}
-                            style={{
-                              height: h,
-                              background: v === 0 ? "var(--surface-sink)" : stage.seq,
-                            }}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div className={s.labels}>
-                    {STAGES.map((stage) => (
-                      <span key={stage.key}>{stage.label}</span>
-                    ))}
-                  </div>
-                  {r.error && <p className={s.error}>{r.error}</p>}
-                </div>
-              </div>
-            );
-          })}
-        </Panel>
-      )}
+      <Panel title="지나간 실행" bodyless>
+        {rows.length === 0 ? (
+          <Empty>아직 실행 이력이 없습니다.</Empty>
+        ) : (
+          rows.map((r) => <RunRow key={r.id} run={r} scaleMax={scaleMax} />)
+        )}
+      </Panel>
     </Screen>
+  );
+}
+
+/** 지금 상태. **이 화면에서 가장 중요한 부분입니다** — 실행 기록은 지나간
+    일이지만, 사용자가 알고 싶은 것은 "지금 어디쯤이고 얼마나 남았나"입니다. */
+function Now({ p }: { p: Pipeline }) {
+  const cooling = p.transcriptCoolingUntil ? new Date(p.transcriptCoolingUntil) : null;
+  const stuckTotal = p.stuck.reduce((a, x) => a + x.count, 0);
+
+  return (
+    <Panel title="지금" className={s.nowPanel}>
+      <div className={s.funnel}>
+        {p.stages.map((st, i) => (
+          <div key={st.key} className={s.stage}>
+            {i > 0 && <span className={s.arrow} aria-hidden="true">→</span>}
+            <span className={s.stageCount}>{num(st.count)}</span>
+            <span className={s.stageLabel}>{st.label}</span>
+          </div>
+        ))}
+      </div>
+
+      <p className={s.nowLine}>
+        {p.current ? (
+          <>
+            <span className={s.dotLive} aria-hidden="true" />
+            {p.current.status === "queued"
+              ? "실행을 요청했습니다. 워커가 곧 집어갑니다."
+              : `${clock(p.current.startedAt)}에 시작한 실행이 돌고 있습니다.`}
+          </>
+        ) : (
+          <>쉬는 중입니다. 1분마다 할 일이 있는지 확인합니다.</>
+        )}
+      </p>
+
+      {p.lastEvent && (
+        <p className={s.lastLine}>
+          마지막 처리 <strong>{ago(p.lastEvent.at)}</strong> ·{" "}
+          {stageLabel[p.lastEvent.stage] ?? p.lastEvent.stage} ·{" "}
+          <span className={s.lastTitle}>{p.lastEvent.title}</span>
+        </p>
+      )}
+
+      {/* 냉각은 실패가 아니라 기다리면 풀리는 상태입니다. 이 한 줄이
+          "손대야 하나"에 대한 답이 됩니다. */}
+      {cooling && cooling.getTime() > Date.now() && (
+        <p className={s.paused}>
+          유튜브 자막이 막혀 쉬는 중입니다 — {clock(p.transcriptCoolingUntil!)} 이후 재개.
+          그동안은 소리를 받아 직접 받아씁니다.
+        </p>
+      )}
+
+      {stuckTotal > 0 && (
+        <p className={s.stuck}>
+          손봐야 할 것:{" "}
+          {p.stuck
+            .filter((x) => x.count > 0)
+            .map((x) => `${x.label} ${x.count}건`)
+            .join(" · ")}
+        </p>
+      )}
+    </Panel>
+  );
+}
+
+function RunRow({ run: r, scaleMax }: { run: Run; scaleMax: number }) {
+  const [open, setOpen] = useState(false);
+  const [events, setEvents] = useState<RunEvent[] | null>(null);
+  const st = statusChip[r.status];
+
+  // 상세는 **펼칠 때만** 받습니다. 50개 실행의 이벤트를 미리 받으면
+  // 목록을 여는 것만으로 수천 줄을 끌어옵니다.
+  useEffect(() => {
+    if (!open || events) return;
+    void api.listRunEvents(r.id).then(setEvents).catch(() => setEvents([]));
+  }, [open, events, r.id]);
+
+  return (
+    <div className={s.runWrap}>
+      <button
+        type="button"
+        className={s.run}
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <div>
+          <div className={s.when}>
+            {r.startedAt.slice(0, 10)} {clock(r.startedAt)}
+            {r.finishedAt && ` → ${clock(r.finishedAt)}`}
+          </div>
+          <div className={s.label}>{r.label}</div>
+          <Chip tone={st.tone}>{st.label}</Chip>
+          <div className={s.cost}>
+            {tokens(r.tokens)} 토큰 · {num(r.youtubeUnits)} 유닛
+          </div>
+        </div>
+
+        <div>
+          <div className={s.mini}>
+            {STAGES.map((stage) => {
+              const v = r.stats[stage.key];
+              const h = Math.max(2, Math.round((v / scaleMax) * MAX_BAR_PX));
+              return (
+                <div key={stage.key} className={s.col}>
+                  <span className={s.count}>{v}</span>
+                  <span
+                    className={s.bar}
+                    style={{
+                      height: h,
+                      background: v === 0 ? "var(--surface-sink)" : stage.seq,
+                    }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+          <div className={s.labels}>
+            {STAGES.map((stage) => (
+              <span key={stage.key}>{stage.label}</span>
+            ))}
+          </div>
+          {r.error && <p className={s.error}>{r.error}</p>}
+          <span className={s.caret}>{open ? "▲ 접기" : "▼ 무엇을 했는지"}</span>
+        </div>
+      </button>
+
+      {open && (
+        <div className={s.events}>
+          {events === null ? (
+            <p className={s.eventNote}>불러오는 중…</p>
+          ) : events.length === 0 ? (
+            <p className={s.eventNote}>이 실행에서 옮긴 영상이 없습니다.</p>
+          ) : (
+            <ul className={s.eventList}>
+              {events.map((e, i) => (
+                <li key={i} className={e.ok ? "" : s.eventBad}>
+                  <span className={s.eventTime}>{clock(e.at)}</span>
+                  <span className={s.eventStage}>{stageLabel[e.stage] ?? e.stage}</span>
+                  <span className={s.eventTitle}>{e.title || e.videoId}</span>
+                  <span className={s.eventTo}>{e.ok ? e.toState : e.detail || e.toState}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

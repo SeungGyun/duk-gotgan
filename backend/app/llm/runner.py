@@ -269,11 +269,20 @@ def recover_zombies(db: Session, minutes: int = 30) -> int:
     from datetime import timedelta
 
     cutoff = now_kst() - timedelta(minutes=minutes)
+    # 자막도 같이 봅니다. 받아쓰기 도중에 워커가 죽으면 TRANSCRIBING 에
+    # 갇혀, 그 영상만 영영 처리되지 않습니다.
     stuck = db.scalars(
-        select(Video).where(Video.state == "REVIEWING", Video.updated_at < cutoff)
+        select(Video).where(
+            Video.state.in_(("REVIEWING", "TRANSCRIBING")), Video.updated_at < cutoff
+        )
     ).all()
+    # **되돌릴 자리가 다릅니다.** 검토 중이던 것은 자막이 이미 있으니
+    # TRANSCRIBED 로, 받아쓰기 중이던 것은 자막이 없으니 대기로 돌립니다.
+    # 한꺼번에 TRANSCRIBED 로 밀면 자막 없는 영상이 검토로 넘어가 AI 를
+    # 자막 없이 부르게 됩니다.
+    back = {"REVIEWING": "TRANSCRIBED", "TRANSCRIBING": "TRANSCRIPT_PENDING"}
     for v in stuck:
-        v.state = "TRANSCRIBED"
+        v.state = back[v.state]
         v.state_reason = None
     db.commit()
     if stuck:
