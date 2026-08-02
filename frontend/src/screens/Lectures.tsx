@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import type { LectureDetail, LectureQuery, LectureSort, LectureSummary } from "../api";
 import { Screen } from "../components/Screen";
@@ -68,6 +68,21 @@ const PREFETCH_PX = 400;
 
 export function Lectures() {
   const { videoId } = useParams<{ videoId: string }>();
+  const navigate = useNavigate();
+
+  // **새로 연 화면은 언제나 목록 맨 위부터.**
+  //
+  // 주소에 강의가 남아 있으면 거기서부터 펴는데, 그건 지난번에 보던
+  // 자리입니다. 그사이 새 덕질이 들어오면 목록 첫 줄과 본문 첫 강의가
+  // 어긋나 보이고, 하필 그게 목록 끝이었다면 스크롤해도 뒤에 붙을 것이
+  // 없습니다. 열 때 한 번 비우면 둘이 항상 같은 데서 시작합니다.
+  // (같은 화면 안에서 목록을 눌러 옮기는 것은 그대로 동작합니다.)
+  const cleared = useRef(false);
+  useEffect(() => {
+    if (cleared.current) return;
+    cleared.current = true;
+    if (videoId) navigate("/lectures", { replace: true });
+  }, [videoId, navigate]);
 
   const [selectedKeywords, setSelectedKeywords] = useState<string[]>([]);
   const [scoreBand, setScoreBand] = useState(0);
@@ -271,6 +286,15 @@ export function Lectures() {
     list.reload();
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [list]);
+
+  // 목록이 판 안에서 굴러가므로, 보고 있는 줄이 판 밖으로 나가면 끌어옵니다.
+  // `nearest` 라서 이미 보이면 아무것도 하지 않습니다 — 읽는 내내 목록이
+  // 덜컹거리면 그게 더 거슬립니다.
+  useEffect(() => {
+    if (!currentId) return;
+    const el = document.querySelector<HTMLElement>(`a[href$="/lectures/${currentId}"]`);
+    el?.scrollIntoView({ block: "nearest" });
+  }, [currentId]);
 
   // 목록에서 다른 강의를 고르면 읽던 위치가 아니라 그 강의의 머리로 보냅니다
   const scrollToFeed = useCallback(() => {

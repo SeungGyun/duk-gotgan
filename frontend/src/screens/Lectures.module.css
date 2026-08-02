@@ -128,11 +128,23 @@
   }
 }
 
-/* 카드가 아니라 색인. 테두리·배경을 걷어내 시선을 덜 끕니다. */
+/* 카드가 아니라 색인. 테두리·배경을 걷어내 시선을 덜 끕니다.
+
+   **화면보다 커지면 안 됩니다.** 덕질이 59편이 되자 목록 높이가 3,217px
+   까지 자랐는데 화면은 1,181px 이었습니다. 붙어 있는 판이 화면보다 크면
+   sticky 가 버티지 못하고 본문을 따라 밀려 올라갑니다 — 긴 글에서만
+   드러난 이유는 짧은 글은 밀려 올라갈 거리 자체가 없어서였습니다.
+
+   높이를 화면 안으로 묶고 목록은 판 안에서 굴립니다. */
 .listPane {
   position: sticky;
   top: calc(var(--tb-off) + 14px);
   align-self: start;
+  max-height: calc(100vh - var(--tb-off) - 28px);
+  overflow-y: auto;
+  /* 목록 끝에 닿았을 때 본문이 딸려 스크롤되지 않게 */
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 .lpHead {
   display: flex;
