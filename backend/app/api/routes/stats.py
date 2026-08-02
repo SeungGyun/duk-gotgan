@@ -19,7 +19,9 @@ from app.db.models import (
     CrawlRun,
     Keyword,
     Lecture,
+    Evaluation,
     PipelineEvent,
+    Transcript,
     UsageLedger,
     UsageWindow,
     Video,
@@ -32,8 +34,10 @@ from config.time import KST, now_kst, to_utc_iso
 router = APIRouter(tags=["stats"])
 
 # 파이프라인 상태 → 퍼널 단계
-_TRANSCRIBED_STATES = ("TRANSCRIBED", "REVIEWING", "PUBLISHED")
-_REVIEWED_STATES = ("PUBLISHED", "REJECTED")
+# 화면에 보이는 덕질 = 숨김 아님 + 제외 안 함. 이 조건이 빠지면 뺀 것이
+# 총계와 평균 점수에 계속 잡힙니다.
+def _visible():
+    return (Lecture.is_hidden.is_(False), Lecture.excluded_at.is_(None))
 
 
 @router.get("/stats/overview")
@@ -42,38 +46,48 @@ def overview(db: Session = Depends(get_db)):
     day_start = _midnight(today)
     week_start = _midnight(today - timedelta(days=7))
 
-    published = db.scalar(
-        select(func.count()).select_from(Lecture).where(Lecture.is_hidden.is_(False))
-    )
+    published = db.scalar(select(func.count()).select_from(Lecture).where(*_visible()))
     new_today = db.scalar(
         select(func.count())
         .select_from(Lecture)
-        .where(Lecture.is_hidden.is_(False), Lecture.published_at >= day_start)
+        .where(*_visible(), Lecture.published_at >= day_start)
     )
     week_added = db.scalar(
         select(func.count())
         .select_from(Lecture)
-        .where(Lecture.is_hidden.is_(False), Lecture.published_at >= week_start)
+        .where(*_visible(), Lecture.published_at >= week_start)
     )
-    avg_score = db.scalar(
-        select(func.avg(Lecture.expert_score)).where(Lecture.is_hidden.is_(False))
-    )
+    avg_score = db.scalar(select(func.avg(Lecture.expert_score)).where(*_visible()))
 
-    # 오늘 발견된 영상 기준 퍼널
+    # **"오늘 한 일" 기준입니다.**
+    #
+    # 예전에는 "오늘 발견된 영상"이 각 칸까지 갔는지를 셌습니다. 한 사이클이
+    # 몇 분 안에 발견→자막→요약을 다 하던 때는 맞는 셈법이었지만, 셋을
+    # 따로 돌리고 대기가 몇 시간씩 쌓이는 지금은 오늘 발견한 것이 내일
+    # 요약됩니다. 그래서 꼬리 세 칸이 늘 0 이었습니다 — 오늘 16편을
+    # 공개했는데도요.
+    def _today_count(model, when):
+        return int(db.scalar(select(func.count()).select_from(model).where(when >= day_start)) or 0)
+
     discovered = _count_videos(db, day_start)
     rule_passed = _count_videos(db, day_start, exclude_state="DISCOVERED")
-    transcribed = _count_videos(db, day_start, states=_TRANSCRIBED_STATES)
-    reviewed = _count_videos(db, day_start, states=_REVIEWED_STATES)
-    published_today = _count_videos(db, day_start, states=("PUBLISHED",))
+    transcribed = _today_count(Transcript, Transcript.created_at)
+    reviewed = _today_count(Evaluation, Evaluation.created_at)
+    published_today = new_today or 0
 
     ledger = db.get(UsageLedger, today)
 
     contributions = db.execute(
-        select(Keyword.id, Keyword.term, func.count(func.distinct(Lecture.video_id)))
+        select(
+            Keyword.id,
+            Keyword.term,
+            func.count(func.distinct(Lecture.video_id)),
+            Keyword.archived_at,
+        )
         .join(VideoKeyword, VideoKeyword.keyword_id == Keyword.id)
         .join(Lecture, Lecture.video_id == VideoKeyword.video_id)
-        .where(Lecture.is_hidden.is_(False), Lecture.published_at >= day_start)
-        .group_by(Keyword.id, Keyword.term)
+        .where(*_visible(), Lecture.published_at >= day_start)
+        .group_by(Keyword.id, Keyword.term, Keyword.archived_at)
         .order_by(func.count(func.distinct(Lecture.video_id)).desc())
         .limit(8)
     ).all()
@@ -86,7 +100,9 @@ def overview(db: Session = Depends(get_db)):
         "weekAdded": week_added or 0,
         "avgScore": round(float(avg_score)) if avg_score is not None else 0,
         "queued": {
-            "transcript": _count_videos(db, states=("RULE_PASSED",)),
+            # 'RULE_PASSED' 라는 상태를 세고 있었습니다 — 그런 상태는 없어서
+            # 자막 대기가 늘 0 으로 보였습니다. 실제로는 86건이었습니다.
+            "transcript": _count_videos(db, states=("TRANSCRIPT_PENDING", "TRANSCRIBING")),
             "review": _count_videos(db, states=("TRANSCRIBED", "REVIEWING")),
         },
         "funnel": {
@@ -96,10 +112,11 @@ def overview(db: Session = Depends(get_db)):
             "reviewed": reviewed,
             "published": published_today,
         },
-        "earlyExitCount": ledger.early_exit_count if ledger else 0,
-        "earlyExitSavedInputTokens": ledger.early_exit_saved_input_tokens if ledger else 0,
         "contributions": [
-            {"keywordId": kid, "term": term, "published": cnt} for kid, term, cnt in contributions
+            # 지운 키워드는 괄호로 표시합니다. 이름만 그대로 두면 지금도
+            # 도는 키워드처럼 보여서, 왜 저기서 안 나오나 헤매게 됩니다.
+            {"keywordId": kid, "term": f"({term})" if archived else term, "published": cnt}
+            for kid, term, cnt, archived in contributions
         ],
         "failures": _failures(db),
         "lastRunAt": to_utc_iso(last_run.started_at) if last_run else None,

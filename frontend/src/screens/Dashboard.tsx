@@ -60,24 +60,26 @@ export function Dashboard({
     );
   }
 
+  // **"오늘 한 일"입니다** — 한 영상이 네 칸을 다 지나간 수가 아닙니다.
+  //
+  // 검색·자막·요약을 따로 돌리고 대기가 몇 시간씩 쌓이므로, 오늘 발견한
+  // 것은 대개 내일 요약됩니다. 칸끼리 빼서 "몇 개가 떨어졌다"를 읽으면
+  // 안 됩니다 — 각 칸은 서로 다른 영상들의 오늘치 처리량입니다.
   const f = overview.funnel;
   const steps = [
     { label: "검색 발견", value: f.discovered },
     { label: "룰 통과", value: f.rulePassed },
     { label: "자막 확보", value: f.transcribed },
+    { label: "AI 요약", value: f.reviewed },
     { label: "공개", value: f.published },
   ];
-  const gaps = [
-    `− ${f.discovered - f.rulePassed} 룰 필터 (길이·조회수·제목)`,
-    `− ${f.rulePassed - f.transcribed} 자막 없음`,
-    // 조기 종료는 없어졌습니다 — AI 가 점수로 떨어뜨리던 시절의 장치라,
-    // 전부 요약하는 지금은 셀 것이 없습니다.
-    `AI 요약 ${f.reviewed}건`,
-  ];
+
+  // 칸끼리 크기가 뒤집힐 수 있어(자막 68 > 룰 통과 62) 발견 수가 아니라
+  // 최대값을 기준으로 그립니다. 안 그러면 막대가 100%를 넘습니다.
+  const maxStep = Math.max(1, ...steps.map((x) => x.value));
 
   const used = usage.inputTokens + usage.outputTokens;
   const limit = usage.limitTokens;
-  const publishRate = f.discovered > 0 ? (f.published / f.discovered) * 100 : 0;
   const perCall = f.reviewed > 0 ? Math.round(used / f.reviewed) : 0;
   const maxContrib = Math.max(1, ...overview.contributions.map((c) => c.published));
   const idleKeywords = 0; // 서버가 내려주기 전까지는 표시하지 않는다
@@ -118,7 +120,7 @@ export function Dashboard({
               {overview.queued.transcript + overview.queued.review}
             </div>
             <div className={s.statNote}>
-              자막 확보 {overview.queued.transcript} · 요약 {overview.queued.review}
+              자막 {overview.queued.transcript} · 요약 {overview.queued.review}
             </div>
           </div>
           <div className={s.stat}>
@@ -130,7 +132,10 @@ export function Dashboard({
       </Panel>
 
       <div className={s.grid} style={{ marginTop: 16 }}>
-        <Panel title="오늘의 파이프라인" aside={<span className="eyebrow">전체 키워드 합계</span>}>
+        <Panel
+          title="오늘 한 일"
+          aside={<span className="eyebrow">단계별 오늘 처리량 · 같은 영상이 아닙니다</span>}
+        >
           <div className={s.funnel}>
             {steps.map((step, i) => (
               <div key={step.label}>
@@ -139,25 +144,22 @@ export function Dashboard({
                   <span className={s.fnBar}>
                     <i
                       style={{
-                        width: `${f.discovered > 0 ? (step.value / f.discovered) * 100 : 0}%`,
+                        width: `${maxStep > 0 ? (step.value / maxStep) * 100 : 0}%`,
                         background: SEQ[i === steps.length - 1 ? 4 : i],
                       }}
                     />
                   </span>
                   <span className={s.fnNum}>{step.value}</span>
                 </div>
-                {gaps[i] && (
-                  <div className={s.fnGap}>
-                    <span>{gaps[i]}</span>
-                  </div>
-                )}
               </div>
             ))}
           </div>
 
           <div className={s.chips}>
+            {/* 칸끼리 같은 영상이 아니므로 "통과율"이 아닙니다 — 오늘
+                각 단계에서 처리한 양입니다. */}
             <Chip>
-              발견 대비 공개율 <span className="mono">{publishRate.toFixed(1)}%</span>
+              오늘 공개 <span className="mono">{f.published}</span>편
             </Chip>
             <Chip>
               건당 평균 <span className="mono">{tokens(perCall)}</span> 토큰
@@ -185,8 +187,9 @@ export function Dashboard({
               )}
             </div>
             <p className={s.note}>
-              공개로 이어지지 않는 키워드는 쿼터만 쓰고 있다는 신호입니다. 며칠 이어지면 주기를
-              낮추거나 검색어를 좁히세요.
+              검색·자막·요약이 <strong>따로 돕니다.</strong> 오늘 발견한 것이 오늘 요약되는
+              것은 아니라, 칸끼리 빼서 "몇 개가 떨어졌다"로 읽으면 안 됩니다. 지금 어디까지
+              왔는지는 실행 로그의 <strong>지금</strong> 패널에서 봅니다.
             </p>
           </div>
         </Panel>
