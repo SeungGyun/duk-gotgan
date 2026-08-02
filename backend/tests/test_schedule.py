@@ -141,3 +141,24 @@ def test_막는_잡은_스레드로_보낸다():
     src = inspect.getsource(worker)
     assert "asyncio.to_thread(_transcript_blocking)" in src
     assert "asyncio.to_thread(_discover_blocking)" in src
+
+
+def test_메모리가_빡빡하면_요약을_미룬다():
+    """CPU 만 보고 "받아쓰기는 GPU, 요약은 네트워크 대기"라 판단했는데,
+    둘이 정말로 다투는 자원은 메모리였습니다. 스왑이 94% 찬 상태에서
+    클로드 프로세스가 뜨지 못해 60건이 실패로 쌓였습니다."""
+    import inspect
+
+    from app.collector import jobs
+
+    assert "resources.memory_tight()" in inspect.getsource(jobs.review_job)
+
+
+def test_프로세스가_못_뜬_것은_영상_탓이_아니다():
+    """`Claude Code returned an error result` 가 일시적 목록에 없어서
+    영구 탈락으로 쌓였습니다. 같은 영상을 손으로 돌리면 그대로 됩니다."""
+    from app.llm.runner import _is_transient
+
+    assert _is_transient("실행 실패: Claude Code returned an error result: success")
+    assert _is_transient("Cannot allocate memory")
+    assert not _is_transient("형식 오류 3회 — sections 가 문자열입니다")

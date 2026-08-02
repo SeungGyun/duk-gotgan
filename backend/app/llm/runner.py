@@ -188,6 +188,11 @@ def _absorb(run: ReviewRun, msg: ResultMessage, transcript_tokens: int) -> None:
 
 
 # 영상 탓이 아닌 고장들. 다음 사이클에 그대로 다시 시도합니다.
+#
+# `Claude Code returned an error result` 가 빠져 있어서 60건이 영구 탈락으로
+# 쌓였습니다. 받아쓰기가 긴 오디오를 메모리에 올리는 동안 클로드 프로세스가
+# 뜨지 못해 죽는 것인데, 영상에는 아무 문제가 없습니다 — 같은 영상을 손으로
+# 다시 돌리면 그대로 성공합니다.
 _TRANSIENT = (
     "control request timeout",
     "initialize",
@@ -197,6 +202,10 @@ _TRANSIENT = (
     "broken pipe",
     "econnreset",
     "lost connection",
+    "returned an error result",
+    "process exited",
+    "cannot allocate",
+    "out of memory",
 )
 
 

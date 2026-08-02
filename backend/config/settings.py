@@ -69,8 +69,10 @@ class Settings(BaseSettings):
     # 같이 돌면서 4~5배속으로 떨어졌습니다. 보수적으로 잡아야 "생각보다
     # 오래 걸린다"는 실망이 없습니다.
     asr_realtime_factor: float = 5.0
-    # 안전장치. 세 시간짜리 하나가 하룻밤을 통째로 먹는 일을 막습니다.
-    asr_max_duration_sec: int = 3 * 3600
+    # 안전장치. 시간뿐 아니라 **메모리** 때문에도 낮춰야 했습니다 —
+    # 위스퍼는 오디오를 통째로 16kHz float32 로 올려서 두 시간이면 그것만
+    # 460MB 이고, 그 순간 요약 프로세스가 못 떠서 죽었습니다(16GB 기계).
+    asr_max_duration_sec: int = 90 * 60
 
     @property
     def title_blocklist(self) -> list[str]:

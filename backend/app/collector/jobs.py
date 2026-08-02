@@ -28,6 +28,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.collector import discover as D
+from app.collector import resources
 from app.collector import quota
 from app.collector.schedule import due_keywords
 from app.collector.transcript import blocked_until, transcribe_pending
@@ -191,6 +192,13 @@ async def review_job(db: Session) -> JobResult:
 
     go, waiting, why = review_due(db)
     if not go:
+        return r
+
+    # **메모리가 빡빡하면 비켜 줍니다.** 받아쓰기가 긴 오디오를 올리는
+    # 동안 클로드 프로세스가 뜨지 못해 죽는 일이 60건 있었습니다. 죽은
+    # 뒤 재시도하면 그때까지 쓴 시간이 버려지고 실패 기록도 남습니다.
+    if resources.memory_tight():
+        logger.info("[review] 메모리가 빡빡해 이번 차례는 건너뜁니다 (대기 %d건)", waiting)
         return r
 
     run = _start(db, "review", "scheduled", f"요약 — 대기 {waiting}건 ({why})")
