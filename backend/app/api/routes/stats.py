@@ -164,7 +164,7 @@ def pipeline(db: Session = Depends(get_db)):
     ).first()
     last_video = db.get(Video, last.video_id) if last else None
 
-    cooling = transcript.blocked_until()
+    cooling = transcript.blocked_until(db)
     return {
         "stages": [
             {"key": k, "label": label, "count": take(states)} for k, label, states in _STAGES

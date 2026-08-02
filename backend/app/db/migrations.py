@@ -127,6 +127,18 @@ def ensure_schema(engine: Engine) -> None:
         if not _column_exists(conn, "lectures", "read_at"):
             conn.execute(text("ALTER TABLE lectures ADD COLUMN read_at DATETIME NULL"))
             logger.info("[db] lectures.read_at added")
+        # 프로세스 밖에 남아야 하는 값(자막 냉각 등).
+        if not _table_exists(conn, "app_state"):
+            conn.execute(
+                text(
+                    "CREATE TABLE app_state ("
+                    " `key` VARCHAR(64) NOT NULL PRIMARY KEY,"
+                    " value TEXT NOT NULL,"
+                    " updated_at DATETIME NOT NULL)"
+                )
+            )
+            logger.info("[db] app_state created")
+
         # 사용자가 직접 뺀 것. is_hidden(재요약으로 밀려난 옛 버전)과 다릅니다.
         if not _column_exists(conn, "lectures", "excluded_at"):
             conn.execute(text("ALTER TABLE lectures ADD COLUMN excluded_at DATETIME NULL"))

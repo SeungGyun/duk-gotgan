@@ -276,6 +276,23 @@ class PipelineEvent(Base):
     __table_args__ = (Index("ix_pipeline_events_video_created", "video_id", "created_at"),)
 
 
+class AppState(Base):
+    """프로세스 밖에 살아야 하는 값들.
+
+    자막 냉각이 메모리 전역이었는데, **재시작하면 사라졌습니다.** launchd 가
+    워커를 다시 띄울 때마다 냉각이 풀린 것처럼 되어 곧바로 차단된 문을 다시
+    두드렸고, 지수 백오프는 한 번도 쌓이지 못했습니다. 화면 쪽은 더 나빴는데,
+    API 프로세스의 전역을 읽으니 **거기에는 애초에 값이 없어** 냉각 안내가
+    영영 뜨지 않았습니다.
+    """
+
+    __tablename__ = "app_state"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=now_kst)
+
+
 class ChannelBlock(Base):
     """이 채널의 영상은 앞으로 수집하지 않습니다.
 

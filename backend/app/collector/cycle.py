@@ -121,17 +121,17 @@ def _has_pipeline_work(db: Session) -> bool:
     "차단으로 쉬는 중"이라는 같은 사유로 실패 표시가 됩니다 — 실행 로그가
     정상적인 대기로 뒤덮여 정작 진짜 실패가 안 보입니다.
     """
-    n = db.scalar(select(func.count()).select_from(Video).where(Video.state.in_(workable_states())))
+    n = db.scalar(select(func.count()).select_from(Video).where(Video.state.in_(workable_states(db))))
     return bool(n)
 
 
-def workable_states() -> list[str]:
+def workable_states(db: Session) -> list[str]:
     """지금 손댈 수 있는 영상 상태."""
-    return ["TRANSCRIBED"] if _cooling() else ["TRANSCRIBED", "TRANSCRIPT_PENDING"]
+    return ["TRANSCRIBED"] if _cooling(db) else ["TRANSCRIBED", "TRANSCRIPT_PENDING"]
 
 
-def _cooling() -> bool:
-    until = blocked_until()
+def _cooling(db: Session) -> bool:
+    until = blocked_until(db)
     return bool(until and now_kst() < until)
 
 

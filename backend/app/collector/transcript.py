@@ -33,7 +33,8 @@ from youtube_transcript_api._errors import (
 )
 
 from app.collector import queue
-from app.db.models import PipelineEvent, Transcript, Video
+from app.db import state
+from app.db.models import AppState, PipelineEvent, Transcript, Video
 from config.settings import settings
 from config.time import now_kst
 
@@ -303,8 +304,13 @@ def store(db: Session, video: Video, fetched: Fetched) -> Transcript:
 # 성공하면 다시 기본값으로 돌아갑니다.
 BLOCK_COOLDOWN_MIN = 60
 BLOCK_COOLDOWN_MAX_MIN = 8 * 60
-_blocked_until: datetime | None = None
-_block_streak = 0
+
+# **DB 에 남깁니다.** 전역 변수로 두었더니 워커가 재시작할 때마다 냉각이
+# 풀린 것처럼 되어 곧바로 차단된 문을 다시 두드렸고(로그에 10:04·10:05·
+# 10:10 세 번 연속), 백오프가 한 번도 쌓이지 못했습니다. 화면 쪽은 API
+# 프로세스의 전역을 읽어서 값이 아예 없었습니다.
+COOLDOWN_KEY = "transcript.blocked_until"
+STREAK_KEY = "transcript.block_streak"
 
 
 def cooldown_minutes(streak: int) -> int:
@@ -312,9 +318,24 @@ def cooldown_minutes(streak: int) -> int:
     return min(BLOCK_COOLDOWN_MIN * 2 ** max(0, streak - 1), BLOCK_COOLDOWN_MAX_MIN)
 
 
-def blocked_until() -> datetime | None:
-    """차단 냉각이 걸려 있으면 언제까지인지. 워커가 건너뛸 근거로 씁니다."""
-    return _blocked_until
+def blocked_until(db: Session) -> datetime | None:
+    """차단 냉각이 걸려 있으면 언제까지인지. 워커와 화면이 같은 값을 봅니다."""
+    return state.get_time(db, COOLDOWN_KEY)
+
+
+def _streak(db: Session) -> int:
+    row = db.get(AppState, STREAK_KEY)
+    return int(row.value) if row is not None and row.value.isdigit() else 0
+
+
+def _set_streak(db: Session, n: int) -> None:
+    row = db.get(AppState, STREAK_KEY)
+    if row is None:
+        row = AppState(key=STREAK_KEY)
+        db.add(row)
+    row.value = str(n)
+    row.updated_at = now_kst()
+    db.commit()
 
 
 def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) -> dict:
@@ -323,16 +344,15 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
     **일부러 순차 처리합니다.** 동시에 던지면 IP 가 막히고, 한 번 막히면
     그날 수집 전체가 멈춥니다. 20건에 1~2분 걸리는 편이 훨씬 쌉니다.
     """
-    global _blocked_until, _block_streak
-
     result = {"attempted": 0, "ok": 0, "failed": 0, "blocked": False, "asr": 0, "rows": []}
 
     # 냉각 중이라고 손을 놓지 않습니다. **자막 경로만 쉬게 두고** 받아쓰기로
     # 갑니다 — 어차피 막힌 문을 영상마다 25초씩 두드릴 이유가 없습니다.
-    skip_youtube = bool(_blocked_until and now_kst() < _blocked_until)
+    cooling = blocked_until(db)
+    skip_youtube = bool(cooling and now_kst() < cooling)
     if skip_youtube:
         logger.info(
-            "[transcript] 자막 경로 냉각 중(%s 재개) — 받아쓰기로 갑니다", f"{_blocked_until:%H:%M}"
+            "[transcript] 자막 경로 냉각 중(%s 재개) — 받아쓰기로 갑니다", f"{cooling:%H:%M}"
         )
 
     # 키워드끼리 번갈아 집습니다. 먼저 온 순서대로 하면 첫 키워드가 줄의
@@ -369,12 +389,14 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
         except Blocked as e:
             video.state = "TRANSCRIPT_PENDING"  # 붙들고 있던 표시를 풉니다
             db.commit()
-            _block_streak += 1
-            wait = cooldown_minutes(_block_streak)
-            _blocked_until = now_kst() + timedelta(minutes=wait)
+            streak = _streak(db) + 1
+            _set_streak(db, streak)
+            wait = cooldown_minutes(streak)
+            until = now_kst() + timedelta(minutes=wait)
+            state.set_time(db, COOLDOWN_KEY, until)
             logger.error(
                 "[transcript] 차단 %d회 연속 — 남은 %d건 중단, %d분간 쉽니다 (%s 재개)",
-                _block_streak, len(videos) - i, wait, f"{_blocked_until:%H:%M}",
+                streak, len(videos) - i, wait, f"{until:%H:%M}",
             )
             result["blocked"] = True
             result["error"] = f"{e} ({wait}분 후 재개)"
@@ -404,16 +426,19 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
             if not skip_youtube:
                 # 자막 경로가 죽어서 받아쓰기로 넘어온 것입니다. 남은 영상은
                 # 같은 문을 다시 두드리지 않게 이 사이클부터 바로 우회합니다.
-                _block_streak += 1
-                _blocked_until = now_kst() + timedelta(minutes=cooldown_minutes(_block_streak))
+                streak = _streak(db) + 1
+                _set_streak(db, streak)
+                until = now_kst() + timedelta(minutes=cooldown_minutes(streak))
+                state.set_time(db, COOLDOWN_KEY, until)
                 skip_youtube = True
                 logger.warning(
                     "[transcript] 자막 경로 실패 %d회 — %s 까지 받아쓰기로 돕니다",
-                    _block_streak, f"{_blocked_until:%H:%M}",
+                    streak, f"{until:%H:%M}",
                 )
         else:
-            _block_streak = 0  # 자막을 받았으면 차단이 풀린 것 — 대기를 되돌립니다
-            _blocked_until = None
+            # 자막을 받았으면 차단이 풀린 것 — 대기를 되돌립니다
+            _set_streak(db, 0)
+            state.set_time(db, COOLDOWN_KEY, None)
 
     return result
 

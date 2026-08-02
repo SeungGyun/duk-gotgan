@@ -142,22 +142,20 @@ def test_냉각_중에는_자막_대기를_할_일로_세지_않는다(monkeypat
     from datetime import timedelta
 
     from app.collector import cycle
-    from app.collector import transcript as T
     from config.time import now_kst
 
-    monkeypatch.setattr(T, "_blocked_until", now_kst() + timedelta(minutes=30))
-    assert cycle.workable_states() == ["TRANSCRIBED"]
+    monkeypatch.setattr(cycle, "blocked_until", lambda db: now_kst() + timedelta(minutes=30))
+    assert cycle.workable_states(None) == ["TRANSCRIBED"]
 
 
 def test_냉각이_풀리면_다시_집어간다(monkeypatch):
     from datetime import timedelta
 
     from app.collector import cycle
-    from app.collector import transcript as T
     from config.time import now_kst
 
-    monkeypatch.setattr(T, "_blocked_until", now_kst() - timedelta(minutes=1))
-    assert "TRANSCRIPT_PENDING" in cycle.workable_states()
+    monkeypatch.setattr(cycle, "blocked_until", lambda db: now_kst() - timedelta(minutes=1))
+    assert "TRANSCRIPT_PENDING" in cycle.workable_states(None)
 
 
 def test_차단은_실패가_아니라_보류로_쌓인다():
@@ -231,3 +229,16 @@ def test_좀비_회수는_되돌릴_자리를_가른다():
     src = inspect.getsource(runner.recover_zombies)
     assert '"REVIEWING": "TRANSCRIBED"' in src
     assert '"TRANSCRIBING": "TRANSCRIPT_PENDING"' in src
+
+
+def test_냉각은_프로세스_밖에_남는다():
+    """전역 변수로 두었더니 워커가 재시작할 때마다 냉각이 풀린 것처럼 되어
+    곧바로 차단된 문을 다시 두드렸습니다(로그에 10:04·10:05·10:10 연속).
+    화면 쪽은 API 프로세스의 전역을 읽어 값이 아예 없었습니다."""
+    import inspect
+
+    from app.collector import transcript as T
+
+    assert not hasattr(T, "_blocked_until"), "전역으로 되돌아가면 안 됩니다"
+    src = inspect.getsource(T)
+    assert "state.set_time" in src and "COOLDOWN_KEY" in src
