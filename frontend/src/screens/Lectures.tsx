@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { api } from "../api";
 import type { LectureDetail, LectureQuery, LectureSort, LectureSummary } from "../api";
 import { Screen } from "../components/Screen";
@@ -60,7 +60,6 @@ const PREFETCH_PX = 400;
 
 export function Lectures() {
   const { videoId } = useParams<{ videoId: string }>();
-  const navigate = useNavigate();
 
   const [selectedKeywords, setSelectedKeywords] = useState<string[]>([]);
   const [scoreBand, setScoreBand] = useState(0);
@@ -93,7 +92,21 @@ export function Lectures() {
 
   // 목록이 준비되면 아무것도 안 고른 상태로 두지 않는다 — 첫 항목을 편다
   const rows = list.data ?? NO_ROWS;
-  const currentId = videoId ?? rows[0]?.videoId;
+
+  // 피드를 어디서부터 쌓을지. 주소에 강의가 있으면 그것부터(목록에서 고른
+  // 경우), 없으면 정렬 첫 항목부터.
+  const seedId = videoId ?? rows[0]?.videoId;
+
+  // **지금 화면에 보이는 강의.** 주소와 분리해서 둡니다.
+  //
+  // 예전에는 스크롤할 때마다 주소를 바꿨는데(navigate replace), 그러면
+  // 새로고침했을 때 마지막으로 스쳐 간 강의부터 다시 시작합니다. 목록 끝까지
+  // 내려간 뒤였다면 뒤에 붙일 것이 없어 스크롤해도 아무것도 안 나오고,
+  // 왼쪽 목록은 처음부터 보이는데 본문은 중간부터라 둘이 안 맞아 보입니다.
+  //
+  // 주소는 **사용자가 직접 고를 때만** 바꿉니다. 스크롤은 이 상태만 옮깁니다.
+  const [viewingId, setViewingId] = useState<string | undefined>(undefined);
+  const currentId = viewingId ?? seedId;
 
   // ── 이어보기 ──────────────────────────────────────────────
   // 읽던 강의가 끝나면 다음 강의를 아래에 이어 붙이고, 스크롤 위치에 따라
@@ -109,14 +122,15 @@ export function Lectures() {
   // 필터가 바뀌면 처음부터, 목록에서 다른 강의를 고르면 그 강의부터 다시 쌓습니다.
   // 스크롤로 주소만 바뀐 경우(이미 스택에 있는 id)는 그대로 둡니다.
   useEffect(() => {
-    if (!currentId) {
+    if (!seedId) {
       setStack([]);
       return;
     }
     const fresh = seedRef.current !== queryKey;
     seedRef.current = queryKey;
-    setStack((prev) => (!fresh && prev.includes(currentId) ? prev : [currentId]));
-  }, [currentId, queryKey]);
+    setStack((prev) => (!fresh && prev.includes(seedId) ? prev : [seedId]));
+    setViewingId(undefined);  // 새로 쌓으면 보는 위치도 머리로
+  }, [seedId, queryKey]);
 
   const lastId = stack[stack.length - 1];
   const nextId = useMemo(() => {
@@ -162,7 +176,7 @@ export function Lectures() {
         const active = stack.find((id) => visible.has(id));
         if (active && active !== activeRef.current) {
           activeRef.current = active;
-          navigate(`/lectures/${active}`, { replace: true });
+          setViewingId(active);
         }
       },
       { rootMargin: "-120px 0px -55% 0px" },
@@ -172,7 +186,7 @@ export function Lectures() {
       if (el) obs.observe(el);
     }
     return () => obs.disconnect();
-  }, [stack, navigate]);
+  }, [stack]);
 
   // 보고 있는 강의를 읽음으로 표시합니다.
   //
