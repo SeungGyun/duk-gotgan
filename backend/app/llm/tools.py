@@ -21,9 +21,8 @@ from pydantic import ValidationError
 from sqlalchemy import select
 
 from app.db.models import Evaluation, Keyword, Lecture, PipelineEvent, Video, VideoKeyword
-from app.collector.channels import consider_block
 from app.db.session import SessionLocal
-from app.llm.policy import BLOCKED_VERDICTS, DEFAULT_THRESHOLD
+from app.llm.policy import should_publish
 from app.llm.schemas import LectureReview, flat_schema, weighted_score
 from config.time import now_kst
 
@@ -103,13 +102,10 @@ def build_server(video_id: str, outcome: ReviewOutcome):
                     video_id, review.expert_score, computed,
                 )
 
-            keywords = _keywords_of(db, video_id)
-            threshold = min((k.min_expert_score for k in keywords), default=DEFAULT_THRESHOLD)
-            passed = (
-                review.verdict not in BLOCKED_VERDICTS
-                and computed >= threshold
-                and review.summary is not None
-            )
+            # **거르지 않습니다.** 요약이 나왔으면 담고, 버릴지는 사람이
+            # 제외 버튼으로 정합니다. 판정과 점수는 그 판단을 돕는 근거로
+            # 함께 저장합니다.
+            passed = should_publish(review.summary is not None)
 
             ev = Evaluation(
                 video_id=video_id,
@@ -127,18 +123,14 @@ def build_server(video_id: str, outcome: ReviewOutcome):
             db.add(ev)
             db.flush()
 
-            # 이 판정으로 채널을 막을지 다시 봅니다. 검색이 계속 물어오는
-            # 엉뚱한 채널을 여기서 끊어야 다음 수집에서 AI 를 안 부릅니다.
-            if not passed:
-                consider_block(db, video, ev)
-
             if passed:
                 _publish(db, video, review, computed)
                 video.state = "PUBLISHED"
                 video.state_reason = None
             else:
-                video.state = "REJECTED_AI"
-                video.state_reason = _reject_reason(review, computed, threshold)
+                # 요약이 없는 것은 판정 결과가 아니라 **실패**입니다.
+                video.state = "FAILED_REVIEW"
+                video.state_reason = "요약이 오지 않았습니다."
 
             db.add(
                 PipelineEvent(
@@ -215,30 +207,6 @@ def _red_flags(review: LectureReview, gap: int) -> list[str]:
     if review.keyword_relevance < 40:
         flags.append(f"검색 키워드와 관련도 낮음 ({review.keyword_relevance}점) — 실제 주제: {review.topic}")
     return flags
-
-
-_LABEL = {
-    "expert": "전문가 강의",
-    "practical": "실무 튜토리얼",
-    "introductory": "개론 수준",
-    "promotional": "홍보물",
-    "irrelevant": "주제 무관",
-}
-
-
-def _reject_reason(review: LectureReview, score: int, threshold: int) -> str:
-    if review.verdict in BLOCKED_VERDICTS:
-        return f"{_LABEL.get(review.verdict, review.verdict)} — 점수와 무관하게 담지 않습니다."
-    if review.summary is None and score >= threshold:
-        return f"판정은 통과({score}점)했으나 요약이 오지 않았습니다."
-    label = {
-        "expert": "전문가 강의",
-        "practical": "실무 튜토리얼",
-        "introductory": "개론 수준",
-        "promotional": "홍보물",
-        "irrelevant": "주제 무관",
-    }.get(review.verdict, review.verdict)
-    return f"{label} · 전문성 {score}점 (기준 {threshold}점)"
 
 
 def _publish(db, video: Video, review: LectureReview, score: int) -> None:

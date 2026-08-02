@@ -207,27 +207,68 @@ def test_차단한_채널은_룰에서_걸린다(db, monkeypatch):
     assert "차단한 채널" in blocked.state_reason
 
 
-def test_좋은_강의를_낸_채널은_막지_않는다(db):
-    """좋은 채널도 가끔 주제에서 벗어난 영상을 올립니다. 그걸로 막으면
-    이후의 좋은 강의까지 통째로 놓칩니다."""
+def test_한_편이라도_남겨_둔_채널은_막지_않는다(db):
+    """좋은 채널도 가끔 주제에서 벗어난 것을 올립니다. 그걸로 막으면
+    이후의 좋은 것까지 통째로 놓칩니다."""
     from app.collector.channels import consider_block
-    from app.db.models import Evaluation, Lecture
+    from app.db.models import Lecture
+    from config.time import now_kst
 
-    good = Video(id="pub00000001", title="좋은 강의", channel_id="ch_mixed",
+    keep = Video(id="pub00000001", title="남겨 둔 것", channel_id="ch_mixed",
                  channel_title="괜찮은 채널", state="PUBLISHED", duration_sec=3000)
-    off = Video(id="off00000001", title="딴 얘기", channel_id="ch_mixed",
-                channel_title="괜찮은 채널", state="REVIEWING", duration_sec=3000)
-    db.add_all([good, off])
+    db.add(keep)
     db.flush()
-    db.add(Lecture(video_id=good.id, version=1, expert_score=88, verdict="expert",
+    db.add(Lecture(video_id=keep.id, version=1, expert_score=88, verdict="expert",
                    one_liner="ok", sections=[], tags=[]))
+    # 같은 채널에서 세 편을 뺐지만, 남겨 둔 것이 하나 있습니다
     for i in range(3):
-        db.add(Evaluation(video_id=off.id, model="m", verdict="irrelevant",
-                          expert_score=20, keyword_relevance=10, criteria=[]))
-    db.flush()
-    ev = Evaluation(video_id=off.id, model="m", verdict="irrelevant",
-                    expert_score=20, keyword_relevance=10, criteria=[])
-    db.add(ev)
+        v = Video(id=f"exc0000000{i}", title=f"뺀 것 {i}", channel_id="ch_mixed",
+                  channel_title="괜찮은 채널", state="PUBLISHED", duration_sec=3000)
+        db.add(v)
+        db.flush()
+        db.add(Lecture(video_id=v.id, version=1, expert_score=40, verdict="introductory",
+                       one_liner="x", sections=[], tags=[], excluded_at=now_kst()))
     db.flush()
 
-    assert consider_block(db, off, ev) is None, "공개 이력이 있으면 막지 않아야 합니다"
+    assert consider_block(db, keep) is None, "남겨 둔 것이 있으면 막지 않아야 합니다"
+
+
+def test_전부_뺀_채널은_자동으로_막는다(db):
+    """AI 판정 대신 사용자의 제외를 신호로 씁니다 — 추정이 아니라 사람이
+    실제로 "이건 아니다"라고 누른 것이라 훨씬 정확합니다."""
+    from app.collector.channels import consider_block
+    from app.db.models import Lecture
+    from config.time import now_kst
+
+    last = None
+    for i in range(3):
+        v = Video(id=f"bad0000000{i}", title=f"뺀 것 {i}", channel_id="ch_bad",
+                  channel_title="안 맞는 채널", state="PUBLISHED", duration_sec=3000)
+        db.add(v)
+        db.flush()
+        db.add(Lecture(video_id=v.id, version=1, expert_score=30, verdict="promotional",
+                       one_liner="x", sections=[], tags=[], excluded_at=now_kst()))
+        last = v
+    db.flush()
+
+    block = consider_block(db, last)
+    assert block is not None and block.auto
+    assert "3편" in block.reason
+
+
+def test_두_번_뺀_정도로는_막지_않는다(db):
+    from app.collector.channels import consider_block
+    from app.db.models import Lecture
+    from config.time import now_kst
+
+    last = None
+    for i in range(2):
+        v = Video(id=f"two0000000{i}", title=f"뺀 것 {i}", channel_id="ch_two",
+                  channel_title="두 번", state="PUBLISHED", duration_sec=3000)
+        db.add(v)
+        db.flush()
+        db.add(Lecture(video_id=v.id, version=1, expert_score=30, verdict="introductory",
+                       one_liner="x", sections=[], tags=[], excluded_at=now_kst()))
+        last = v
+    db.flush()
+    assert consider_block(db, last) is None

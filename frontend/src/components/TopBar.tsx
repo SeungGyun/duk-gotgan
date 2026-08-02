@@ -104,6 +104,9 @@ export function TopBar({
         <NavLink to="/keywords" className={link}>
           키워드 {keywordCount != null && <span className={s.count}>{keywordCount}</span>}
         </NavLink>
+        <NavLink to="/excluded" className={link}>
+          제외함
+        </NavLink>
         <NavLink to="/runs" className={link}>
           실행 로그 {runCount != null && <span className={s.count}>{runCount}</span>}
         </NavLink>

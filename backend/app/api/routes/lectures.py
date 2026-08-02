@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from app.api.errors import ApiError
 from app.api.serializers import lecture_detail_out, lecture_summary_out
 from app.db.models import Evaluation, Lecture, Transcript, Video, VideoKeyword
+from app.collector.channels import consider_block
 from app.db.session import get_db
 from config.time import from_utc_iso, now_kst
 
@@ -47,6 +48,7 @@ DEFAULT_SORT = "unread"
 class LecturePatch(BaseModel):
     isFavorite: bool | None = None
     isRead: bool | None = None
+    isExcluded: bool | None = None
 
 
 def _keyword_map(db: Session, video_ids: list[str]) -> dict[str, list[str]]:
@@ -75,6 +77,9 @@ class Filters:
     max_duration_sec: int | None = None
     q: str | None = None
     favorites_only: bool = False
+    # True 면 **제외함**을 봅니다. 목록과 제외함이 같은 함수를 쓰므로
+    # 필터가 갈릴 일이 없습니다.
+    excluded: bool = False
 
 
 def _filtered(f: Filters):
@@ -86,7 +91,8 @@ def _filtered(f: Filters):
     favorites_only = f.favorites_only
 
     stmt = select(Lecture).join(Video, Video.id == Lecture.video_id).where(
-        Lecture.is_hidden.is_(False)
+        Lecture.is_hidden.is_(False),
+        Lecture.excluded_at.isnot(None) if f.excluded else Lecture.excluded_at.is_(None),
     )
 
     if keyword_ids:
@@ -135,6 +141,7 @@ def list_lectures(
     max_duration_sec: int | None = Query(default=None, ge=0),
     q: str | None = Query(default=None),
     favorites_only: bool = Query(default=False),
+    excluded: bool = Query(default=False, description="제외함을 봅니다"),
     sort: str = Query(default=DEFAULT_SORT),
     db: Session = Depends(get_db),
 ):
@@ -143,8 +150,11 @@ def list_lectures(
             400, "INVALID_VALUE", f"sort 값이 올바르지 않습니다. 가능한 값: {', '.join(SORTS)}"
         )
     stmt = _filtered(
-        Filters(keyword_ids, min_score, min_duration_sec, max_duration_sec, q, favorites_only)
-    ).order_by(*SORTS[sort])
+        Filters(
+            keyword_ids, min_score, min_duration_sec, max_duration_sec, q, favorites_only,
+            excluded,
+        )
+    ).order_by(*(SORTS["added"] if excluded else SORTS[sort]))
 
     rows = db.scalars(stmt).unique().all()
     kmap = _keyword_map(db, [r.video_id for r in rows])
@@ -212,6 +222,8 @@ def patch_lecture(video_id: str, patch: LecturePatch, db: Session = Depends(get_
     values: dict = {}
     if patch.isFavorite is not None:
         values["is_favorite"] = patch.isFavorite
+    if patch.isExcluded is not None:
+        values["excluded_at"] = now_kst() if patch.isExcluded else None
     if patch.isRead is not None:
         # 이미 읽은 것을 다시 읽어도 시각을 덮지 않습니다 — "처음 읽은 때"가
         # 남아야 나중에 "이번 주에 새로 본 것" 같은 걸 셀 수 있습니다.
@@ -230,7 +242,41 @@ def patch_lecture(video_id: str, patch: LecturePatch, db: Session = Depends(get_
         return  # 이미 읽음으로 되어 있습니다 — 실패가 아닙니다
     if not updated:
         raise ApiError(404, "LECTURE_NOT_FOUND", "해당 강의를 찾을 수 없습니다.")
+
+    # 뺀 것이 쌓이면 그 채널 자체가 안 맞는다는 뜻입니다. AI 판정 대신
+    # 이 신호로 자동 차단을 판단합니다 — 추정이 아니라 사람이 누른 것이라
+    # 훨씬 정확합니다.
+    if patch.isExcluded:
+        video = db.get(Video, video_id)
+        if video is not None:
+            db.flush()
+            consider_block(db, video)
     db.commit()
 
 
 __all__ = ["router", "func"]
+
+
+@router.delete("/{video_id}", status_code=204)
+def delete_lecture(video_id: str, db: Session = Depends(get_db)):
+    """완전삭제 — 요약을 지웁니다.
+
+    **영상 행은 남깁니다.** `videos` 의 PK 가 유튜브 id 라서, 그 행이
+    중복 수집을 막는 장치입니다. 지워 버리면 다음 수집에서 같은 영상을
+    처음 본 것처럼 다시 데려와 자막을 받고 AI 를 부릅니다 — 지운 것이
+    도로 살아나고 비용까지 다시 듭니다.
+
+    그래서 요약만 지우고 영상은 `EXCLUDED` 로 세워 둡니다. 발견 단계가
+    이 상태를 보고 건너뜁니다.
+    """
+    lectures = db.scalars(select(Lecture).where(Lecture.video_id == video_id)).all()
+    if not lectures:
+        raise ApiError(404, "LECTURE_NOT_FOUND", "해당 덕질을 찾을 수 없습니다.")
+    for lec in lectures:
+        db.delete(lec)
+
+    video = db.get(Video, video_id)
+    if video is not None:
+        video.state = "EXCLUDED"
+        video.state_reason = "완전삭제했습니다 — 다시 수집하지 않습니다."
+    db.commit()

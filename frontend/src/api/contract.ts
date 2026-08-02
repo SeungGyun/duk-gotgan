@@ -42,6 +42,10 @@ export interface Api {
   markRead(videoId: string): Promise<void>;
   /** 화면을 켜 둔 사이 새로 들어온 편수. 목록 전체를 다시 받지 않습니다. */
   countNewLectures(query: LectureQuery, since: string): Promise<number>;
+  /** 제외하거나 되돌립니다. 뺀 것은 제외함에서 볼 수 있습니다. */
+  setExcluded(videoId: string, isExcluded: boolean): Promise<void>;
+  /** 완전삭제 — 요약을 지우고 다시 수집하지 않습니다. 되돌릴 수 없습니다. */
+  deleteLecture(videoId: string): Promise<void>;
 
   // 운영
   getOverview(): Promise<Overview>;

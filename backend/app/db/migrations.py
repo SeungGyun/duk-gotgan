@@ -127,6 +127,16 @@ def ensure_schema(engine: Engine) -> None:
         if not _column_exists(conn, "lectures", "read_at"):
             conn.execute(text("ALTER TABLE lectures ADD COLUMN read_at DATETIME NULL"))
             logger.info("[db] lectures.read_at added")
+        # 사용자가 직접 뺀 것. is_hidden(재요약으로 밀려난 옛 버전)과 다릅니다.
+        if not _column_exists(conn, "lectures", "excluded_at"):
+            conn.execute(text("ALTER TABLE lectures ADD COLUMN excluded_at DATETIME NULL"))
+            logger.info("[db] lectures.excluded_at added")
+        if not _index_exists(conn, "lectures", "ix_lectures_excluded"):
+            conn.execute(
+                text("CREATE INDEX ix_lectures_excluded ON lectures (excluded_at)")
+            )
+            logger.info("[db] ix_lectures_excluded created")
+
         # 기본 정렬(안 읽은 것 먼저 · 유튜브 최신순)이 매번 전체를 훑지 않게.
         if not _index_exists(conn, "lectures", "ix_lectures_read"):
             conn.execute(

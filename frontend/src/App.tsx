@@ -5,6 +5,7 @@ import { useAsync } from "./hooks/useAsync";
 import { Dashboard } from "./screens/Dashboard";
 import { Keywords } from "./screens/Keywords";
 import { Lectures } from "./screens/Lectures";
+import { Excluded } from "./screens/Excluded";
 import { Runs } from "./screens/Runs";
 import s from "./App.module.css";
 
@@ -60,6 +61,7 @@ export default function App() {
             path="/keywords"
             element={<Keywords list={keywords} />}
           />
+          <Route path="/excluded" element={<Excluded />} />
           <Route path="/runs" element={<Runs />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.db.models import Keyword, Transcript, Video
-from app.llm.policy import DEFAULT_THRESHOLD
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -49,7 +48,6 @@ def prepare(video: Video, transcript: Transcript, keywords: list[Keyword]) -> Wo
     # 통과 기준을 같이 넘깁니다. 이 값이 없으면 모델이 어디서 끊어야 할지 몰라
     # 탈락시킬 강의의 자막까지 끝까지 읽습니다 (AI-PIPELINE §2.1).
     # 키워드가 여럿이면 가장 낮은 기준을 씁니다 — 하나라도 통과하면 공개됩니다.
-    threshold = min((k.min_expert_score for k in keywords), default=DEFAULT_THRESHOLD)
     quality = transcript.quality or {}
 
     ws.metadata.write_text(
@@ -62,7 +60,6 @@ def prepare(video: Video, transcript: Transcript, keywords: list[Keyword]) -> Wo
                 if video.published_at
                 else None,
                 "search_keywords": [k.term for k in keywords],
-                "summary_threshold": threshold,
                 "transcript": {
                     "source": transcript.source,
                     "language": transcript.language,

@@ -110,6 +110,11 @@ def discover_keyword(db: Session, kw: Keyword, run: CrawlRun) -> DiscoverResult:
     for c in sorted(candidates, key=lambda x: x.search_rank):
         existing = db.get(Video, c.video_id)
         if existing is not None:
+            # **완전삭제한 것은 다시 데려오지 않습니다.** 링크도 걸지
+            # 않습니다 — 링크가 남으면 키워드 화면의 편수에 잡혀서, 지운
+            # 것이 목록에는 없는데 숫자로는 세어지는 상태가 됩니다.
+            if existing.state == "EXCLUDED":
+                continue
             _link(db, c, kw, run)
             result.already_known += 1
             # 지난 실행에서 상한에 걸려 미뤄둔 것이면 이번에 올려 보냅니다.

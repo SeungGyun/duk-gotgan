@@ -113,8 +113,23 @@ export function Lectures() {
   const queryKey = JSON.stringify(query);
   const list = useAsync(() => api.listLectures(query), [queryKey]);
 
-  // 목록이 준비되면 아무것도 안 고른 상태로 두지 않는다 — 첫 항목을 편다
-  const rows = list.data ?? NO_ROWS;
+  // 방금 뺀 것. **목록을 다시 부르지 않고** 화면에서만 걷어냅니다 —
+  // 다시 부르면 정렬이 발밑에서 바뀌어 읽던 자리가 튑니다.
+  const [excludedIds, setExcludedIds] = useState<Set<string>>(() => new Set());
+
+  const all = list.data ?? NO_ROWS;
+  const rows = useMemo(
+    () => (excludedIds.size ? all.filter((r) => !excludedIds.has(r.videoId)) : all),
+    [all, excludedIds],
+  );
+
+  const handleExcluded = useCallback((id: string) => {
+    setExcludedIds((prev) => new Set(prev).add(id));
+    setStack((prev) => prev.filter((x) => x !== id));
+    // 보던 것이 빠졌으면 시드로 되돌립니다 — 안 그러면 없는 강의를
+    // 가리킨 채 목록 강조가 아무 데도 안 붙습니다.
+    setViewingId((cur) => (cur === id ? undefined : cur));
+  }, []);
 
   // 피드를 어디서부터 쌓을지. 주소에 강의가 있으면 그것부터(목록에서 고른
   // 경우), 없으면 정렬 첫 항목부터.
@@ -283,6 +298,7 @@ export function Lectures() {
     setNewCount(0);
     readSent.current.clear();
     setReadIds(new Set());
+    setExcludedIds(new Set());
     list.reload();
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [list]);
@@ -480,6 +496,7 @@ export function Lectures() {
                     chaptersOpen={chaptersOpen}
                     onToggleChapters={toggleChapters}
                     onReady={markReady}
+                    onExcluded={handleExcluded}
                   />
                 </div>
               ))}
@@ -501,11 +518,13 @@ function Reading({
   chaptersOpen,
   onToggleChapters,
   onReady,
+  onExcluded,
 }: {
   videoId: string;
   chaptersOpen: boolean;
   onToggleChapters: () => void;
   onReady?: (videoId: string) => void;
+  onExcluded?: (videoId: string) => void;
 }) {
   const detail = useAsync(() => api.getLecture(videoId), [videoId]);
 
@@ -513,6 +532,19 @@ function Reading({
   useEffect(() => {
     if (loaded) onReady?.(videoId);
   }, [loaded, videoId, onReady]);
+
+  // 제외는 되돌릴 수 있으므로 확인창 없이 바로 보냅니다 — 제외함에서
+  // 되돌릴 수 있다는 것을 안내로 알립니다. 매번 묻는 쪽이 더 성가십니다.
+  const [excluding, setExcluding] = useState(false);
+  const exclude = async () => {
+    setExcluding(true);
+    try {
+      await api.setExcluded(videoId, true);
+      onExcluded?.(videoId);
+    } finally {
+      setExcluding(false);
+    }
+  };
 
   // 즐겨찾기는 낙관적으로 먼저 뒤집고, 서버가 거절하면 되돌립니다.
   // null 이면 "아직 손대지 않음" — 서버가 준 값을 그대로 씁니다.
@@ -599,6 +631,18 @@ function Reading({
               aria-label={isFavorite ? "즐겨찾기 해제" : "즐겨찾기"}
             >
               <IconStar filled={isFavorite} />
+            </button>
+            {/* 제외는 즐겨찾기 옆이 맞습니다 — 둘 다 "이 덕질을 어떻게 둘
+                것인가"에 대한 판단이고, 읽다가 바로 누르는 동작입니다. */}
+            <button
+              type="button"
+              className={`${s.iconBtn} ${s.iconDanger}`}
+              onClick={exclude}
+              disabled={excluding}
+              title="제외함으로 보내기"
+              aria-label="제외함으로 보내기"
+            >
+              <IconExclude />
             </button>
             <button
               type="button"
@@ -865,6 +909,15 @@ function IconStar({ filled }: { filled: boolean }) {
         strokeLinejoin="round"
         fill={filled ? "currentColor" : "none"}
       />
+    </svg>
+  );
+}
+
+function IconExclude() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M5.4 5.4l5.2 5.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
   );
 }

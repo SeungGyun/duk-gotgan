@@ -45,6 +45,7 @@ def lecture_summary_out(lec: Lecture, keyword_ids: list[str]) -> dict:
         "keyPointOffsets": [p.get("timestampSec", 0) for p in (lec.key_points or [])],
         "isFavorite": bool(lec.is_favorite),
         "isRead": lec.read_at is not None,
+        "isExcluded": lec.excluded_at is not None,
         # 곳간에 들어온 시각. "새로 온 것" 개수를 셀 때 기준으로 씁니다 —
         # 브라우저 시계를 쓰면 몇 초 어긋나 새 글을 놓칠 수 있습니다.
         "addedAt": to_utc_iso(lec.published_at),

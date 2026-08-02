@@ -184,6 +184,7 @@ const lectures: Seed[] = [
     keyPointOffsets: [682, 1661, 3364, 4470],
     isFavorite: true,
     isRead: false,
+    isExcluded: false,
     addedAt: "2026-07-31T14:48:00Z",
     keywordIds: ["kw_2"],
     detail: {
@@ -318,6 +319,7 @@ const lectures: Seed[] = [
     keyPointOffsets: [723, 1481, 2210, 3105, 3940],
     isFavorite: false,
     isRead: false,
+    isExcluded: false,
     addedAt: "2026-07-31T14:48:00Z",
     keywordIds: ["kw_1"],
     detail: {
@@ -429,6 +431,7 @@ const lectures: Seed[] = [
     keyPointOffsets: [395, 1240, 2115],
     isFavorite: false,
     isRead: false,
+    isExcluded: false,
     addedAt: "2026-07-31T14:48:00Z",
     keywordIds: ["kw_3"],
     detail: {
@@ -521,6 +524,7 @@ const lectures: Seed[] = [
     keyPointOffsets: [512, 1420, 2380, 3350],
     isFavorite: false,
     isRead: false,
+    isExcluded: false,
     addedAt: "2026-07-31T14:48:00Z",
     keywordIds: ["kw_4"],
     detail: {
@@ -620,6 +624,7 @@ const lectures: Seed[] = [
     keyPointOffsets: [440, 1590, 2705],
     isFavorite: false,
     isRead: false,
+    isExcluded: false,
     addedAt: "2026-07-31T14:48:00Z",
     keywordIds: ["kw_6"],
     detail: {
@@ -798,6 +803,9 @@ export const mockApi: Api = {
       const set = new Set(query.keywordIds);
       rows = rows.filter((l) => l.keywordIds.some((id) => set.has(id)));
     }
+    // 목록과 제외함이 같은 함수를 씁니다 — 조건이 갈리면 화면에 안 나오는
+    // 것을 두고 새로 왔다고 알리게 됩니다.
+    rows = rows.filter((l) => Boolean(l.isExcluded) === Boolean(query.excluded));
     if (query.minScore != null) rows = rows.filter((l) => l.expertScore >= query.minScore!);
     if (query.minDurationSec != null)
       rows = rows.filter((l) => l.durationSec >= query.minDurationSec!);
@@ -838,6 +846,18 @@ export const mockApi: Api = {
   async countNewLectures(_query, since) {
     await delay(50);
     return lectures.filter((l) => l.addedAt > since).length;
+  },
+
+  async setExcluded(videoId, isExcluded) {
+    await delay(80);
+    const found = lectures.find((l) => l.videoId === videoId);
+    if (found) found.isExcluded = isExcluded;
+  },
+
+  async deleteLecture(videoId) {
+    await delay(80);
+    const i = lectures.findIndex((l) => l.videoId === videoId);
+    if (i >= 0) lectures.splice(i, 1);
   },
 
   async markRead(videoId) {

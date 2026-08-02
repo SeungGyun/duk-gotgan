@@ -14,27 +14,18 @@ import logging
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import ChannelBlock, Evaluation, Lecture, Video
+from app.db.models import ChannelBlock, Lecture, Video
 from config.time import now_kst
 
 logger = logging.getLogger(__name__)
 
-# 차단 기준이 두 겹입니다.
+# 같은 채널을 이만큼 빼면 자동으로 막습니다.
 #
-# 무관·홍보는 **다른 분야**라는 뜻이라 두 번이면 충분합니다. 반면
-# introductory(주제는 맞지만 얕음)는 그 채널이 언젠가 깊은 걸 낼 수도 있어서
-# 더 참습니다 — 다만 계속 떨어지면 AI 호출만 태우므로 세 번에서 끊습니다.
-#
-# 실측 사례: "슬기로운 스테이블코인 생활" 은 코인 뉴스 채널인데 세 번 걸렸고
-# 그중 둘이 introductory 였습니다. 좁은 기준으로는 영영 안 막혔을 겁니다.
-STRIKE_LIMIT = 2
-ANY_REJECT_LIMIT = 3
+# 세 번인 이유: 한두 번은 그 채널의 특정 영상이 안 맞았을 뿐일 수 있지만,
+# 세 번이면 채널 자체가 안 맞는 것입니다. 키워드 화면에서 언제든 풀 수
+# 있으므로 지나치게 신중할 이유는 없습니다.
+EXCLUDE_LIMIT = 3
 
-# 이 아래면 "검색어와 무관"으로 봅니다 (AI 가 매긴 0~100)
-IRRELEVANT_BELOW = 40
-
-# 이 판정들은 관련도와 무관하게 스트라이크입니다
-BAD_VERDICTS = ("promotional", "irrelevant")
 
 
 def is_blocked(db: Session, channel_id: str | None) -> ChannelBlock | None:
@@ -57,55 +48,47 @@ def blocked_ids(db: Session) -> set[str]:
     )
 
 
-def consider_block(db: Session, video: Video, ev: Evaluation) -> ChannelBlock | None:
-    """판정 하나가 끝날 때마다 이 채널을 막을지 다시 봅니다.
+def consider_block(db: Session, video: Video) -> ChannelBlock | None:
+    """제외 하나가 끝날 때마다 이 채널을 막을지 다시 봅니다.
 
-    **한 번이라도 공개된 강의를 낸 채널은 막지 않습니다.** 좋은 강의를 내는
-    채널도 가끔 주제에서 벗어난 영상을 올리는데, 그걸로 막아버리면 이후의
-    좋은 강의까지 통째로 놓칩니다.
+    **한 편이라도 남겨 둔 채널은 막지 않습니다.** 좋은 영상을 내는 채널도
+    가끔 주제에서 벗어난 것을 올리는데, 그걸로 막으면 이후의 좋은 것까지
+    통째로 놓칩니다.
     """
     # 해제된 채널도 건너뜁니다 — 사용자가 "괜찮다"고 한 것을 되막지 않습니다.
     if not video.channel_id or has_record(db, video.channel_id):
         return None
 
-    published = db.scalar(
-        select(func.count())
-        .select_from(Lecture)
-        .join(Video, Video.id == Lecture.video_id)
-        .where(Video.channel_id == video.channel_id, Lecture.is_hidden.is_(False))
-    )
-    if published:
-        return None  # 이 채널은 좋은 것도 냅니다 — 막지 않습니다
-
-    def _count(condition=None):
-        stmt = (
-            select(func.count())
-            .select_from(Evaluation)
-            .join(Video, Video.id == Evaluation.video_id)
-            .where(Video.channel_id == video.channel_id)
+    def _count(*where):
+        return (
+            db.scalar(
+                select(func.count())
+                .select_from(Lecture)
+                .join(Video, Video.id == Lecture.video_id)
+                .where(
+                    Video.channel_id == video.channel_id,
+                    Lecture.is_hidden.is_(False),
+                    *where,
+                )
+            )
+            or 0
         )
-        return db.scalar(stmt.where(condition) if condition is not None else stmt) or 0
 
-    off_topic = _count(
-        (Evaluation.verdict.in_(BAD_VERDICTS))
-        | (Evaluation.keyword_relevance < IRRELEVANT_BELOW)
-    )
-    rejected = _count()
+    if _count(Lecture.excluded_at.is_(None)):
+        return None  # 남겨 둔 것이 있습니다 — 막지 않습니다
 
-    if off_topic >= STRIKE_LIMIT:
-        why = f"검색과 무관하거나 홍보인 영상이 {off_topic}번 걸렸습니다"
-    elif rejected >= ANY_REJECT_LIMIT:
-        why = f"{rejected}번 검토했지만 한 번도 기준을 넘지 못했습니다"
-    else:
+    excluded = _count(Lecture.excluded_at.isnot(None))
+    if excluded < EXCLUDE_LIMIT:
         return None
 
     block = ChannelBlock(
         channel_id=video.channel_id,
-        channel_title=video.channel_title,
-        reason=f"{why} (최근: {ev.topic or ev.verdict})",
+        channel_title=video.channel_title or "",
+        reason=f"{excluded}편을 빼고 한 편도 남기지 않았습니다.",
         auto=True,
+        active=True,
         created_at=now_kst(),
     )
     db.add(block)
-    logger.info("[channels] 자동 차단 — %s · %s", video.channel_title, why)
+    logger.info("[channels] 자동 차단 — %s (%d편 제외)", video.channel_title, excluded)
     return block

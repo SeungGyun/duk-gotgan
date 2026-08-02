@@ -126,6 +126,8 @@ export interface LectureSummary {
   isRead: boolean;
   /** 곳간에 들어온 시각(UTC ISO). "새로 온 것" 개수의 기준. */
   addedAt: string;
+  /** 사용자가 직접 뺐는지. 뺀 것은 제외함에서만 보입니다. */
+  isExcluded: boolean;
   keywordIds: string[];
 }
 
@@ -255,4 +257,6 @@ export interface LectureQuery {
   q?: string;
   favoritesOnly?: boolean;
   sort?: LectureSort;
+  /** 제외함을 봅니다. */
+  excluded?: boolean;
 }

@@ -330,6 +330,9 @@ class Lecture(Base):
     # 읽은 시각. **불리언 대신 시각으로 둡니다** — 비용은 같은데 "언제 읽었나"를
     # 나중에 쓸 수 있고, NULL 하나로 "안 읽음"이 자연스럽게 표현됩니다.
     read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # 사용자가 직접 뺀 것. **`is_hidden` 과 다릅니다** — 그건 재요약으로
+    # 밀려난 옛 버전이라, 같이 쓰면 제외함에 옛 버전이 섞입니다.
+    excluded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     model: Mapped[str] = mapped_column(String(64), nullable=False, default="")

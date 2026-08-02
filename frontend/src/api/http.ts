@@ -47,6 +47,7 @@ function qs(query: LectureQuery): string {
   if (query.q?.trim()) p.set("q", query.q.trim());
   if (query.favoritesOnly) p.set("favorites_only", "true");
   if (query.sort) p.set("sort", query.sort);
+  if (query.excluded) p.set("excluded", "true");
   const s = p.toString();
   return s ? `?${s}` : "";
 }
@@ -87,6 +88,14 @@ export const httpApi: Api = {
     const { count } = await req<{ count: number }>(url);
     return count;
   },
+
+  setExcluded: (videoId, isExcluded) =>
+    req<void>(`/lectures/${videoId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ isExcluded }),
+    }),
+
+  deleteLecture: (videoId) => req<void>(`/lectures/${videoId}`, { method: "DELETE" }),
 
   markRead: (videoId) =>
     req<void>(`/lectures/${videoId}`, {
