@@ -193,7 +193,7 @@ async def review_job(db: Session) -> JobResult:
     if not go:
         return r
 
-    run = _start(db, "review", "scheduled", f"검토 — 대기 {waiting}건 ({why})")
+    run = _start(db, "review", "scheduled", f"요약 — 대기 {waiting}건 ({why})")
     runs = await review_pending(db, limit=min(waiting, REVIEW_LIMIT))
     done = [x for x in runs if x.ok]
     r.did_work = bool(runs)
@@ -202,7 +202,7 @@ async def review_job(db: Session) -> JobResult:
     for x in runs:
         if x.error:
             r.notes.append(f"{x.title[:30]} — {x.error}")
-    r.label = f"검토 {r.stats['reviewed']}건 · 공개 {r.stats['published']}건"
+    r.label = f"요약 {r.stats['reviewed']}건 · 공개 {r.stats['published']}건"
     _finish(db, run, r)
     return r
 

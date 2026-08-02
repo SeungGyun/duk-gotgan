@@ -131,14 +131,14 @@ def list_runs(db: Session = Depends(get_db)):
 _STAGES = [
     ("discovered", "발견", ("DISCOVERED",)),
     ("transcript", "자막 대기", ("TRANSCRIPT_PENDING",)),
-    ("review", "검토 대기", ("TRANSCRIBED",)),
+    ("review", "요약 대기", ("TRANSCRIBED",)),
     ("working", "처리 중", ("TRANSCRIBING", "REVIEWING")),
     ("published", "공개", ("PUBLISHED",)),
 ]
 # 손을 봐야 하는 것들. 위 흐름과 섞으면 "막힌 것"이 흐름 속에 묻힙니다.
 _STUCK = [
     ("failedTranscript", "자막 실패", ("FAILED_TRANSCRIPT", "FAILED")),
-    ("failedReview", "검토 실패", ("FAILED_REVIEW",)),
+    ("failedReview", "요약 실패", ("FAILED_REVIEW",)),
 ]
 
 

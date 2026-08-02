@@ -65,12 +65,14 @@ export function Dashboard({
     { label: "검색 발견", value: f.discovered },
     { label: "룰 통과", value: f.rulePassed },
     { label: "자막 확보", value: f.transcribed },
-    { label: "전문성 통과", value: f.published },
+    { label: "공개", value: f.published },
   ];
   const gaps = [
     `− ${f.discovered - f.rulePassed} 룰 필터 (길이·조회수·제목)`,
     `− ${f.rulePassed - f.transcribed} 자막 없음`,
-    `AI 검토 ${f.reviewed}건 · 조기 종료 ${overview.earlyExitCount}건`,
+    // 조기 종료는 없어졌습니다 — AI 가 점수로 떨어뜨리던 시절의 장치라,
+    // 전부 요약하는 지금은 셀 것이 없습니다.
+    `AI 요약 ${f.reviewed}건`,
   ];
 
   const used = usage.inputTokens + usage.outputTokens;
@@ -116,7 +118,7 @@ export function Dashboard({
               {overview.queued.transcript + overview.queued.review}
             </div>
             <div className={s.statNote}>
-              자막 확보 {overview.queued.transcript} · 검토 {overview.queued.review}
+              자막 확보 {overview.queued.transcript} · 요약 {overview.queued.review}
             </div>
           </div>
           <div className={s.stat}>
@@ -160,7 +162,6 @@ export function Dashboard({
             <Chip>
               건당 평균 <span className="mono">{tokens(perCall)}</span> 토큰
             </Chip>
-            {overview.earlyExitCount > 0 && <Chip tone="pass">조기 종료 작동 중</Chip>}
           </div>
 
           <div className={s.contrib}>
@@ -216,9 +217,8 @@ export function Dashboard({
               </div>
             </div>
             <p className={s.note}>
-              검토 {f.reviewed}건 · 조기 종료 {overview.earlyExitCount}건이 입력을{" "}
-              <span className="mono">{tokens(overview.earlyExitSavedInputTokens)}</span>{" "}
-              아꼈습니다. 상한에 닿으면 신규 검토는 멈추고 진행 중인 건만 마칩니다.
+              오늘 <span className="mono">{f.reviewed}</span>건을 요약했습니다. 상한에
+              닿으면 새 요약은 멈추고 진행 중인 건만 마칩니다.
             </p>
           </Panel>
 

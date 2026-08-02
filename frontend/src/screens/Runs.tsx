@@ -19,7 +19,7 @@ const STAGES: { key: keyof RunStats; label: string; seq: string }[] = [
   { key: "discovered", label: "발견", seq: "var(--seq-1)" },
   { key: "rulePassed", label: "룰", seq: "var(--seq-2)" },
   { key: "transcribed", label: "자막", seq: "var(--seq-3)" },
-  { key: "reviewed", label: "검토", seq: "var(--seq-4)" },
+  { key: "reviewed", label: "요약", seq: "var(--seq-4)" },
   { key: "published", label: "공개", seq: "var(--seq-5)" },
 ];
 
@@ -44,10 +44,13 @@ const jobLabel: Record<string, string> = {
   cycle: "통합",
 };
 
+/** 파이프라인 단계 이름. **"검토"라고 쓰지 않습니다** — AI 가 더 이상
+    심사해서 떨어뜨리지 않고 요약만 하므로, 검토는 하는 일과 맞지 않는
+    말이 됐습니다. 화면 곳곳에서 같은 말을 써야 헷갈리지 않습니다. */
 const stageLabel: Record<string, string> = {
   discover: "발견",
   transcript: "자막",
-  review: "검토",
+  review: "요약",
 };
 
 function clock(iso: string): string {

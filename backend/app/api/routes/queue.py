@@ -31,7 +31,7 @@ PREVIEW = 40
 SKIPPED = "SKIPPED"
 
 STAGES = [
-    ("review", "검토 대기", "TRANSCRIBED"),
+    ("review", "요약 대기", "TRANSCRIBED"),
     ("transcript", "자막 대기", "TRANSCRIPT_PENDING"),
     ("discovered", "발견 — 다음 수집에서 올라감", "DISCOVERED"),
 ]
