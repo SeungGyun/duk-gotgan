@@ -84,7 +84,10 @@ def transcribe(video_id: str, duration_sec: int, language: str = "ko") -> AsrRes
     if why:
         raise AsrUnavailable(why)
     if duration_sec > settings.asr_max_duration_sec:
-        raise AsrUnavailable(
+        # **이 영상만의 문제입니다.** AsrUnavailable 로 던지면 IP 차단으로
+        # 취급되어, 긴 영상 한 편이 줄 맨 앞에 서 있는 것만으로 전체가
+        # 60분씩 멈춥니다. 실제로 221분짜리가 그 자리에 있었습니다.
+        raise AudioUnavailable(
             f"영상이 너무 깁니다 ({duration_sec // 60}분) — "
             f"받아쓰기 상한 {settings.asr_max_duration_sec // 60}분."
         )

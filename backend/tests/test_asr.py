@@ -78,7 +78,7 @@ def test_받아쓰기가_실패해도_오디오를_지운다(monkeypatch):
 
 def test_너무_긴_영상은_받아쓰지_않는다(monkeypatch):
     monkeypatch.setattr(asr, "available", lambda: None)
-    with pytest.raises(asr.AsrUnavailable, match="너무 깁니다"):
+    with pytest.raises(asr.AudioUnavailable, match="너무 깁니다"):
         asr.transcribe("vid123", 10 * 3600)
 
 
@@ -139,3 +139,18 @@ def test_받아쓰기도_못_하면_차단으로_다룬다(monkeypatch):
         asr.AsrUnavailable("ffmpeg 가 없습니다.")))
     with pytest.raises(transcript.Blocked, match="받아쓰기도 못 했습니다"):
         transcript.fetch_via_asr(FakeVideo())
+
+
+def test_너무_긴_영상은_차단이_아니라_그_영상만의_문제다(monkeypatch):
+    """AsrUnavailable 로 던지면 IP 차단으로 취급되어, 긴 영상 한 편이 줄
+    맨 앞에 서 있는 것만으로 전체가 60분씩 멈춥니다. 실제로 221분짜리가
+    그 자리에 있었습니다."""
+    from app.collector import transcript
+
+    monkeypatch.setattr(asr, "available", lambda: None)
+
+    class V:
+        id, duration_sec, default_language, title = "v", 10 * 3600, "ko", "긴 영상"
+
+    with pytest.raises(transcript.TranscriptUnavailable, match="너무 깁니다"):
+        transcript.fetch_via_asr(V())
