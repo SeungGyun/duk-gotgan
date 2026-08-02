@@ -190,12 +190,27 @@ export type RunStatus =
   | "failed"
   | "interrupted";
 
+/** 한 트랙(검색·자막·요약)의 지금 상태. **셋이 나란히 돕니다** — 하나만
+ *  보여 주면 나머지가 멈춘 것처럼 읽힙니다. */
+export interface Track {
+  key: string;
+  label: string;
+  status: "running" | "idle";
+  waiting: number;
+  runLabel: string | null;
+  startedAt: string | null;
+  /** 지금 붙들고 있는 영상. 이게 있어야 "도는 중"이 눈에 보입니다. */
+  working: { title: string; since: string } | null;
+  lastAt: string | null;
+  /** 검색만 — 다음 차례 시각. */
+  nextAt: string | null;
+}
+
 /** 파이프라인의 지금 상태. "기다리면 되는가, 손대야 하는가"의 근거. */
 export interface Pipeline {
-  stages: { key: string; label: string; count: number }[];
+  funnel: { key: string; label: string; count: number }[];
+  tracks: Track[];
   stuck: { key: string; label: string; count: number }[];
-  current: { runId: string; status: RunStatus; startedAt: string; label: string } | null;
-  lastEvent: { at: string; stage: string; toState: string; ok: boolean; title: string } | null;
   transcriptCoolingUntil: string | null;
 }
 

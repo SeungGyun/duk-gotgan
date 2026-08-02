@@ -78,7 +78,12 @@ class ReviewRun:
         return round(self.input_new + self.cache_created * 1.25 + self.cache_read * 0.1)
 
 
-def _options(ws: workspace.Workspace, outcome: ReviewOutcome, denials: list[str]):
+def _options(
+    ws: workspace.Workspace,
+    outcome: ReviewOutcome,
+    denials: list[str],
+    run_id: str | None = None,
+):
     def note_denial(tool_name: str, reason: str) -> None:
         entry = f"{tool_name}: {reason}"
         if entry not in denials:  # 훅과 콜백이 같은 건을 두 번 기록하지 않게
@@ -92,7 +97,7 @@ def _options(ws: workspace.Workspace, outcome: ReviewOutcome, denials: list[str]
         # 읽기 하나 + 저장 도구 하나. 나머지는 전부 막습니다.
         allowed_tools=["Read", "mcp__gotgan__save_review"],
         disallowed_tools=DISALLOWED,
-        mcp_servers={"gotgan": build_server(ws.video_id, outcome)},
+        mcp_servers={"gotgan": build_server(ws.video_id, outcome, run_id)},
         # 경로 가드는 **훅으로** 겁니다. can_use_tool 은 allowed_tools 에 통째로
         # 올린 도구를 거치지 않아, 정작 막아야 할 Read 를 그냥 통과시킵니다.
         hooks={"PreToolUse": [make_pretool_hook(ws.path, on_denied=note_denial)]},
@@ -112,7 +117,7 @@ async def _prompt_stream():
     yield {"type": "user", "message": {"role": "user", "content": TASK}}
 
 
-async def review_video(db: Session, video: Video) -> ReviewRun:
+async def review_video(db: Session, video: Video, run_id: str | None = None) -> ReviewRun:
     """영상 1건을 판정·요약합니다."""
     run = ReviewRun(video_id=video.id, title=video.title)
 
@@ -141,7 +146,7 @@ async def review_video(db: Session, video: Video) -> ReviewRun:
             # 문자열이 아니라 이터러블로 넘깁니다 — `can_use_tool`(경로 가드)이
             # 스트리밍 모드에서만 동작합니다. 가드를 포기할 수는 없습니다.
             prompt=_prompt_stream(),
-            options=_options(ws, outcome, denials),
+            options=_options(ws, outcome, denials, run_id),
         ):
             if isinstance(message, ResultMessage):
                 _absorb(run, message, transcript.est_tokens)
@@ -200,7 +205,9 @@ def _is_transient(error: str | None) -> bool:
     return any(sig in low for sig in _TRANSIENT)
 
 
-async def review_pending(db: Session, limit: int = 10) -> list[ReviewRun]:
+async def review_pending(
+    db: Session, limit: int = 10, run_id: str | None = None
+) -> list[ReviewRun]:
     """검토 대기 중인 영상을 연속으로 처리합니다."""
     # 자막과 같은 이유로 키워드끼리 번갈아 집습니다 (queue.py 참고).
     videos = [db.get(Video, i) for i in queue.next_ids(db, "TRANSCRIBED", limit)]
@@ -230,7 +237,7 @@ async def review_pending(db: Session, limit: int = 10) -> list[ReviewRun]:
         video.updated_at = now_kst()
         db.commit()
 
-        run = await review_video(db, video)
+        run = await review_video(db, video, run_id)
         runs.append(run)
 
         if run.ok:
@@ -253,6 +260,7 @@ async def review_pending(db: Session, limit: int = 10) -> list[ReviewRun]:
             db.add(
                 PipelineEvent(
                     video_id=video.id,
+                    run_id=run_id,
                     from_state="REVIEWING",
                     to_state=video.state,
                     stage="review",

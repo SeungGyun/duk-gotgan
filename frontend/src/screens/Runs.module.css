@@ -252,3 +252,50 @@
   color: var(--muted);
   vertical-align: 1px;
 }
+
+/* ── 트랙 ────────────────────────────────────────────────
+   셋이 나란히 돕니다. 한 줄에 하나씩 두어, 무엇이 도는 중이고 무엇이
+   쉬는 중인지 점 하나로 갈리게 합니다. */
+.tracks {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+.track {
+  display: grid;
+  grid-template-columns: 10px 34px 62px minmax(0, 1fr);
+  gap: 9px;
+  align-items: baseline;
+  padding: 7px 0;
+  font-size: 12.5px;
+}
+.track + .track {
+  border-top: 1px solid var(--border);
+}
+.dotIdle {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--surface-sink);
+  border: 1px solid var(--border-strong);
+}
+.trackName {
+  font-weight: 650;
+}
+.trackWait {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.trackWhat {
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trackSince {
+  font-style: normal;
+  color: var(--muted);
+}

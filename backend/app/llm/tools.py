@@ -52,7 +52,13 @@ class ReviewOutcome:
         self.format_errors = 0
 
 
-def build_server(video_id: str, outcome: ReviewOutcome):
+def build_server(video_id: str, outcome: ReviewOutcome, run_id: str | None = None):
+    """`run_id` 는 **이벤트를 실행 기록에 묶기 위한 것**입니다.
+
+    없이 두었더니 요약 이벤트 145건이 전부 실행과 연결되지 않아, 실행
+    로그에서 펼쳐도 "무엇을 했는지"가 빈칸이었습니다. 발견·자막은 run_id
+    를 넘기고 있었는데 요약만 빠져 있었습니다.
+    """
     """이 영상 1건 전용 도구 서버를 만듭니다.
 
     `video_id` 를 클로저에 묶어 둡니다 — 인자로 받으면 자막에 심긴 문장이
@@ -135,6 +141,7 @@ def build_server(video_id: str, outcome: ReviewOutcome):
             db.add(
                 PipelineEvent(
                     video_id=video_id,
+                    run_id=run_id,
                     from_state="REVIEWING",
                     to_state=video.state,
                     stage="review",

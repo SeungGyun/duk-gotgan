@@ -194,7 +194,7 @@ async def review_job(db: Session) -> JobResult:
         return r
 
     run = _start(db, "review", "scheduled", f"요약 — 대기 {waiting}건 ({why})")
-    runs = await review_pending(db, limit=min(waiting, REVIEW_LIMIT))
+    runs = await review_pending(db, limit=min(waiting, REVIEW_LIMIT), run_id=run.id)
     done = [x for x in runs if x.ok]
     r.did_work = bool(runs)
     r.stats.update({"reviewed": len(done), "published": len([x for x in done if x.published])})

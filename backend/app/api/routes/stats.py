@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.api.errors import ApiError
 from app.api.serializers import run_out
 from app.collector import transcript
+from app.collector.schedule import next_due_at
 from app.llm import usage as usage_guard
 from app.db.models import (
     CrawlRun,
@@ -135,71 +136,106 @@ def list_runs(db: Session = Depends(get_db)):
     return [run_out(r) for r in rows]
 
 
-# 파이프라인 각 칸에 지금 몇 개가 서 있는지. **"기다리면 되는가 손대야
-# 하는가"를 가르는 화면의 근거**입니다. 실행 기록만 봐서는 알 수 없습니다 —
-# 기록은 지나간 일이고, 사용자가 궁금한 것은 지금 상태니까요.
-_STAGES = [
+# 파이프라인 각 칸에 지금 몇 개가 서 있는지, 그리고 **세 트랙이 각각
+# 무엇을 하는 중인지**. 실행 기록만 봐서는 알 수 없습니다 — 기록은 지나간
+# 일이고, 사용자가 궁금한 것은 지금 상태니까요.
+#
+# 셋을 따로 돌리게 된 뒤로 "지금 도는 실행" 하나만 보여 주면 거짓말이
+# 됩니다. 자막과 요약이 나란히 도는데 화면에는 나중에 시작한 것만
+# 떴습니다.
+_FUNNEL = [
     ("discovered", "발견", ("DISCOVERED",)),
     ("transcript", "자막 대기", ("TRANSCRIPT_PENDING",)),
     ("review", "요약 대기", ("TRANSCRIBED",)),
-    ("working", "처리 중", ("TRANSCRIBING", "REVIEWING")),
     ("published", "공개", ("PUBLISHED",)),
 ]
-# 손을 봐야 하는 것들. 위 흐름과 섞으면 "막힌 것"이 흐름 속에 묻힙니다.
 _STUCK = [
     ("failedTranscript", "자막 실패", ("FAILED_TRANSCRIPT", "FAILED")),
     ("failedReview", "요약 실패", ("FAILED_REVIEW",)),
 ]
 
+# 트랙마다 "지금 붙들고 있는 영상"이 어느 상태로 나타나는지.
+_WORKING = {"transcript": "TRANSCRIBING", "review": "REVIEWING"}
+
+
+def _now_working(db: Session, state: str) -> dict | None:
+    v = db.scalars(
+        select(Video).where(Video.state == state).order_by(Video.updated_at.desc())
+    ).first()
+    if v is None:
+        return None
+    return {"title": v.title, "since": to_utc_iso(v.updated_at)}
+
 
 @router.get("/stats/pipeline")
 def pipeline(db: Session = Depends(get_db)):
-    """지금 파이프라인 상태 — 각 칸의 대기 수와 지금 하는 일."""
-    counts = dict(
-        db.execute(select(Video.state, func.count()).group_by(Video.state)).all()
-    )
+    counts = dict(db.execute(select(Video.state, func.count()).group_by(Video.state)).all())
 
     def take(states):
         return sum(int(counts.get(s, 0)) for s in states)
 
-    running = db.scalars(
-        select(CrawlRun).where(CrawlRun.status.in_(("running", "queued")))
-        .order_by(CrawlRun.started_at.desc())
-    ).first()
+    running = {
+        r.job: r
+        for r in db.scalars(
+            select(CrawlRun).where(CrawlRun.status.in_(("running", "queued")))
+        ).all()
+    }
+    last_by_stage = {
+        stage: at
+        for stage, at in db.execute(
+            select(PipelineEvent.stage, func.max(PipelineEvent.created_at)).group_by(
+                PipelineEvent.stage
+            )
+        ).all()
+    }
 
-    # 지금 무엇을 하고 있는지는 **마지막 전이 기록**이 가장 정확합니다.
-    # 상태 숫자만으로는 "자막 대기 107" 이 도는 중인지 멈춘 건지 모릅니다.
-    last = db.scalars(
-        select(PipelineEvent).order_by(PipelineEvent.created_at.desc()).limit(1)
-    ).first()
-    last_video = db.get(Video, last.video_id) if last else None
+    # 검색은 "붙들고 있는 영상"이 없습니다. 대신 다음 차례가 언제인지가
+    # 알고 싶은 값입니다.
+    upcoming = [
+        n
+        for n in (
+            next_due_at(k)
+            for k in db.scalars(
+                select(Keyword).where(
+                    Keyword.status.in_(("pending", "active")), Keyword.archived_at.is_(None)
+                )
+            )
+        )
+        if n is not None
+    ]
+
+    tracks = []
+    for key, label, waiting_states in (
+        ("discover", "검색", ("DISCOVERED",)),
+        ("transcript", "자막", ("TRANSCRIPT_PENDING",)),
+        ("review", "요약", ("TRANSCRIBED",)),
+    ):
+        run = running.get(key)
+        tracks.append(
+            {
+                "key": key,
+                "label": label,
+                "status": "running" if run is not None else "idle",
+                "waiting": take(waiting_states),
+                "runLabel": run.label if run else None,
+                "startedAt": to_utc_iso(run.started_at) if run else None,
+                # 지금 붙들고 있는 영상 — 이게 있어야 "멈춘 건지 도는
+                # 건지"가 구분됩니다.
+                "working": _now_working(db, _WORKING[key]) if key in _WORKING else None,
+                "lastAt": to_utc_iso(last_by_stage.get(key)),
+                "nextAt": to_utc_iso(min(upcoming)) if key == "discover" and upcoming else None,
+            }
+        )
 
     cooling = transcript.blocked_until(db)
     return {
-        "stages": [
-            {"key": k, "label": label, "count": take(states)} for k, label, states in _STAGES
+        "funnel": [
+            {"key": k, "label": label, "count": take(states)} for k, label, states in _FUNNEL
         ],
+        "tracks": tracks,
         "stuck": [
             {"key": k, "label": label, "count": take(states)} for k, label, states in _STUCK
         ],
-        "current": None
-        if running is None
-        else {
-            "runId": running.id,
-            "status": running.status,
-            "startedAt": to_utc_iso(running.started_at),
-            "label": running.label,
-        },
-        "lastEvent": None
-        if last is None
-        else {
-            "at": to_utc_iso(last.created_at),
-            "stage": last.stage,
-            "toState": last.to_state,
-            "ok": bool(last.ok),
-            "title": last_video.title if last_video else "",
-        },
-        # 자막이 쉬는 중이면 "기다리면 됩니다"의 근거가 됩니다.
         "transcriptCoolingUntil": to_utc_iso(cooling) if cooling else None,
     }
 

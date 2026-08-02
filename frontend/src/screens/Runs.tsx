@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { api } from "../api";
-import type { Pipeline, Run, RunEvent, RunStats } from "../api";
+import type { Pipeline, Run, RunEvent, RunStats, Track } from "../api";
 import { Screen } from "../components/Screen";
 import { Chip, Empty, ErrorState, Loading, Panel } from "../components/ui";
 import { useAsync } from "../hooks/useAsync";
@@ -72,7 +72,9 @@ export function Runs() {
   // **한 번만 불러오면 안 됩니다.** "지금 실행"은 요청만 남기고 워커가
   // 다음 틱에 집어가는 구조라, 눌러 놓고 이 화면을 봐도 대기 중인 실행이
   // 나타나지 않았습니다. 진행 중인 것이 있으면 자주, 없으면 뜸하게 봅니다.
-  const active = Boolean(pipe.data?.current);
+  // 트랙 중 하나라도 돌면 자주 봅니다. "지금 도는 실행" 하나만 보던
+  // 때는 자막이 도는데도 요약 기준으로 판단해 갱신이 느렸습니다.
+  const active = (pipe.data?.tracks ?? []).some((t) => t.status === "running");
   const { reload: reloadRuns } = runs;
   const { reload: reloadPipe } = pipe;
   useEffect(() => {
@@ -117,7 +119,11 @@ export function Runs() {
 }
 
 /** 지금 상태. **이 화면에서 가장 중요한 부분입니다** — 실행 기록은 지나간
-    일이지만, 사용자가 알고 싶은 것은 "지금 어디쯤이고 얼마나 남았나"입니다. */
+    일이지만, 사용자가 알고 싶은 것은 "지금 어디쯤이고 얼마나 남았나"입니다.
+
+    셋을 따로 돌리게 된 뒤로 트랙을 각각 보여 줍니다. 하나만 보여 주면
+    나머지가 멈춘 것처럼 읽힙니다 — 실제로 자막과 요약이 나란히 도는데
+    화면에는 나중에 시작한 것만 떴습니다. */
 function Now({ p }: { p: Pipeline }) {
   const cooling = p.transcriptCoolingUntil ? new Date(p.transcriptCoolingUntil) : null;
   const stuckTotal = p.stuck.reduce((a, x) => a + x.count, 0);
@@ -125,7 +131,7 @@ function Now({ p }: { p: Pipeline }) {
   return (
     <Panel title="지금" className={s.nowPanel}>
       <div className={s.funnel}>
-        {p.stages.map((st, i) => (
+        {p.funnel.map((st, i) => (
           <div key={st.key} className={s.stage}>
             {i > 0 && <span className={s.arrow} aria-hidden="true">→</span>}
             <span className={s.stageCount}>{num(st.count)}</span>
@@ -134,26 +140,11 @@ function Now({ p }: { p: Pipeline }) {
         ))}
       </div>
 
-      <p className={s.nowLine}>
-        {p.current ? (
-          <>
-            <span className={s.dotLive} aria-hidden="true" />
-            {p.current.status === "queued"
-              ? "실행을 요청했습니다. 워커가 곧 집어갑니다."
-              : `${clock(p.current.startedAt)}에 시작한 실행이 돌고 있습니다.`}
-          </>
-        ) : (
-          <>쉬는 중입니다. 1분마다 할 일이 있는지 확인합니다.</>
-        )}
-      </p>
-
-      {p.lastEvent && (
-        <p className={s.lastLine}>
-          마지막 처리 <strong>{ago(p.lastEvent.at)}</strong> ·{" "}
-          {stageLabel[p.lastEvent.stage] ?? p.lastEvent.stage} ·{" "}
-          <span className={s.lastTitle}>{p.lastEvent.title}</span>
-        </p>
-      )}
+      <ul className={s.tracks}>
+        {p.tracks.map((t) => (
+          <TrackRow key={t.key} t={t} />
+        ))}
+      </ul>
 
       {/* 냉각은 실패가 아니라 기다리면 풀리는 상태입니다. 이 한 줄이
           "손대야 하나"에 대한 답이 됩니다. */}
@@ -174,6 +165,33 @@ function Now({ p }: { p: Pipeline }) {
         </p>
       )}
     </Panel>
+  );
+}
+
+function TrackRow({ t }: { t: Track }) {
+  const running = t.status === "running";
+  return (
+    <li className={s.track}>
+      <span className={running ? s.dotLive : s.dotIdle} aria-hidden="true" />
+      <span className={s.trackName}>{t.label}</span>
+      <span className={s.trackWait}>대기 {num(t.waiting)}</span>
+      <span className={s.trackWhat}>
+        {t.working ? (
+          <>
+            {t.working.title}
+            <em className={s.trackSince}> · {ago(t.working.since)} 시작</em>
+          </>
+        ) : running ? (
+          (t.runLabel ?? "도는 중")
+        ) : t.nextAt ? (
+          `쉬는 중 · 다음 차례 ${clock(t.nextAt)}`
+        ) : t.lastAt ? (
+          `쉬는 중 · 마지막 ${ago(t.lastAt)}`
+        ) : (
+          "쉬는 중"
+        )}
+      </span>
+    </li>
   );
 }
 

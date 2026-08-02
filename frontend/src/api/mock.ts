@@ -978,19 +978,24 @@ export const mockApi: Api = {
   async getPipeline() {
     await delay();
     return {
-      stages: [
+      funnel: [
         { key: "discovered", label: "발견", count: 4 },
         { key: "transcript", label: "자막 대기", count: 3 },
-        { key: "review", label: "검토 대기", count: 2 },
-        { key: "working", label: "처리 중", count: 1 },
+        { key: "review", label: "요약 대기", count: 2 },
         { key: "published", label: "공개", count: lectures.length },
+      ],
+      tracks: [
+        { key: "discover", label: "검색", status: "idle" as const, waiting: 4,
+          runLabel: null, startedAt: null, working: null, lastAt: null, nextAt: null },
+        { key: "transcript", label: "자막", status: "idle" as const, waiting: 3,
+          runLabel: null, startedAt: null, working: null, lastAt: null, nextAt: null },
+        { key: "review", label: "요약", status: "idle" as const, waiting: 2,
+          runLabel: null, startedAt: null, working: null, lastAt: null, nextAt: null },
       ],
       stuck: [
         { key: "failedTranscript", label: "자막 실패", count: 0 },
-        { key: "failedReview", label: "검토 실패", count: 0 },
+        { key: "failedReview", label: "요약 실패", count: 0 },
       ],
-      current: null,
-      lastEvent: null,
       transcriptCoolingUntil: null,
     };
   },
