@@ -7,6 +7,7 @@ import type {
   LectureSummary,
   Overview,
   Pipeline,
+  Queue,
   Run,
   RunEvent,
   Usage,
@@ -57,6 +58,12 @@ export interface Api {
   getPipeline(): Promise<Pipeline>;
   /** 실행 하나의 상세 흐름. */
   listRunEvents(runId: string): Promise<RunEvent[]>;
+
+  // 대기 목록
+  getQueue(): Promise<Queue>;
+  /** 처리 전에 뺍니다 — 받아쓰기도 검토도 하지 않습니다. */
+  skipQueued(videoId: string): Promise<void>;
+  restoreQueued(videoId: string): Promise<void>;
   /** "지금 실행" — 요청만 남깁니다. 워커가 다음 틱에 집어갑니다. */
   requestRun(): Promise<Run>;
 

@@ -991,6 +991,19 @@ export const mockApi: Api = {
     };
   },
 
+  async getQueue() {
+    await delay();
+    return { stages: [], skipped: [], asrRealtimeFactor: 5 };
+  },
+
+  async skipQueued(_videoId: string) {
+    await delay(60);
+  },
+
+  async restoreQueued(_videoId: string) {
+    await delay(60);
+  },
+
   async listRunEvents(_runId: string) {
     await delay();
     return [];

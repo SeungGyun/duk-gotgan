@@ -109,6 +109,10 @@ export const httpApi: Api = {
   getPipeline: () => req("/stats/pipeline"),
   listRunEvents: (runId) => req(`/runs/${runId}/events`),
 
+  getQueue: () => req("/queue"),
+  skipQueued: (videoId) => req<void>(`/queue/${videoId}/skip`, { method: "POST" }),
+  restoreQueued: (videoId) => req<void>(`/queue/${videoId}/restore`, { method: "POST" }),
+
   requestRun: () => req<Run>("/runs", { method: "POST" }),
 
   listChannelBlocks: () => req("/channels/blocks"),

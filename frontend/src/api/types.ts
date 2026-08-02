@@ -289,3 +289,34 @@ export interface LectureQuery {
   /** 제외함을 봅니다. */
   excluded?: boolean;
 }
+
+
+/** 앞으로 처리할 영상 한 건. */
+export interface QueueItem {
+  videoId: string;
+  title: string;
+  channelTitle: string;
+  durationSec: number;
+  publishedAt: string | null;
+  /** 이 영상을 데려온 키워드. 괄호는 지운 키워드입니다. */
+  keywords: string[];
+  /** 실제 처리 차례. 발견 단계는 차례가 정해지지 않아 null 입니다. */
+  order: number | null;
+  reason: string;
+}
+
+export interface QueueStage {
+  key: string;
+  label: string;
+  count: number;
+  totalSec: number;
+  /** 받아쓰기만 어림합니다. 검토는 영상 길이로 재면 틀립니다. */
+  etaSec: number | null;
+  items: QueueItem[];
+}
+
+export interface Queue {
+  stages: QueueStage[];
+  skipped: QueueItem[];
+  asrRealtimeFactor: number;
+}

@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import errors
-from app.api.routes import channels, keywords, lectures, stats
+from app.api.routes import channels, keywords, lectures, queue, stats
 from app.db.session import init_db
 from config.settings import settings
 
@@ -46,6 +46,7 @@ app.include_router(keywords.router, prefix="/api/v1")
 app.include_router(lectures.router, prefix="/api/v1")
 app.include_router(stats.router, prefix="/api/v1")
 app.include_router(channels.router, prefix="/api/v1")
+app.include_router(queue.router, prefix="/api/v1")
 
 
 @app.get("/api/v1/health")
