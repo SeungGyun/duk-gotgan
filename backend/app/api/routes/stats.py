@@ -13,12 +13,14 @@ from sqlalchemy.orm import Session
 from app.api.errors import ApiError
 from app.api.serializers import run_out
 from app.collector import transcript
+from app.llm import usage as usage_guard
 from app.db.models import (
     CrawlRun,
     Keyword,
     Lecture,
     PipelineEvent,
     UsageLedger,
+    UsageWindow,
     Video,
     VideoKeyword,
 )
@@ -107,10 +109,18 @@ def overview(db: Session = Depends(get_db)):
 def usage(db: Session = Depends(get_db)):
     today = now_kst().date()
     ledger = db.get(UsageLedger, today)
+    win = db.get(UsageWindow, usage_guard.window_start())
+
+    # **토큰은 5시간 창, 유튜브는 하루** — 주기가 다릅니다. 한 숫자로
+    # 합치면 둘 중 하나는 틀린 기준으로 보이게 됩니다.
     return {
-        "inputTokens": ledger.input_tokens if ledger else 0,
-        "outputTokens": ledger.output_tokens if ledger else 0,
-        "dailyLimitTokens": settings.daily_token_limit or None,
+        "inputTokens": win.input_tokens if win else 0,
+        "outputTokens": win.output_tokens if win else 0,
+        "limitTokens": settings.token_limit_per_window or None,
+        "windowHours": settings.token_window_hours,
+        "windowResetsAt": to_utc_iso(usage_guard.window_end()),
+        # 오늘 하루 합계 — 창과 별개로 "오늘 얼마나 했나"를 보려는 값입니다.
+        "todayTokens": (ledger.input_tokens + ledger.output_tokens) if ledger else 0,
         "youtubeUnits": ledger.youtube_units if ledger else 0,
         "youtubeUnitLimit": settings.youtube_unit_limit,
         # 유튜브 쿼터는 태평양 표준시 자정에 리셋됩니다. 우리 집계는 KST 날짜

@@ -76,7 +76,12 @@ export function TopBar({
 }) {
   const tucked = useTuckOnScroll();
   const used = usage ? usage.inputTokens + usage.outputTokens : 0;
-  const limit = usage?.dailyLimitTokens ?? null;
+  const limit = usage?.limitTokens ?? null;
+  // 언제 풀리는지가 "지금 아껴야 하나"의 답입니다. 남은 시간이 짧으면
+  // 상한에 가까워도 걱정할 일이 아닙니다.
+  const resetIn = usage
+    ? Math.max(0, Math.round((new Date(usage.windowResetsAt).getTime() - Date.now()) / 60000))
+    : 0;
   const pct = limit ? Math.round((used / limit) * 100) : null;
 
   return (
@@ -116,14 +121,19 @@ export function TopBar({
       </nav>
 
       {usage && (
-        <div className={s.usage} title="오늘 사용한 토큰 / 일일 상한">
-          <span className={s.usageLabel}>오늘 토큰</span>
+        <div
+          className={s.usage}
+          title={`이번 ${usage.windowHours}시간 창에서 쓴 토큰 / 창당 상한`}
+        >
+          <span className={s.usageLabel}>
+            {usage.windowHours}시간 토큰
+          </span>
           <span className={s.usageValue}>{tokens(used)}</span>
           {limit && (
             <>
               <Meter value={used} max={limit} height={5} className={s.usageMeter} />
               <span className={s.usageCap}>
-                {pct}% · 상한 {tokens(limit)}
+                {pct}% · {resetIn >= 60 ? `${Math.floor(resetIn / 60)}시간 ${resetIn % 60}분` : `${resetIn}분`} 뒤 초기화
               </span>
             </>
           )}

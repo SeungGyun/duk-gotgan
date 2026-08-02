@@ -270,10 +270,16 @@ export interface Overview {
 }
 
 export interface Usage {
+  /** **이번 창**의 토큰. 하루 합계가 아닙니다. */
   inputTokens: number;
   outputTokens: number;
-  /** 하루 상한. null 이면 상한 없음 */
-  dailyLimitTokens: number | null;
+  /** 창당 상한. null 이면 상한 없음 */
+  limitTokens: number | null;
+  /** 창의 길이(시간). 구독 사용량이 이 주기로 풀립니다. */
+  windowHours: number;
+  windowResetsAt: string;
+  /** 오늘 하루 합계 — 창과 별개로 "오늘 얼마나 했나"를 보는 값. */
+  todayTokens: number;
   youtubeUnits: number;
   youtubeUnitLimit: number;
   resetsAt: string;

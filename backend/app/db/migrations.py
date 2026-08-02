@@ -133,6 +133,18 @@ def ensure_schema(engine: Engine) -> None:
             )
             logger.info("[db] crawl_runs.job added")
 
+        if not _table_exists(conn, "usage_window"):
+            conn.execute(
+                text(
+                    "CREATE TABLE usage_window ("
+                    " start DATETIME NOT NULL PRIMARY KEY,"
+                    " input_tokens BIGINT NOT NULL DEFAULT 0,"
+                    " output_tokens BIGINT NOT NULL DEFAULT 0,"
+                    " llm_calls INT NOT NULL DEFAULT 0)"
+                )
+            )
+            logger.info("[db] usage_window created")
+
         # 프로세스 밖에 남아야 하는 값(자막 냉각 등).
         if not _table_exists(conn, "app_state"):
             conn.execute(

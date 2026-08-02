@@ -76,7 +76,7 @@ export function Dashboard({
   ];
 
   const used = usage.inputTokens + usage.outputTokens;
-  const limit = usage.dailyLimitTokens;
+  const limit = usage.limitTokens;
   const publishRate = f.discovered > 0 ? (f.published / f.discovered) * 100 : 0;
   const perCall = f.reviewed > 0 ? Math.round(used / f.reviewed) : 0;
   const maxContrib = Math.max(1, ...overview.contributions.map((c) => c.published));
@@ -192,7 +192,7 @@ export function Dashboard({
         </Panel>
 
         <div className={s.side}>
-          <Panel title="일일 토큰">
+          <Panel title={`${usage.windowHours}시간 토큰`}>
             <div className={s.usageTop}>
               <span className={s.usageBig}>{tokens(used)}</span>
               {limit && <span className={s.usageCap}>/ {tokens(limit)} 토큰</span>}
@@ -202,7 +202,7 @@ export function Dashboard({
                 <Meter value={used} max={limit} height={8} />
                 <div className={s.usageFoot}>
                   <span>{Math.round((used / limit) * 100)}% 소진</span>
-                  <span>{when(usage.resetsAt)} 리셋</span>
+                  <span>{when(usage.windowResetsAt)} 초기화</span>
                 </div>
               </>
             )}
@@ -217,8 +217,11 @@ export function Dashboard({
               </div>
             </div>
             <p className={s.note}>
-              오늘 <span className="mono">{f.reviewed}</span>건을 요약했습니다. 상한에
-              닿으면 새 요약은 멈추고 진행 중인 건만 마칩니다.
+              {/* 창과 하루를 나란히 둡니다 — 상한은 창 기준이지만 "오늘
+                  얼마나 했나"도 궁금하니까요. */}
+              오늘 하루로는 <span className="mono">{tokens(usage.todayTokens)}</span>,
+              요약 <span className="mono">{f.reviewed}</span>건. 상한에 닿으면 새 요약은
+              멈추고 진행 중인 건만 마칩니다.
             </p>
           </Panel>
 

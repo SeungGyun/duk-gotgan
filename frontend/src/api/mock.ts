@@ -918,7 +918,10 @@ export const mockApi: Api = {
     return {
       inputTokens: 183_000,
       outputTokens: 24_000,
-      dailyLimitTokens: 1_000_000,
+      limitTokens: 20_000_000,
+      windowHours: 5,
+      windowResetsAt: new Date(Date.now() + 3 * 3600_000).toISOString(),
+      todayTokens: 1_200_000,
       youtubeUnits: 2_140,
       youtubeUnitLimit: 10_000,
       resetsAt: runAt(-1, 0),

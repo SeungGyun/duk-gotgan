@@ -15,7 +15,12 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     # 상한 — UI 미터의 분모. 0 이면 상한 없음(UI 가 미터를 숨김)
-    daily_token_limit: int = 10_000_000
+    # **5시간 창 단위**로 셉니다. 구독 사용량이 그 주기로 풀려서, 하루로
+    # 재면 오전에 다 쓰고 저녁 내내 놀거나 그 반대가 됩니다.
+    # 유튜브 쿼터는 여전히 하루 단위입니다(구글이 그렇게 리셋합니다) —
+    # 그래서 장부를 갈라 둡니다.
+    token_limit_per_window: int = 20_000_000
+    token_window_hours: int = 5
     youtube_unit_limit: int = 10_000
 
     # 유튜브 Data API v3 키 (Google Cloud Console 에서 발급, 무료)

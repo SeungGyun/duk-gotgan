@@ -150,6 +150,25 @@ class UsageLedger(Base):
     )
 
 
+class UsageWindow(Base):
+    """토큰 사용량 — **5시간 창** 단위.
+
+    일일 장부(`usage_ledger`)와 갈라 둡니다. 유튜브 쿼터는 구글이 하루
+    주기로 풀지만 구독 사용량은 5시간 주기라, 한 테이블에 담으면 둘 중
+    하나는 틀린 주기로 세게 됩니다.
+
+    창의 시작 시각을 키로 씁니다. 자정에 맞추면 24가 5로 나눠떨어지지
+    않아 마지막 칸만 짧아지므로, 고정 기준점에서 5시간씩 끊습니다.
+    """
+
+    __tablename__ = "usage_window"
+
+    start: Mapped[datetime] = mapped_column(DateTime, primary_key=True)
+    input_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    llm_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
 # ── 임시 층 (파이프라인 작업용) ──────────────────────────────
 
 
