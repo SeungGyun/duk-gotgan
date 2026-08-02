@@ -412,7 +412,13 @@ export function Lectures() {
                 key={l.videoId}
                 to={`/lectures/${l.videoId}`}
                 replace
-                className={`${s.row} ${l.videoId === currentId ? s.rowOn : ""}`}
+                className={[
+                  s.row,
+                  l.videoId === currentId ? s.rowOn : "",
+                  l.isRead || readIds.has(l.videoId) ? s.rowRead : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
                 aria-current={l.videoId === currentId ? "true" : undefined}
                 onClick={scrollToFeed}
                 title={`${l.title}\n${l.channelTitle} · ${duration(l.durationSec)} · 전문성 ${l.expertScore}`}
