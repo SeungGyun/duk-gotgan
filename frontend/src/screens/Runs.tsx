@@ -14,14 +14,29 @@ const POLL_ACTIVE_MS = 5_000;
 /** 놀고 있을 때. 정기 실행이 언제 시작될지 몰라 아주 끊지는 않습니다. */
 const POLL_IDLE_MS = 30_000;
 
-const MAX_BAR_PX = 40;
-const STAGES: { key: keyof RunStats; label: string; seq: string }[] = [
-  { key: "discovered", label: "발견", seq: "var(--seq-1)" },
-  { key: "rulePassed", label: "룰", seq: "var(--seq-2)" },
-  { key: "transcribed", label: "자막", seq: "var(--seq-3)" },
-  { key: "reviewed", label: "요약", seq: "var(--seq-4)" },
-  { key: "published", label: "공개", seq: "var(--seq-5)" },
-];
+/** 잡마다 **자기가 한 일만** 보여 줍니다.
+ *
+ *  예전에는 실행마다 5단계 막대를 그렸습니다. 한 사이클이 발견→자막→요약을
+ *  다 하던 때는 흐름이 보였지만, 셋을 따로 돌리는 지금은 한 실행이 한
+ *  가지만 합니다. 그래서 다섯 칸 중 넷이 0 이고, 척도로 쓰던 "발견" 이
+ *  0 이라 막대 폭이 300%까지 튀었습니다. */
+const JOB_STATS: Record<string, { key: keyof RunStats; label: string }[]> = {
+  discover: [
+    { key: "discovered", label: "발견" },
+    { key: "rulePassed", label: "룰 통과" },
+  ],
+  transcript: [{ key: "transcribed", label: "자막" }],
+  review: [
+    { key: "reviewed", label: "요약" },
+    { key: "published", label: "공개" },
+  ],
+  cycle: [
+    { key: "discovered", label: "발견" },
+    { key: "transcribed", label: "자막" },
+    { key: "reviewed", label: "요약" },
+    { key: "published", label: "공개" },
+  ],
+};
 
 /** **`interrupted` 는 실패가 아닙니다.** 워커가 사이클 도중에 멈춘 것이고
     (재시작·강제 종료), 남은 일은 다음 사이클이 그대로 이어받습니다.
@@ -98,7 +113,6 @@ export function Runs() {
   }
 
   const rows = runs.data;
-  const scaleMax = Math.max(1, ...rows.map((r) => r.stats.discovered));
 
   return (
     <Screen
@@ -111,7 +125,7 @@ export function Runs() {
         {rows.length === 0 ? (
           <Empty>아직 실행 이력이 없습니다.</Empty>
         ) : (
-          rows.map((r) => <RunRow key={r.id} run={r} scaleMax={scaleMax} />)
+          rows.map((r) => <RunRow key={r.id} run={r} />)
         )}
       </Panel>
     </Screen>
@@ -195,7 +209,7 @@ function TrackRow({ t }: { t: Track }) {
   );
 }
 
-function RunRow({ run: r, scaleMax }: { run: Run; scaleMax: number }) {
+function RunRow({ run: r }: { run: Run }) {
   const [open, setOpen] = useState(false);
   const [events, setEvents] = useState<RunEvent[] | null>(null);
   const st = statusChip[r.status];
@@ -225,33 +239,29 @@ function RunRow({ run: r, scaleMax }: { run: Run; scaleMax: number }) {
             {r.label}
           </div>
           <Chip tone={st.tone}>{st.label}</Chip>
-          <div className={s.cost}>
-            {tokens(r.tokens)} 토큰 · {num(r.youtubeUnits)} 유닛
-          </div>
+          {/* 잡마다 쓰는 자원이 다릅니다. 자막은 토큰도 유닛도 안 쓰는데
+              "0 토큰 · 0 유닛"이 붙어 있으면 읽을 것이 하나 늘 뿐입니다. */}
+          {(r.tokens > 0 || r.youtubeUnits > 0) && (
+            <div className={s.cost}>
+              {[
+                r.tokens > 0 && `${tokens(r.tokens)} 토큰`,
+                r.youtubeUnits > 0 && `${num(r.youtubeUnits)} 유닛`,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </div>
+          )}
         </div>
 
         <div>
-          <div className={s.mini}>
-            {STAGES.map((stage) => {
-              const v = r.stats[stage.key];
-              const h = Math.max(2, Math.round((v / scaleMax) * MAX_BAR_PX));
-              return (
-                <div key={stage.key} className={s.col}>
-                  <span className={s.count}>{v}</span>
-                  <span
-                    className={s.bar}
-                    style={{
-                      height: h,
-                      background: v === 0 ? "var(--surface-sink)" : stage.seq,
-                    }}
-                  />
-                </div>
-              );
-            })}
-          </div>
-          <div className={s.labels}>
-            {STAGES.map((stage) => (
-              <span key={stage.key}>{stage.label}</span>
+          <div className={s.figures}>
+            {(JOB_STATS[r.job] ?? JOB_STATS.cycle!).map((m) => (
+              <div key={m.key} className={s.figure}>
+                <span className={r.stats[m.key] ? s.figValue : s.figZero}>
+                  {r.stats[m.key]}
+                </span>
+                <span className={s.figLabel}>{m.label}</span>
+              </div>
             ))}
           </div>
           {r.error && <p className={s.error}>{r.error}</p>}

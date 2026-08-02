@@ -26,51 +26,6 @@
   margin-top: 8px;
 }
 
-/* 실행마다 같은 5단 퍼널을 같은 축척으로 그립니다.
-   어제와 오늘을 나란히 두면 어느 단계가 달라졌는지가 바로 보입니다. */
-/* 폭을 제한하지 않으면 컬럼이 200px 넘게 벌어져 막대그래프가 아니라
-   가로 띠로 읽힙니다. 세로 비교가 목적이므로 좁게 묶습니다. */
-.mini {
-  display: flex;
-  align-items: flex-end;
-  gap: 3px;
-  height: 58px;
-  max-width: 420px;
-}
-.labels {
-  max-width: 420px;
-}
-.col {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
-.count {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--ink-2);
-  font-variant-numeric: tabular-nums;
-}
-/* 퍼센트 높이는 부모 높이가 auto 면 해석되지 않으므로 픽셀로 계산해 넣습니다 */
-.bar {
-  width: 100%;
-  border-radius: 2px 2px 0 0;
-  min-height: 2px;
-}
-.labels {
-  display: flex;
-  gap: 3px;
-  margin-top: 5px;
-}
-.labels span {
-  flex: 1;
-  text-align: center;
-  font-size: 10px;
-  color: var(--muted);
-}
-
 /* 실패는 코드가 아니라 문장으로. 다음에 무슨 일이 일어나는지까지. */
 .error {
   font-size: 12.5px;
@@ -297,5 +252,35 @@
 }
 .trackSince {
   font-style: normal;
+  color: var(--muted);
+}
+
+/* 잡별 지표. 막대 대신 숫자만 둡니다 — 한 실행이 한 가지만 하므로
+   칸끼리 비교할 것이 없고, 막대는 자리만 먹고 오해를 부릅니다. */
+.figures {
+  display: flex;
+  gap: 18px;
+  justify-content: flex-end;
+}
+.figure {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+.figValue,
+.figZero {
+  font-family: var(--mono);
+  font-size: 17px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+/* 0 은 흐리게 — 한 일이 없다는 뜻이라 눈에 걸릴 이유가 없습니다 */
+.figZero {
+  color: var(--muted);
+}
+.figLabel {
+  font-size: 10.5px;
   color: var(--muted);
 }
