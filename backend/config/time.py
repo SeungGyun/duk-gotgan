@@ -32,3 +32,15 @@ def to_date_str(dt: datetime | None) -> str | None:
     if dt is None:
         return None
     return dt.strftime("%Y-%m-%d")
+
+def from_utc_iso(s: str) -> datetime:
+    """`2026-07-31T04:02:00Z` → KST naive. `to_utc_iso` 의 역함수입니다.
+
+    브라우저가 돌려주는 시각을 DB 값과 비교하려면 반드시 거쳐야 합니다.
+    문자열을 그대로 비교하면 9시간이 어긋납니다.
+    """
+    raw = s.strip().replace("Z", "+00:00")
+    dt = datetime.fromisoformat(raw)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(KST).replace(tzinfo=None)

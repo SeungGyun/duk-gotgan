@@ -79,6 +79,15 @@ export const httpApi: Api = {
       body: JSON.stringify({ isFavorite }),
     }),
 
+  countNewLectures: async (query, since) => {
+    // 정렬은 개수와 무관하니 뺍니다 — 조건이 같아야 화면에 안 나올 것을
+    // 두고 새로 왔다고 알리는 일이 없습니다.
+    const base = qs({ ...query, sort: undefined });
+    const url = `/lectures/updates${base ? base + "&" : "?"}since=${encodeURIComponent(since)}`;
+    const { count } = await req<{ count: number }>(url);
+    return count;
+  },
+
   markRead: (videoId) =>
     req<void>(`/lectures/${videoId}`, {
       method: "PATCH",

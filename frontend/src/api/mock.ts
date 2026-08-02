@@ -184,6 +184,7 @@ const lectures: Seed[] = [
     keyPointOffsets: [682, 1661, 3364, 4470],
     isFavorite: true,
     isRead: false,
+    addedAt: "2026-07-31T14:48:00Z",
     keywordIds: ["kw_2"],
     detail: {
       youtubeUrl: "https://youtu.be/aX7kQ2mN9pL",
@@ -317,6 +318,7 @@ const lectures: Seed[] = [
     keyPointOffsets: [723, 1481, 2210, 3105, 3940],
     isFavorite: false,
     isRead: false,
+    addedAt: "2026-07-31T14:48:00Z",
     keywordIds: ["kw_1"],
     detail: {
       youtubeUrl: "https://youtu.be/bK4rT8wY1zQ",
@@ -427,6 +429,7 @@ const lectures: Seed[] = [
     keyPointOffsets: [395, 1240, 2115],
     isFavorite: false,
     isRead: false,
+    addedAt: "2026-07-31T14:48:00Z",
     keywordIds: ["kw_3"],
     detail: {
       youtubeUrl: "https://youtu.be/cM9nP3vB7hR",
@@ -518,6 +521,7 @@ const lectures: Seed[] = [
     keyPointOffsets: [512, 1420, 2380, 3350],
     isFavorite: false,
     isRead: false,
+    addedAt: "2026-07-31T14:48:00Z",
     keywordIds: ["kw_4"],
     detail: {
       youtubeUrl: "https://youtu.be/dW2jL6xF4tG",
@@ -616,6 +620,7 @@ const lectures: Seed[] = [
     keyPointOffsets: [440, 1590, 2705],
     isFavorite: false,
     isRead: false,
+    addedAt: "2026-07-31T14:48:00Z",
     keywordIds: ["kw_6"],
     detail: {
       youtubeUrl: "https://youtu.be/eR5tY8uI0oP",
@@ -828,6 +833,11 @@ export const mockApi: Api = {
     await delay(80);
     const found = lectures.find((l) => l.videoId === videoId);
     if (found) found.isFavorite = isFavorite;
+  },
+
+  async countNewLectures(_query, since) {
+    await delay(50);
+    return lectures.filter((l) => l.addedAt > since).length;
   },
 
   async markRead(videoId) {

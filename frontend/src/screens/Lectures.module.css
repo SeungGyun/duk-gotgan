@@ -937,3 +937,26 @@
   color: var(--warn);
   line-height: 1.6;
 }
+
+/* 새로 온 것 알림. 목록 맨 위에 붙어 스크롤해도 따라옵니다 — 아래까지
+   내려간 뒤에 새 글이 와도 알아챌 수 있어야 합니다. */
+.newPill {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+.newPill:hover {
+  filter: brightness(0.97);
+}

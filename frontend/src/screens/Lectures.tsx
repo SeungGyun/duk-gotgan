@@ -48,8 +48,16 @@ const SORTS: { value: LectureSort; label: string }[] = [
 ];
 
 /** 이만큼 머물러야 "읽었다"로 봅니다. 스크롤로 스쳐 간 것까지 읽음으로
-    만들면, 안 본 것 먼저 정렬이 첫 스크롤 한 번에 무의미해집니다. */
+    만들면, 안 본 것 먼저 정렬이 첫 스크롤 한 번에 무의미해집니다.
+
+    **머문 시간만으로는 부족합니다.** 화면을 열어 두기만 해도 맨 위 강의가
+    4초 뒤 읽음이 되어, 다음에 왔을 때 읽지도 않은 것이 뒤로 가 있었습니다.
+    그래서 손을 댄 뒤(스크롤·클릭·키)부터 셉니다. */
 const READ_DWELL_MS = 4000;
+
+/** 새로 들어온 것이 있는지 확인하는 간격. 워커 사이클이 분 단위라 자주 볼
+    이유가 없습니다. */
+const NEW_POLL_MS = 60_000;
 
 /** 목록이 비었을 때 매 렌더 새 배열이 생기지 않게 — 이어보기 옵저버의 의존값 */
 const NO_ROWS: LectureSummary[] = [];
@@ -194,7 +202,27 @@ export function Lectures() {
   // 정렬이 발밑에서 순서를 바꿔, 읽던 글이 화면 밖으로 튑니다. 표시는
   // 서버와 화면에만 반영하고, 순서는 다음에 목록을 열 때 맞춰집니다.
   const readSent = useRef(new Set<string>());
+
+  // 손을 댄 적이 있는지. 열어만 둔 화면은 아무것도 읽지 않은 것입니다.
+  const [engaged, setEngaged] = useState(false);
   useEffect(() => {
+    if (engaged) return;
+    const on = () => setEngaged(true);
+    const opts = { passive: true, once: true } as const;
+    window.addEventListener("wheel", on, opts);
+    window.addEventListener("touchmove", on, opts);
+    window.addEventListener("keydown", on, opts);
+    window.addEventListener("pointerdown", on, opts);
+    return () => {
+      window.removeEventListener("wheel", on);
+      window.removeEventListener("touchmove", on);
+      window.removeEventListener("keydown", on);
+      window.removeEventListener("pointerdown", on);
+    };
+  }, [engaged]);
+
+  useEffect(() => {
+    if (!engaged) return;
     if (!currentId || readSent.current.has(currentId)) return;
     const id = currentId;
     const timer = window.setTimeout(() => {
@@ -203,7 +231,46 @@ export function Lectures() {
       setReadIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
     }, READ_DWELL_MS);
     return () => window.clearTimeout(timer);
-  }, [currentId]);
+  }, [currentId, engaged]);
+
+  // ── 새로 온 것 알림 ──────────────────────────────────────
+  //
+  // **목록을 몰래 갈아 끼우지 않습니다.** 다시 부르면 "안 본 것 먼저" 정렬이
+  // 발밑에서 순서를 바꿔 읽던 글이 화면 밖으로 튑니다. 개수만 확인해 알리고,
+  // 갈아 끼울지는 사용자가 정합니다.
+  //
+  // 기준 시각은 **목록에 실제로 담긴 것 중 가장 최근에 들어온 때**입니다.
+  // 브라우저 시계로 재면 몇 초 어긋나 새 글을 놓칩니다.
+  const [newCount, setNewCount] = useState(0);
+  const since = useMemo(
+    () => rows.reduce((max, r) => (r.addedAt > max ? r.addedAt : max), ""),
+    [rows],
+  );
+
+  useEffect(() => {
+    setNewCount(0);
+    if (!since) return;
+    let alive = true;
+    const check = () => {
+      void api
+        .countNewLectures(query, since)
+        .then((n) => alive && setNewCount(n))
+        .catch(() => {});
+    };
+    const id = window.setInterval(check, NEW_POLL_MS);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, [since, query]);
+
+  const showNew = useCallback(() => {
+    setNewCount(0);
+    readSent.current.clear();
+    setReadIds(new Set());
+    list.reload();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [list]);
 
   // 목록에서 다른 강의를 고르면 읽던 위치가 아니라 그 강의의 머리로 보냅니다
   const scrollToFeed = useCallback(() => {
@@ -331,6 +398,14 @@ export function Lectures() {
                 {SORTS.find((x) => x.value === sort)?.label}
               </button>
             </div>
+
+            {/* 새로 들어온 것이 있으면 알리기만 합니다. 누를 때 갈아 끼웁니다 —
+                읽는 중에 순서가 바뀌면 보던 글이 화면 밖으로 튑니다. */}
+            {newCount > 0 && (
+              <button type="button" className={s.newPill} onClick={showNew}>
+                새로 온 덕질 {newCount}편 보기
+              </button>
+            )}
 
             {rows.map((l) => (
               <Link

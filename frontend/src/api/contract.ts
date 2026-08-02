@@ -40,6 +40,8 @@ export interface Api {
   setFavorite(videoId: string, isFavorite: boolean): Promise<void>;
   /** 읽음 표시. 목록을 다시 부르지 않으므로 보는 중에 순서가 흔들리지 않습니다. */
   markRead(videoId: string): Promise<void>;
+  /** 화면을 켜 둔 사이 새로 들어온 편수. 목록 전체를 다시 받지 않습니다. */
+  countNewLectures(query: LectureQuery, since: string): Promise<number>;
 
   // 운영
   getOverview(): Promise<Overview>;

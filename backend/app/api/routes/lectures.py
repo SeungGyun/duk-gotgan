@@ -9,11 +9,13 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
+from dataclasses import dataclass
+
 from app.api.errors import ApiError
 from app.api.serializers import lecture_detail_out, lecture_summary_out
 from app.db.models import Evaluation, Lecture, Transcript, Video, VideoKeyword
 from app.db.session import get_db
-from config.time import now_kst
+from config.time import from_utc_iso, now_kst
 
 router = APIRouter(prefix="/lectures", tags=["lectures"])
 
@@ -62,21 +64,26 @@ def _keyword_map(db: Session, video_ids: list[str]) -> dict[str, list[str]]:
     return out
 
 
-@router.get("")
-def list_lectures(
-    keyword_ids: str | None = Query(default=None),
-    min_score: int | None = Query(default=None, ge=0, le=100),
-    min_duration_sec: int | None = Query(default=None, ge=0),
-    max_duration_sec: int | None = Query(default=None, ge=0),
-    q: str | None = Query(default=None),
-    favorites_only: bool = Query(default=False),
-    sort: str = Query(default=DEFAULT_SORT),
-    db: Session = Depends(get_db),
-):
-    if sort not in SORTS:
-        raise ApiError(
-            400, "INVALID_VALUE", f"sort 값이 올바르지 않습니다. 가능한 값: {', '.join(SORTS)}"
-        )
+@dataclass
+class Filters:
+    """목록과 "새로 온 것" 개수가 **같은 조건**을 봐야 합니다. 조건이 갈리면
+    화면에 안 나오는 것을 두고 새로 왔다고 알리게 됩니다."""
+
+    keyword_ids: str | None = None
+    min_score: int | None = None
+    min_duration_sec: int | None = None
+    max_duration_sec: int | None = None
+    q: str | None = None
+    favorites_only: bool = False
+
+
+def _filtered(f: Filters):
+    keyword_ids = f.keyword_ids
+    min_score = f.min_score
+    min_duration_sec = f.min_duration_sec
+    max_duration_sec = f.max_duration_sec
+    q = f.q
+    favorites_only = f.favorites_only
 
     stmt = select(Lecture).join(Video, Video.id == Lecture.video_id).where(
         Lecture.is_hidden.is_(False)
@@ -117,11 +124,64 @@ def list_lectures(
         else:
             stmt = stmt.where(Lecture.search_text.like(f"%{term}%"))
 
-    stmt = stmt.order_by(*SORTS[sort])
+    return stmt
+
+
+@router.get("")
+def list_lectures(
+    keyword_ids: str | None = Query(default=None),
+    min_score: int | None = Query(default=None, ge=0, le=100),
+    min_duration_sec: int | None = Query(default=None, ge=0),
+    max_duration_sec: int | None = Query(default=None, ge=0),
+    q: str | None = Query(default=None),
+    favorites_only: bool = Query(default=False),
+    sort: str = Query(default=DEFAULT_SORT),
+    db: Session = Depends(get_db),
+):
+    if sort not in SORTS:
+        raise ApiError(
+            400, "INVALID_VALUE", f"sort 값이 올바르지 않습니다. 가능한 값: {', '.join(SORTS)}"
+        )
+    stmt = _filtered(
+        Filters(keyword_ids, min_score, min_duration_sec, max_duration_sec, q, favorites_only)
+    ).order_by(*SORTS[sort])
 
     rows = db.scalars(stmt).unique().all()
     kmap = _keyword_map(db, [r.video_id for r in rows])
     return [lecture_summary_out(r, kmap.get(r.video_id, [])) for r in rows]
+
+
+@router.get("/updates")
+def count_new(
+    since: str = Query(..., description="이 시각 이후에 곳간에 들어온 것만 셉니다 (UTC ISO)"),
+    keyword_ids: str | None = Query(default=None),
+    min_score: int | None = Query(default=None, ge=0, le=100),
+    min_duration_sec: int | None = Query(default=None, ge=0),
+    max_duration_sec: int | None = Query(default=None, ge=0),
+    q: str | None = Query(default=None),
+    favorites_only: bool = Query(default=False),
+    db: Session = Depends(get_db),
+):
+    """화면을 켜 둔 사이에 새로 들어온 덕질이 몇 편인지.
+
+    **목록 전체를 다시 주지 않습니다.** 1분마다 수십 KB 를 받을 이유가 없고,
+    무엇보다 목록을 갈아 끼우면 "안 본 것 먼저" 정렬이 발밑에서 순서를 바꿔
+    읽던 글이 화면 밖으로 튑니다. 개수만 알려 주고, 갈아 끼울지는 사용자가
+    버튼으로 정합니다.
+
+    기준은 **곳간에 들어온 시각**(lectures.published_at)입니다. 영상 공개일로
+    세면 오래된 영상을 새로 수집했을 때 안 세게 됩니다.
+    """
+    try:
+        at = from_utc_iso(since)
+    except ValueError as e:
+        raise ApiError(400, "INVALID_VALUE", "since 는 ISO 8601 시각이어야 합니다.") from e
+
+    stmt = _filtered(
+        Filters(keyword_ids, min_score, min_duration_sec, max_duration_sec, q, favorites_only)
+    ).where(Lecture.published_at > at)
+    n = db.scalar(stmt.with_only_columns(func.count()).order_by(None))
+    return {"count": int(n or 0)}
 
 
 @router.get("/{video_id}")

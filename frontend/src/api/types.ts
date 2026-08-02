@@ -124,6 +124,8 @@ export interface LectureSummary {
   isFavorite: boolean;
   /** 읽었는지. 기본 정렬이 안 읽은 것을 앞에 둡니다. */
   isRead: boolean;
+  /** 곳간에 들어온 시각(UTC ISO). "새로 온 것" 개수의 기준. */
+  addedAt: string;
   keywordIds: string[];
 }
 
