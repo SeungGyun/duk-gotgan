@@ -154,3 +154,28 @@ def test_너무_긴_영상은_차단이_아니라_그_영상만의_문제다(mon
 
     with pytest.raises(transcript.TranscriptUnavailable, match="너무 깁니다"):
         transcript.fetch_via_asr(V())
+
+
+def test_모델_해제는_한_번만_로그를_남긴다(monkeypatch, caplog):
+    """자막 잡이 30초마다 도는데 놀 때마다 같은 줄을 찍으면 로그가 덮입니다."""
+    import logging
+
+    from mlx_whisper.transcribe import ModelHolder
+
+    from app.collector import asr as A
+
+    ModelHolder.model = None
+    with caplog.at_level(logging.INFO):
+        A.release_model()
+    assert "모델을 내렸습니다" not in caplog.text
+
+
+def test_받아쓰기_뒤에는_버퍼_캐시를_비운다():
+    """실측: 3분 오디오 한 편 뒤에 캐시 778MB 가 남아 있었습니다. 다음
+    파일에서 어차피 다시 잡는 것이라, 그걸 들고 있느라 요약 프로세스가
+    뜰 자리를 잃는 것은 손해입니다."""
+    import inspect
+
+    from app.collector import asr as A
+
+    assert "mx.clear_cache()" in inspect.getsource(A._run_whisper)

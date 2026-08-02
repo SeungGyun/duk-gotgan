@@ -134,7 +134,36 @@ def _download_audio(video_id: str, workdir: str) -> str:
     return path
 
 
+def release_model() -> None:
+    """모델과 버퍼를 메모리에서 내립니다.
+
+    **한 번 부르고 나면 계속 남아 있습니다** (실측):
+
+      3분 오디오 처리 후   MLX 활성 1,618MB · 캐시 778MB · 최대 2,152MB
+
+    캐시 778MB 는 다음 파일에서 어차피 다시 잡으므로 매번 비웁니다 —
+    공짜입니다. 모델 1,618MB 는 다시 올리는 데 몇 초 걸리므로, 할 일이
+    없을 때만 내립니다.
+
+    16GB 기계에서 요약 프로세스(368MB)가 뜰 자리를 못 찾아 60건이 죽은
+    적이 있습니다. 놀면서 1.6GB 를 쥐고 있을 이유가 없습니다.
+    """
+    try:
+        import mlx.core as mx
+        from mlx_whisper.transcribe import ModelHolder
+
+        if ModelHolder.model is None:
+            return  # 이미 내려가 있습니다 — 30초마다 같은 줄을 찍지 않습니다
+        ModelHolder.model = None
+        ModelHolder.model_path = None
+        mx.clear_cache()
+        logger.info("[asr] 모델을 내렸습니다 — 다음 작업에서 다시 올립니다")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[asr] 모델 해제 실패 (%s) — 그냥 둡니다", type(e).__name__)
+
+
 def _run_whisper(path: str, language: str) -> AsrResult:
+    import mlx.core as mx
     import mlx_whisper
 
     t0 = time.time()
@@ -146,6 +175,11 @@ def _run_whisper(path: str, language: str) -> AsrResult:
         verbose=None,
     )
     elapsed = time.time() - t0
+
+    # **버퍼 캐시는 매번 비웁니다.** 다음 파일에서 어차피 다시 잡는
+    # 것이라 들고 있어 봐야 이득이 없는데, 그 778MB 때문에 요약
+    # 프로세스가 뜰 자리가 없어집니다.
+    mx.clear_cache()
 
     segments = []
     for s in res.get("segments", []):

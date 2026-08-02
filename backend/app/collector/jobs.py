@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.collector import asr
 from app.collector import discover as D
 from app.collector import resources
 from app.collector import quota
@@ -134,6 +135,10 @@ def transcript_job(db: Session) -> JobResult:
         select(func.count()).select_from(Video).where(Video.state == "TRANSCRIPT_PENDING")
     )
     if not waiting:
+        # 할 일이 없으면 모델을 내립니다. 놀면서 1.6GB 를 쥐고 있으면
+        # 요약 프로세스가 뜰 자리가 없어집니다 — 실제로 그래서 60건이
+        # 죽었습니다. 다시 올리는 데 몇 초면 됩니다.
+        asr.release_model()
         return r
 
     run = _start(db, "transcript", "scheduled", f"자막 — 대기 {waiting}건")
