@@ -31,10 +31,11 @@ from app.collector import asr
 from app.collector import discover as D
 from app.collector import resources
 from app.collector import quota
+from app.collector import queue
 from app.collector.schedule import due_keywords
 from app.collector.transcript import blocked_until, transcribe_pending
 from app.collector.youtube import YouTubeError
-from app.db.models import CrawlRun, Evaluation, Keyword, Video
+from app.db.models import CrawlRun, Evaluation, Keyword, PipelineEvent, Video
 from app.llm.runner import recover_zombies, review_pending
 from config.settings import settings
 from config.time import now_kst
@@ -95,15 +96,83 @@ def _start(db: Session, job: str, trigger: str, label: str) -> CrawlRun:
 # ── 1) 검색 ──────────────────────────────────────────────────
 
 
+# 자막 줄이 이보다 짧아지면 발견분에서 채웁니다.
+#
+# 20편이면 평균 30분짜리 기준으로 열 시간치 소리이고, 받아쓰기 5배속에서
+# 두 시간 분량입니다. 넉넉히 물려 있으면서도, 마음이 바뀌어 대기 목록에서
+# 빼고 싶을 때 줄이 지나치게 길지 않은 정도입니다.
+BACKFILL_LOW_WATER = 20
+
+
+def backfill(db: Session) -> int:
+    """발견해 둔 것을 자막 줄로 올립니다. **유튜브 유닛이 들지 않습니다.**
+
+    `max_per_run` 은 *새 검색 결과*를 한 번에 몇 편 올릴지 정하는 값입니다.
+    한 사이클이 발견부터 요약까지 다 하던 시절의 비용 가드였는데, 셋을
+    따로 돌리는 지금은 토큰 상한이 그 일을 합니다.
+
+    그 사이 이런 일이 벌어졌습니다 — 발견 283건이 묶여 있는데 자막·요약
+    트랙은 완전히 놀고, 키워드당 하루 10편씩이라 다 풀리는 데 엿새가
+    걸립니다. **검색은 이미 끝나서 유닛을 지불한 재고인데** 쓰지 못하고
+    있었습니다.
+
+    **키워드끼리 번갈아 올립니다.** 앞에서부터 채우면 발견 55건인 키워드
+    하나가 줄을 독차지하고 나머지는 그대로 굶습니다 (queue.py 참고).
+    """
+    waiting = int(
+        db.scalar(select(func.count()).select_from(Video).where(Video.state == "TRANSCRIPT_PENDING"))
+        or 0
+    )
+    room = BACKFILL_LOW_WATER - waiting
+    if room <= 0:
+        return 0
+
+    ids = queue.next_ids(db, "DISCOVERED", room)
+    if not ids:
+        return 0
+
+    for vid in ids:
+        v = db.get(Video, vid)
+        if v is None or v.state != "DISCOVERED":
+            continue
+        v.state = "TRANSCRIPT_PENDING"
+        v.state_reason = None
+        db.add(
+            PipelineEvent(
+                video_id=v.id,
+                from_state="DISCOVERED",
+                to_state="TRANSCRIPT_PENDING",
+                stage="discover",
+                ok=True,
+                detail={"reason": "자막 줄이 비어 발견분에서 채웠습니다."},
+            )
+        )
+    db.commit()
+    logger.info("[discover] 발견분 %d편을 자막 줄로 올렸습니다 (대기 %d편)", len(ids), waiting)
+    return len(ids)
+
+
 def discover_job(db: Session, keyword_ids: list[str] | None = None, trigger: str = "scheduled"):
     """차례가 된 키워드를 검색합니다. 초 단위로 끝나는 가벼운 일입니다."""
     r = JobResult(job="discover")
+
+    # **차례가 아니어도 재고는 씁니다.** 검색은 하루 한 번이지만, 이미
+    # 발견해 둔 것을 올리는 데는 유닛이 들지 않습니다.
+    filled = backfill(db)
+    if filled:
+        r.stats["rulePassed"] = filled
+
     targets = (
         list(db.scalars(select(Keyword).where(Keyword.id.in_(keyword_ids))))
         if keyword_ids
         else due_keywords(db)
     )
     if not targets:
+        if filled:
+            run = _start(db, "discover", trigger, f"발견분 {filled}편을 자막 줄로")
+            r.did_work = True
+            r.label = f"발견분 {filled}편을 자막 줄로"
+            _finish(db, run, r)
         return r
 
     run = _start(db, "discover", trigger, "검색")

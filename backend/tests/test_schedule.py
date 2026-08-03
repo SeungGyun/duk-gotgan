@@ -162,3 +162,38 @@ def test_프로세스가_못_뜬_것은_영상_탓이_아니다():
     assert _is_transient("실행 실패: Claude Code returned an error result: success")
     assert _is_transient("Cannot allocate memory")
     assert not _is_transient("형식 오류 3회 — sections 가 문자열입니다")
+
+
+def test_보충은_키워드끼리_번갈아_올린다():
+    """앞에서부터 채우면 발견 55건인 키워드 하나가 줄을 독차지하고
+    나머지는 굶습니다. 실제로 그런 상태였습니다 — 자막·요약 트랙이
+    노는 동안 283건이 묶여 있었고, 키워드당 하루 10편씩이라 다 풀리는
+    데 엿새가 걸렸습니다."""
+    import inspect
+
+    from app.collector import jobs
+
+    src = inspect.getsource(jobs.backfill)
+    assert "queue.next_ids(db" in src, "번갈아 뽑는 큐를 써야 합니다"
+
+
+def test_보충은_유튜브_유닛을_쓰지_않는다():
+    """이미 발견해 둔 것을 올릴 뿐이라 검색 호출이 없어야 합니다.
+    유닛을 쓴다면 하루 한 번이라는 검색 주기를 우회하는 셈이 됩니다."""
+    import inspect
+
+    from app.collector import jobs
+
+    src = inspect.getsource(jobs.backfill)
+    for banned in ("search_ids", "fetch_details", "playlist_video_ids", "_spend", "quota"):
+        assert banned not in src, f"{banned} 를 부르면 안 됩니다"
+
+
+def test_자막_줄이_차_있으면_보충하지_않는다():
+    """줄이 이미 길면 더 올릴 이유가 없습니다 — 마음이 바뀌어 대기
+    목록에서 빼고 싶을 때 줄만 길어집니다."""
+    import inspect
+
+    from app.collector import jobs
+
+    assert "room <= 0" in inspect.getsource(jobs.backfill)
