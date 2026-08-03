@@ -93,8 +93,19 @@ export function Lectures() {
   const [readIds, setReadIds] = useState<Set<string>>(() => new Set());
 
   // 읽기에 집중하고 싶을 때 양옆 패널을 접습니다. 둘 다 접으면 본문이 화면 정중앙.
-  const [listOpen, toggleList] = usePersistentToggle("ui.lectures.list", true);
-  const [chaptersOpen, toggleChapters] = usePersistentToggle("ui.lectures.chapters", true);
+  // **좁은 화면에서는 접고 시작합니다.** 390px 에서 목록판이 762px 를
+  // 차지해, 덕질 화면을 열면 첫 화면이 통째로 목록이고 본문은 한참
+  // 아래에 있었습니다. 읽으러 들어온 화면이니 본문이 먼저 보여야 합니다.
+  // 챕터도 같은 이유로 접습니다.
+  const [listOpen, toggleList] = usePersistentToggle("ui.lectures.list", true, false);
+  // 필터가 390px 화면에서 267px(32%)를 먹고 있었습니다. 읽으러 들어온
+  // 화면이니 본문이 먼저 보여야 합니다 — 넓은 화면에서는 그대로 둡니다.
+  const [filtersOpen, toggleFilters] = usePersistentToggle("ui.lectures.filters", true, false);
+  const [chaptersOpen, toggleChapters] = usePersistentToggle(
+    "ui.lectures.chapters",
+    true,
+    false,
+  );
 
   const keywords = useAsync(() => api.listKeywords(), []);
 
@@ -335,8 +346,9 @@ export function Lectures() {
         </Button>
       }
     >
-      {/* 키워드 필터 — 칩 자체가 설명이라 머리글·선택 수는 두지 않습니다 */}
-      <div className={s.kwFilter}>
+      {/* 키워드 필터 — 칩 자체가 설명이라 머리글·선택 수는 두지 않습니다.
+          좁은 화면에서는 접습니다(아래 `필터` 버튼). */}
+      <div className={`${s.kwFilter} ${filtersOpen ? "" : s.foldable}`}>
         <div className={s.kwChips}>
           {(keywords.data ?? [])
             .filter((k) => k.status !== "archived")
@@ -380,6 +392,16 @@ export function Lectures() {
           <span className={s.caret}>{listOpen ? "◀" : "▶"}</span>
           목록
         </button>
+        {/* 좁은 화면에서만 보입니다. 넓은 화면은 접을 이유가 없습니다. */}
+        <button
+          type="button"
+          className={`${s.toggle} ${s.filterToggle} ${filtersOpen ? s.toggleOn : ""}`}
+          onClick={toggleFilters}
+          aria-pressed={filtersOpen}
+        >
+          <span className={s.caret}>{filtersOpen ? "▲" : "▼"}</span>
+          필터
+        </button>
         <input
           className={s.search}
           type="search"
@@ -387,7 +409,11 @@ export function Lectures() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        <div className={s.seg} role="group" aria-label="점수 필터">
+        <div
+          className={`${s.seg} ${filtersOpen ? "" : s.foldable}`}
+          role="group"
+          aria-label="점수 필터"
+        >
           {SCORE_BANDS.map((b, i) => (
             <button
               key={b.label}
@@ -400,7 +426,11 @@ export function Lectures() {
             </button>
           ))}
         </div>
-        <div className={s.seg} role="group" aria-label="길이 필터">
+        <div
+          className={`${s.seg} ${filtersOpen ? "" : s.foldable}`}
+          role="group"
+          aria-label="길이 필터"
+        >
           {LENGTH_BANDS.map((b, i) => (
             <button
               key={b.label}

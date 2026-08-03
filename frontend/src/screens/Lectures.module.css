@@ -301,11 +301,34 @@
   color: var(--muted);
   margin-bottom: 8px;
 }
-/* 제목과 동작을 한 줄에. 아래로 쌓으면 본문이 그만큼 밀립니다. */
+/* 제목과 동작을 한 줄에. 아래로 쌓으면 본문이 그만큼 밀립니다.
+
+   **좁은 화면에서는 아래로 내립니다.** 390px 에서 재 보니 아이콘 넷이
+   138px(화면의 35%)을 차지하고 제목은 200px 로 눌려 세 줄로 접혔습니다.
+   제목이 읽히지 않으면 무엇을 보는지도 모르게 됩니다 — 아이콘은 한 줄을
+   더 쓰더라도 제목에 폭을 내주는 편이 낫습니다. */
 .rpTitleRow {
   display: flex;
   align-items: flex-start;
   gap: 16px;
+}
+@media (max-width: 640px) {
+  .rpTitleRow {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .rpTitle {
+    font-size: 18px;
+  }
+  /* 손가락으로 누르는 화면이라 조금 키우고, 왼쪽 끝을 제목과 맞춥니다 */
+  .rpActions {
+    padding-top: 0;
+    gap: 10px;
+  }
+  .rpActions .iconBtn {
+    width: 38px;
+    height: 38px;
+  }
 }
 .rpTitle {
   flex: 1;
@@ -981,4 +1004,49 @@
 }
 .newPill:hover {
   filter: brightness(0.97);
+}
+
+/* ── 모바일 ──────────────────────────────────────────────
+   390px 에서 재 보니 본문이 668px 아래에서 시작했습니다 — 화면(844px)의
+   8할이 머리였습니다. 읽으러 들어온 화면이니 본문이 먼저 보여야 합니다.
+
+     84  상단바
+     97  화면 머리
+    138  키워드 칩      ┐ 267px = 32%
+    129  검색·점수·길이 ┘
+    180  강의 헤더
+*/
+.filterToggle {
+  display: none;
+}
+@media (max-width: 640px) {
+  /* 넓은 화면에는 접을 이유가 없어 버튼도 숨겨 둡니다 */
+  .filterToggle {
+    display: inline-flex;
+  }
+  .foldable {
+    display: none;
+  }
+  /* 접었을 때 검색창이 한 줄을 통째로 쓰게 — 필터 없이 검색만으로도
+     쓸 수 있어야 합니다 */
+  .filters {
+    gap: 8px;
+  }
+  .search {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  /* 메타 줄에서 주소는 뺍니다 — 바로 위 재생 아이콘이 같은 곳으로
+     가는데, 좁은 화면에서 줄바꿈까지 만들어 가며 둘 이유가 없습니다. */
+  .srcLink {
+    display: none;
+  }
+  .rpMeta {
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  .rpHead {
+    padding-bottom: 12px;
+    margin-bottom: 16px;
+  }
 }

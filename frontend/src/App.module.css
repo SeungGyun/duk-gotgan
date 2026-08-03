@@ -57,3 +57,20 @@
 }
 
 /* 좁은 화면의 여백은 --page-pad 가 한 곳에서 줄입니다 (tokens.css) */
+
+/* 모바일에서는 화면 머리를 줄입니다. 390×844 에서 상단바 84 + 머리 97 이
+   화면의 21%를 차지했는데, 어느 화면인지는 상단바 메뉴에 이미 강조로
+   나와 있어 두 번 말할 이유가 없습니다. */
+@media (max-width: 640px) {
+  .head {
+    padding: 12px var(--page-pad) 10px;
+    align-items: center;
+    gap: 10px;
+  }
+  .head h1 {
+    font-size: 17px;
+  }
+  .head p {
+    font-size: 12px;
+  }
+}
