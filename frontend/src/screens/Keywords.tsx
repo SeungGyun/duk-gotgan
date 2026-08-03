@@ -11,6 +11,7 @@ import type {
 import { Screen } from "../components/Screen";
 import { Button, Chip, ErrorState, Loading, Meter, Panel } from "../components/ui";
 import { useAsync } from "../hooks/useAsync";
+import { useMe } from "../me";
 import { languageLabel, num, scheduleLabel, when } from "../lib/format";
 import s from "./Keywords.module.css";
 
@@ -53,6 +54,7 @@ interface ListState {
 }
 
 export function Keywords({ list }: { list: ListState }) {
+  const me = useMe();
   const [draft, setDraft] = useState<KeywordDraft>(DEFAULT_DRAFT);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -68,7 +70,11 @@ export function Keywords({ list }: { list: ListState }) {
   const [blocksOpen, setBlocksOpen] = useState(false);
   const [blockHandle, setBlockHandle] = useState("");
 
-  const usage = useAsync(() => api.getUsage(), []);
+  // 쿼터는 주인만 봅니다 — 식구는 손댈 수 없는 숫자입니다.
+  const usage = useAsync(
+    () => (me.isOwner ? api.getUsage() : Promise.resolve(null)),
+    [me.isOwner],
+  );
   const bin = useAsync(() => api.listArchivedKeywords(), []);
   const blocks = useAsync(() => api.listChannelBlocks(), []);
 
@@ -477,7 +483,12 @@ export function Keywords({ list }: { list: ListState }) {
         </section>
       )}
 
-      {/* 차단한 채널 — 자동 차단은 오판할 수 있어 화면에서 풀 수 있어야 합니다 */}
+      {/* 차단한 채널 — 자동 차단은 오판할 수 있어 화면에서 풀 수 있어야 합니다.
+          **주인만 봅니다.** 여기 올리면 수집 자체가 멈춰서 모두에게 영향이
+          갑니다 — 비용을 줄이는 결정이라 주인이 내려야 합니다. 식구가 어떤
+          채널을 안 보고 싶으면 그냥 빼면 되고, 그건 그 사람 목록에서만
+          사라집니다. */}
+      {me.isOwner && (
       <section className={s.bin}>
         <button
           type="button"
@@ -545,8 +556,9 @@ export function Keywords({ list }: { list: ListState }) {
           </>
         )}
       </section>
+      )}
 
-      {usage.data && (
+      {usage.data && me.isOwner && (
         <Panel title="쿼터 배분" className={s.quotaPanel}>
           <p className={s.quotaText}>
             유튜브 검색은 호출당 100유닛, 일 상한 {num(usage.data.youtubeUnitLimit)}유닛입니다.{" "}

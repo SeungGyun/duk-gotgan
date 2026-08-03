@@ -95,7 +95,8 @@ export function TopBar({
       onFocus={() => document.documentElement.style.setProperty("--tb-off", `${TB_H}px`)}
     >
       <div className={s.inner}>
-      <NavLink to="/" className={s.brand}>
+      {/* 이름표는 덕질로 갑니다 — 여기가 메인입니다. */}
+      <NavLink to="/lectures" className={s.brand}>
         <span className={s.mark}>
           Duk<span className={s.markSep}>!</span>gotgan
         </span>
@@ -104,28 +105,38 @@ export function TopBar({
         </span>
       </NavLink>
 
+      {/* **읽는 화면이 먼저, 기계 화면이 나중입니다.**
+          식구에게는 뒤쪽 셋이 아예 안 보입니다 — 눌러도 못 들어가는 메뉴가
+          걸려 있으면 "왜 나만 안 되지" 가 되고, 볼 수 있는 것과 없는 것을
+          매번 가려 읽어야 합니다. */}
       <nav className={s.nav} aria-label="주요 화면">
-        <NavLink to="/" end className={link}>
-          대시보드
-        </NavLink>
         <NavLink to="/lectures" className={link}>
           덕질 {lectureCount != null && <span className={s.count}>{lectureCount}</span>}
         </NavLink>
         <NavLink to="/keywords" className={link}>
           키워드 {keywordCount != null && <span className={s.count}>{keywordCount}</span>}
         </NavLink>
-        <NavLink to="/queue" className={link}>
-          대기 목록
-        </NavLink>
         <NavLink to="/excluded" className={link}>
           제외함
         </NavLink>
-        <NavLink to="/runs" className={link}>
-          실행 로그 {runCount != null && <span className={s.count}>{runCount}</span>}
-        </NavLink>
+
+        {me.isOwner && (
+          <>
+            <span className={s.navSplit} aria-hidden="true" />
+            <NavLink to="/dashboard" className={link}>
+              대시보드
+            </NavLink>
+            <NavLink to="/queue" className={link}>
+              대기 목록
+            </NavLink>
+            <NavLink to="/runs" className={link}>
+              실행 로그 {runCount != null && <span className={s.count}>{runCount}</span>}
+            </NavLink>
+          </>
+        )}
       </nav>
 
-      {usage && (
+      {usage && me.isOwner && (
         <div
           className={s.usage}
           title={`이번 ${usage.windowHours}시간 창에서 쓴 토큰 / 창당 상한`}

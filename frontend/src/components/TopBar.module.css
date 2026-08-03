@@ -343,6 +343,19 @@
   cursor: default;
 }
 
+
+/* 읽는 화면과 기계 화면 사이의 칸막이. 주인에게만 보입니다 —
+   메뉴 여섯 개가 한 줄로 늘어서면 어디까지가 "내가 읽는 것" 인지
+   눈으로 갈리지 않습니다. */
+.navSplit {
+  width: 1px;
+  align-self: center;
+  height: 16px;
+  margin: 0 6px;
+  background: var(--border);
+  flex: none;
+}
+
 @media (max-width: 860px) {
   .bar {
     height: auto;

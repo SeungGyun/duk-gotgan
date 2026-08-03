@@ -4,6 +4,7 @@ import { api } from "../api";
 import { Screen } from "../components/Screen";
 import { Button, Empty, ErrorState, Loading, Panel } from "../components/ui";
 import { useAsync } from "../hooks/useAsync";
+import { useMe } from "../me";
 import { duration } from "../lib/format";
 import s from "./Excluded.module.css";
 
@@ -16,6 +17,7 @@ import s from "./Excluded.module.css";
  *  완전삭제만 확인을 받습니다 — 이건 되돌릴 수 없고, 같은 영상을 다시
  *  수집하지도 않습니다. */
 export function Excluded() {
+  const me = useMe();
   const list = useAsync(() => api.listLectures({ excluded: true }), []);
   const [busy, setBusy] = useState<string | null>(null);
   const [asking, setAsking] = useState<string | null>(null);
@@ -86,6 +88,11 @@ export function Excluded() {
                       >
                         되돌리기
                       </Button>
+                      {/* **완전삭제는 주인만.** 요약 행 하나를 지우면 그걸
+                          구독한 다른 사람의 곳간에서도 사라지고, 그 사람은
+                          지운 적이 없는데 없어진 것을 보게 됩니다. 식구는
+                          제외함에 두거나 되돌리면 됩니다. */}
+                      {me.isOwner && (
                       <button
                         type="button"
                         className={s.danger}
@@ -94,6 +101,7 @@ export function Excluded() {
                       >
                         완전삭제
                       </button>
+                      )}
                     </>
                   )}
                 </div>

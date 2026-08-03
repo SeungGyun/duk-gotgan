@@ -4,6 +4,7 @@ import type { Me } from "./api";
 import { TopBar } from "./components/TopBar";
 import { Loading } from "./components/ui";
 import { useAsync } from "./hooks/useAsync";
+import { MeProvider } from "./me";
 import { Dashboard } from "./screens/Dashboard";
 import { Keywords } from "./screens/Keywords";
 import { Lectures } from "./screens/Lectures";
@@ -33,15 +34,16 @@ export default function App() {
 }
 
 function Shell({ me, onMeChanged }: { me: Me; onMeChanged: () => void }) {
-  const { name, pinIsDefault } = me;
+  const { name, isOwner, pinIsDefault } = me;
   // 상단바 카운트·미터는 화면과 무관하게 항상 필요하므로 셸에서 한 번만 부른다
   const usage = useAsync(() => api.getUsage(), []);
   const overview = useAsync(() => api.getOverview(), []);
   const keywords = useAsync(() => api.listKeywords(), []);
-  const runs = useAsync(() => api.listRuns(), []);
+  // 실행 기록은 주인만 봅니다 — 식구에게는 세어 봐야 쓸 데가 없습니다.
+  const runs = useAsync(() => (isOwner ? api.listRuns() : Promise.resolve([])), [isOwner]);
 
   return (
-    <>
+    <MeProvider value={me}>
       {apiMode === "mock" && (
         <div className={s.mockNote}>
           <div className={s.mockNoteInner}>
@@ -82,30 +84,43 @@ function Shell({ me, onMeChanged }: { me: Me; onMeChanged: () => void }) {
 
       <main>
         <Routes>
-          <Route
-            path="/"
-            element={
-              <Dashboard
-                overview={overview.data}
-                usage={usage.data}
-                loading={overview.loading || usage.loading}
-                error={overview.error ?? usage.error}
-                onRetry={() => {
-                  overview.reload();
-                  usage.reload();
-                }}
-              />
-            }
-          />
+          {/* **메인은 덕질입니다.** 곳간에 들어오는 이유가 읽으려는
+              것이지 기계가 잘 도는지 보려는 것이 아닙니다. 대시보드는
+              주인이 필요할 때 찾아가는 화면이라 주소를 따로 줍니다. */}
+          <Route path="/" element={<Navigate to="/lectures" replace />} />
+
           <Route path="/lectures" element={<Lectures />} />
           <Route path="/lectures/:videoId" element={<Lectures />} />
           <Route path="/keywords" element={<Keywords list={keywords} />} />
-          <Route path="/queue" element={<Queue />} />
           <Route path="/excluded" element={<Excluded />} />
-          <Route path="/runs" element={<Runs />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+
+          {/* 기계를 들여다보는 화면들. **주소를 직접 쳐도 막습니다** —
+              메뉴에서만 감추면 링크 하나로 새어 나갑니다. */}
+          {isOwner && (
+            <>
+              <Route
+                path="/dashboard"
+                element={
+                  <Dashboard
+                    overview={overview.data}
+                    usage={usage.data}
+                    loading={overview.loading || usage.loading}
+                    error={overview.error ?? usage.error}
+                    onRetry={() => {
+                      overview.reload();
+                      usage.reload();
+                    }}
+                  />
+                }
+              />
+              <Route path="/queue" element={<Queue />} />
+              <Route path="/runs" element={<Runs />} />
+            </>
+          )}
+
+          <Route path="*" element={<Navigate to="/lectures" replace />} />
         </Routes>
       </main>
-    </>
+    </MeProvider>
   );
 }
