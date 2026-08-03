@@ -13,9 +13,10 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.api.auth import current_user, require_owner
 from app.api.errors import ApiError
 from app.collector import queue as q
-from app.db.models import Keyword, PipelineEvent, Video, VideoKeyword
+from app.db.models import Keyword, PipelineEvent, User, Video, VideoKeyword
 from app.db.session import get_db
 from config.settings import settings
 from config.time import to_utc_iso
@@ -70,7 +71,7 @@ def _item(v: Video, kws: dict[str, list[str]], order: int | None = None) -> dict
 
 
 @router.get("/queue")
-def get_queue(db: Session = Depends(get_db)):
+def get_queue(db: Session = Depends(get_db), _: User = Depends(current_user)):
     stages = []
     for key, label, state in STAGES:
         total, raw = db.execute(
@@ -129,7 +130,7 @@ def get_queue(db: Session = Depends(get_db)):
 
 
 @router.post("/queue/{video_id}/skip", status_code=204)
-def skip(video_id: str, db: Session = Depends(get_db)):
+def skip(video_id: str, db: Session = Depends(get_db), _: User = Depends(require_owner)):
     """처리 전에 뺍니다. 되돌릴 수 있습니다."""
     v = db.get(Video, video_id)
     if v is None:
@@ -159,7 +160,7 @@ def skip(video_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/queue/{video_id}/restore", status_code=204)
-def restore(video_id: str, db: Session = Depends(get_db)):
+def restore(video_id: str, db: Session = Depends(get_db), _: User = Depends(require_owner)):
     """뺀 것을 원래 줄로 돌려놓습니다."""
     v = db.get(Video, video_id)
     if v is None or v.state != SKIPPED:

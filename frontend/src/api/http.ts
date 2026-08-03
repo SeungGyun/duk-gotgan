@@ -1,6 +1,14 @@
 import type { Api } from "./contract";
 import { ApiError } from "./contract";
-import type { ChannelBlock, Keyword, KeywordDraft, LectureQuery, Run } from "./types";
+import type {
+  ChannelBlock,
+  Keyword,
+  KeywordDraft,
+  LectureQuery,
+  Person,
+  PersonDraft,
+  Run,
+} from "./types";
 
 /**
  * 실제 REST 구현. 백엔드를 붙일 때 .env 에서 VITE_API=http 로 바꾸면 이쪽이 씁니다.
@@ -9,11 +17,24 @@ import type { ChannelBlock, Keyword, KeywordDraft, LectureQuery, Run } from "./t
 
 const BASE = "/api/v1";
 
+/** 선택 화면의 주소. 401 을 받으면 여기로 보냅니다. */
+export const WHO = "/who";
+
+/** 누구인지 모르는 상태에서도 불러야 하는 것들.
+ *
+ *  이 목록에 없는 요청이 401 을 받으면 선택 화면으로 튕깁니다. 여기까지
+ *  튕기면 **선택 화면이 자기 자신을 부르다가 무한히 새로 고칩니다.** */
+const OPEN = new Set(["/users", "/session"]);
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${BASE}${path}`, {
       ...init,
+      // 쿠키는 서버가 HttpOnly 로 심습니다 — 자바스크립트가 읽지도 쓰지도
+      // 않습니다. 사파리가 스크립트로 심은 쿠키를 7일 만에 지우기 때문에,
+      // 그렇게 해야 만료가 2년으로 유지됩니다.
+      credentials: "same-origin",
       headers: {
         "Content-Type": "application/json",
         ...(init?.headers ?? {}),
@@ -28,6 +49,12 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const body = await res.json().catch(() => null);
 
   if (!res.ok) {
+    // **401 처리는 여기 한 곳뿐입니다.** 모든 호출이 이 함수를 지나가서,
+    // 화면마다 "로그인 됐나" 를 챙길 필요가 없습니다.
+    const base = path.split("?")[0]!;
+    if (res.status === 401 && !OPEN.has(base) && window.location.pathname !== WHO) {
+      window.location.assign(WHO);
+    }
     const err = body?.error;
     throw new ApiError(
       err?.message ?? `요청이 실패했습니다 (${res.status})`,
@@ -53,7 +80,32 @@ function qs(query: LectureQuery): string {
 }
 
 export const httpApi: Api = {
+  listPeople: () => req("/users"),
+
+  pickPerson: (id, pin) =>
+    req<Person>("/session", {
+      method: "POST",
+      body: JSON.stringify({ userId: id, pin: pin ?? null }),
+    }),
+
+  createPerson: (draft: PersonDraft) =>
+    req<Person>("/users", { method: "POST", body: JSON.stringify(draft) }),
+
+  leave: () => req<void>("/session", { method: "DELETE" }),
+
+  getMe: () => req("/me"),
+
+  renameMe: (name) =>
+    req<Person>("/me", { method: "PATCH", body: JSON.stringify({ name }) }),
+
+  setPin: (current, next) =>
+    req<void>("/me/pin", { method: "PUT", body: JSON.stringify({ current, next }) }),
+
   listKeywords: () => req("/keywords"),
+
+  listAllKeywords: () => req("/keywords?mine=false"),
+
+  subscribeKeyword: (id) => req<Keyword>(`/keywords/${id}/subscribe`, { method: "POST" }),
 
   listArchivedKeywords: () => req("/keywords?archived=true"),
 

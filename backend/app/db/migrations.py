@@ -173,3 +173,82 @@ def ensure_schema(engine: Engine) -> None:
                 text("CREATE INDEX ix_lectures_read ON lectures (is_hidden, read_at)")
             )
             logger.info("[db] ix_lectures_read created")
+
+        _seed_owner(conn)
+
+
+def _seed_owner(conn) -> None:
+    """주인 한 명을 만들고, 지금까지 쌓인 것을 그 사람 이름으로 옮깁니다.
+
+    **여러 번 돌려도 같은 결과여야 합니다.** 매 기동마다 실행되므로,
+    이미 사용자가 있으면 통째로 건너뜁니다 — 안 그러면 서버를 재시작할
+    때마다 주인이 늘거나, 사용자가 지운 구독이 되살아납니다.
+
+    옛 컬럼(`lectures.read_at` 등)은 **지우지 않습니다.** 옮긴 값이 틀렸을
+    때 되돌릴 곳이 있어야 합니다. 코드는 이미 새 표만 읽으므로 남아 있어도
+    화면에 영향이 없고, 몇 주 지켜본 뒤 따로 걷습니다.
+    """
+    from app.db.models import new_id
+    from app.security import hash_pin
+    from config.time import now_kst
+
+    if conn.execute(text("SELECT COUNT(*) FROM users")).scalar():
+        return
+
+    owner_id = new_id()
+    conn.execute(
+        text(
+            "INSERT INTO users (id, name, password_hash, is_owner, created_at)"
+            " VALUES (:id, :name, :pw, 1, :now)"
+        ),
+        # 첫 비밀번호는 0000 입니다. 화면이 이걸 알아보고 바꾸라고 띄웁니다
+        # (routes/users.py 의 `pinIsDefault`).
+        # 시각은 파이썬에서 넣습니다 — MySQL 의 NOW() 는 컨테이너 표준시라
+        # 다른 시각들과 몇 시간씩 어긋납니다.
+        {"id": owner_id, "name": "주인", "pw": hash_pin("0000"), "now": now_kst()},
+    )
+
+    # 보관된 키워드까지 전부 옮깁니다 — 되살렸을 때 남의 것이 되어 있으면
+    # 복구가 복구가 아닙니다. **보관 시각도 같이 옮겨야** 지웠던 6개가
+    # 활성 목록이 아니라 삭제 영역에 그대로 남습니다.
+    kw = conn.execute(
+        text(
+            "INSERT INTO user_keywords (user_id, keyword_id, created_at, archived_at)"
+            " SELECT :u, id, created_at,"
+            "        CASE WHEN status = 'archived'"
+            "             THEN COALESCE(archived_at, created_at) END"
+            " FROM keywords"
+        ),
+        {"u": owner_id},
+    ).rowcount
+
+    # 읽음·즐겨찾기·제외. 재요약본이 여러 개인 영상은 하나로 접습니다 —
+    # 새 표의 키가 video_id 라 버전이 몇이든 한 줄입니다.
+    lec = conn.execute(
+        text(
+            "INSERT INTO user_lectures (user_id, video_id, read_at, is_favorite, excluded_at)"
+            " SELECT :u, video_id, MAX(read_at), MAX(is_favorite), MAX(excluded_at)"
+            " FROM lectures"
+            " WHERE read_at IS NOT NULL OR is_favorite = 1 OR excluded_at IS NOT NULL"
+            " GROUP BY video_id"
+        ),
+        {"u": owner_id},
+    ).rowcount
+
+    # 지금까지 쌓인 자동 차단은 주인이 뺀 결과입니다. 개인 차단으로 옮기되
+    # **전역 차단도 그대로 둡니다** — 이미 수집을 멈춰 둔 채널이라, 여기서
+    # 풀면 다음 수집에 도로 들어와 비용만 다시 듭니다.
+    ch = conn.execute(
+        text(
+            "INSERT INTO user_channel_blocks"
+            " (user_id, channel_id, channel_title, reason, auto, created_at)"
+            " SELECT :u, channel_id, channel_title, reason, auto, created_at"
+            " FROM channel_blocks WHERE active = 1"
+        ),
+        {"u": owner_id},
+    ).rowcount
+
+    logger.info(
+        "[db] 주인 계정 생성 — 키워드 %d · 읽음/제외 %d · 차단 채널 %d 이관 (첫 비밀번호 0000)",
+        kw, lec, ch,
+    )

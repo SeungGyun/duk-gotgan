@@ -10,9 +10,10 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.api.auth import current_user, require_owner
 from app.api.errors import ApiError
 from app.collector.youtube import YouTubeError, resolve_channel
-from app.db.models import ChannelBlock, Evaluation, Video
+from app.db.models import ChannelBlock, Evaluation, User, Video
 from app.db.session import get_db
 from config.time import to_utc_iso
 
@@ -38,7 +39,7 @@ def _out(b: ChannelBlock, rejected: int = 0) -> dict:
 
 
 @router.get("/blocks")
-def list_blocks(db: Session = Depends(get_db)):
+def list_blocks(db: Session = Depends(get_db), _: User = Depends(current_user)):
     blocks = db.scalars(
         select(ChannelBlock)
         .where(ChannelBlock.active.is_(True))
@@ -59,7 +60,7 @@ def list_blocks(db: Session = Depends(get_db)):
 
 
 @router.post("/blocks", status_code=201)
-def add_block(draft: BlockDraft, db: Session = Depends(get_db)):
+def add_block(draft: BlockDraft, db: Session = Depends(get_db), _: User = Depends(require_owner)):
     handle = draft.handle.strip()
     if not handle:
         raise ApiError(400, "HANDLE_REQUIRED", "채널 핸들(@이름)을 입력해 주세요.")
@@ -84,7 +85,7 @@ def add_block(draft: BlockDraft, db: Session = Depends(get_db)):
 
 
 @router.delete("/blocks/{channel_id}", status_code=204)
-def remove_block(channel_id: str, db: Session = Depends(get_db)):
+def remove_block(channel_id: str, db: Session = Depends(get_db), _: User = Depends(require_owner)):
     """차단을 풉니다.
 
     판정 이력은 지우지 않습니다 — 지우면 다음 탈락 때 처음부터 세기 시작해

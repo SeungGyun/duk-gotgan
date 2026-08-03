@@ -5,8 +5,27 @@
 그리기 때문에, 형태를 만드는 자리를 한 곳으로 묶어 둡니다.
 """
 
+from dataclasses import dataclass
+
 from app.db.models import CrawlRun, Keyword, Lecture
 from config.time import to_date_str, to_utc_iso
+
+
+@dataclass(frozen=True)
+class Marks:
+    """읽음·즐겨찾기·제외 — **보는 사람마다 다른 값**입니다.
+
+    예전에는 `lectures` 컬럼에서 바로 읽었는데, 그러면 한 사람이 읽음
+    표시한 것이 모두에게 읽음으로 보입니다. 강의 행에서 떼어 내 여기로
+    받으면, 값을 어디서 가져올지 정하는 자리가 라우트 한 곳으로 모입니다.
+    """
+
+    is_read: bool = False
+    is_favorite: bool = False
+    is_excluded: bool = False
+
+
+NO_MARKS = Marks()
 
 
 def keyword_out(k: Keyword, lecture_count: int = 0) -> dict:
@@ -29,7 +48,7 @@ def keyword_out(k: Keyword, lecture_count: int = 0) -> dict:
     }
 
 
-def lecture_summary_out(lec: Lecture, keyword_ids: list[str]) -> dict:
+def lecture_summary_out(lec: Lecture, keyword_ids: list[str], marks: Marks = NO_MARKS) -> dict:
     v = lec.video
     return {
         "videoId": lec.video_id,
@@ -43,9 +62,9 @@ def lecture_summary_out(lec: Lecture, keyword_ids: list[str]) -> dict:
         "oneLiner": lec.one_liner,
         "tags": lec.tags or [],
         "keyPointOffsets": [p.get("timestampSec", 0) for p in (lec.key_points or [])],
-        "isFavorite": bool(lec.is_favorite),
-        "isRead": lec.read_at is not None,
-        "isExcluded": lec.excluded_at is not None,
+        "isFavorite": marks.is_favorite,
+        "isRead": marks.is_read,
+        "isExcluded": marks.is_excluded,
         # 곳간에 들어온 시각. "새로 온 것" 개수를 셀 때 기준으로 씁니다 —
         # 브라우저 시계를 쓰면 몇 초 어긋나 새 글을 놓칠 수 있습니다.
         "addedAt": to_utc_iso(lec.published_at),
@@ -53,8 +72,10 @@ def lecture_summary_out(lec: Lecture, keyword_ids: list[str]) -> dict:
     }
 
 
-def lecture_detail_out(lec: Lecture, keyword_ids: list[str], ev, transcript) -> dict:
-    out = lecture_summary_out(lec, keyword_ids)
+def lecture_detail_out(
+    lec: Lecture, keyword_ids: list[str], ev, transcript, marks: Marks = NO_MARKS
+) -> dict:
+    out = lecture_summary_out(lec, keyword_ids, marks)
     out.update(
         {
             "youtubeUrl": f"https://youtu.be/{lec.video_id}",

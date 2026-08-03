@@ -14,7 +14,7 @@ import logging
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import ChannelBlock, Lecture, Video
+from app.db.models import ChannelBlock, Lecture, UserChannelBlock, UserLecture, Video
 from config.time import now_kst
 
 logger = logging.getLogger(__name__)
@@ -48,23 +48,39 @@ def blocked_ids(db: Session) -> set[str]:
     )
 
 
-def consider_block(db: Session, video: Video) -> ChannelBlock | None:
-    """제외 하나가 끝날 때마다 이 채널을 막을지 다시 봅니다.
+def consider_block(db: Session, video: Video, user_id: str) -> UserChannelBlock | None:
+    """제외 하나가 끝날 때마다 **이 사람에게** 이 채널을 숨길지 다시 봅니다.
 
     **한 편이라도 남겨 둔 채널은 막지 않습니다.** 좋은 영상을 내는 채널도
     가끔 주제에서 벗어난 것을 올리는데, 그걸로 막으면 이후의 좋은 것까지
     통째로 놓칩니다.
+
+    **이 차단은 수집을 멈추지 않습니다.** 예전에는 전역 `channel_blocks` 에
+    쌓여 룰 단계에서 걸렸는데, 여러 사람이 쓰면 그게 사고가 됩니다 — 아내가
+    세 번 빼면 그때부터 주인도 그 채널 영상을 못 받고, 받은 적이 없으니
+    그런 일이 있었다는 것조차 모릅니다. 수집을 멈추는 결정은 비용을 줄이는
+    결정이라 주인이 채널 화면에서 직접 내립니다.
     """
-    # 해제된 채널도 건너뜁니다 — 사용자가 "괜찮다"고 한 것을 되막지 않습니다.
-    if not video.channel_id or has_record(db, video.channel_id):
+    if not video.channel_id:
+        return None
+    # 이미 이 사람이 막았으면 다시 만들지 않습니다.
+    if db.get(UserChannelBlock, {"user_id": user_id, "channel_id": video.channel_id}):
+        return None
+    # 전역으로 이미 막혀 있으면 개인 차단을 더할 이유가 없습니다.
+    if has_record(db, video.channel_id):
         return None
 
     def _count(*where):
         return (
             db.scalar(
-                select(func.count())
+                select(func.count(func.distinct(Lecture.video_id)))
                 .select_from(Lecture)
                 .join(Video, Video.id == Lecture.video_id)
+                .outerjoin(
+                    UserLecture,
+                    (UserLecture.video_id == Lecture.video_id)
+                    & (UserLecture.user_id == user_id),
+                )
                 .where(
                     Video.channel_id == video.channel_id,
                     Lecture.is_hidden.is_(False),
@@ -74,21 +90,21 @@ def consider_block(db: Session, video: Video) -> ChannelBlock | None:
             or 0
         )
 
-    if _count(Lecture.excluded_at.is_(None)):
+    if _count(UserLecture.excluded_at.is_(None)):
         return None  # 남겨 둔 것이 있습니다 — 막지 않습니다
 
-    excluded = _count(Lecture.excluded_at.isnot(None))
+    excluded = _count(UserLecture.excluded_at.isnot(None))
     if excluded < EXCLUDE_LIMIT:
         return None
 
-    block = ChannelBlock(
+    block = UserChannelBlock(
+        user_id=user_id,
         channel_id=video.channel_id,
         channel_title=video.channel_title or "",
         reason=f"{excluded}편을 빼고 한 편도 남기지 않았습니다.",
         auto=True,
-        active=True,
         created_at=now_kst(),
     )
     db.add(block)
-    logger.info("[channels] 자동 차단 — %s (%d편 제외)", video.channel_title, excluded)
+    logger.info("[channels] 개인 차단 — %s (%d편 제외)", video.channel_title, excluded)
     return block

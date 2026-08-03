@@ -5,7 +5,10 @@ import type {
   LectureDetail,
   LectureQuery,
   LectureSummary,
+  Me,
   Overview,
+  Person,
+  PersonDraft,
   Pipeline,
   Queue,
   Run,
@@ -24,8 +27,27 @@ import type {
  * 알고 있으므로 어느 구현이 붙었는지 모릅니다.
  */
 export interface Api {
+  // 사람 — **`listPeople` 만 로그인 없이 부를 수 있습니다.**
+  // 그게 로그인 전 화면이라 그렇습니다.
+  listPeople(): Promise<Person[]>;
+  /** 이 사람으로 들어갑니다. 비밀번호를 안 건 사람은 pin 없이. */
+  pickPerson(id: string, pin?: string): Promise<Person>;
+  /** 새로 만들고 바로 그 사람으로 들어갑니다. */
+  createPerson(draft: PersonDraft): Promise<Person>;
+  /** 사용자 바꾸기 — 이 기기만 나갑니다. 계정은 그대로. */
+  leave(): Promise<void>;
+  /** 지금 누구인지. 쿠키가 없으면 401 이 나고 선택 화면으로 갑니다. */
+  getMe(): Promise<Me>;
+  renameMe(name: string): Promise<Person>;
+  /** 비밀번호를 걸거나 바꿉니다. next 가 null 이면 풀기(주인은 불가). */
+  setPin(current: string | null, next: string | null): Promise<void>;
+
   // 키워드
   listKeywords(): Promise<Keyword[]>;
+  /** 아직 구독하지 않은 것까지. 새로 온 사람이 고를 목록입니다. */
+  listAllKeywords(): Promise<Keyword[]>;
+  /** 이미 있는 키워드를 내 것으로. **수집 비용이 늘지 않습니다.** */
+  subscribeKeyword(id: string): Promise<Keyword>;
   /** 삭제 영역. 지운 것만, 최근 것부터. */
   listArchivedKeywords(): Promise<Keyword[]>;
   /** 등록. 서버는 status=pending 으로 만들고 곧 첫 수집을 돌립니다. */

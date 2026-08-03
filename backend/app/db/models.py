@@ -45,6 +45,112 @@ class Base(DeclarativeBase):
     pass
 
 
+# ── 사람 ─────────────────────────────────────────────────────
+
+
+class User(Base):
+    """곳간을 보는 사람.
+
+    **비밀번호는 네 자리 숫자입니다.** 집 안 공유기 안에서만 쓰는 전제라
+    긴 비밀번호는 매번 입력하는 비용만 큽니다. 대신 네 자리는 만 가지뿐이라
+    무한정 찍으면 뚫리므로, `auth.py` 가 틀린 횟수를 세어 잠급니다 —
+    **짧은 비밀번호를 쓸 수 있게 만드는 것이 그 잠금입니다.**
+
+    `password_hash` 가 NULL 이면 비밀번호 없이 눌러서 들어갑니다. 주인만은
+    NULL 을 허용하지 않습니다 (`auth.set_pin` 이 막습니다) — 선택 화면에
+    주인이 그냥 떠 있는데 비밀번호가 없으면 "주인만" 이라는 제한이 잠금이
+    아니라 표시가 됩니다.
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    # 선택 화면이 이름으로 사람을 가리므로 비워 둘 수 없습니다.
+    name: Mapped[str] = mapped_column(String(40), nullable=False)
+    # scrypt. NULL 이면 비밀번호 없음.
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # 한 명뿐입니다. 수집을 직접 돌리는 버튼이 이 값을 봅니다.
+    is_owner: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=now_kst)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (UniqueConstraint("name", name="uq_users_name"),)
+
+
+class UserSession(Base):
+    """쿠키에 들어가는 값.
+
+    **사용자 ID 를 쿠키에 직접 넣지 않습니다.** 기기 하나를 끊고 싶을 때
+    그 세션 행만 지우면 되고, 계정 자체는 그대로 남습니다. 쿠키 값이 새면
+    세션 하나를 버리는 것으로 끝나는 것도 같은 이유입니다.
+    """
+
+    __tablename__ = "user_sessions"
+
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=now_kst)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=now_kst)
+
+    __table_args__ = (Index("ix_user_sessions_user", "user_id"),)
+
+
+class UserKeyword(Base):
+    """누가 어떤 키워드를 구독하는가.
+
+    **`keywords` 는 사람별로 쪼개지 않습니다.** 거기 걸린
+    `UNIQUE(term)` 이 "같은 검색어는 한 번만 수집한다"는 뜻이고, 그것이
+    사람이 늘어도 유튜브 호출과 요약 비용이 늘지 않는 이유입니다. 사람별로
+    쪼개는 순간 셋이 같은 주제를 보면 비용도 셋이 됩니다.
+    """
+
+    __tablename__ = "user_keywords"
+
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    keyword_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("keywords.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=now_kst)
+    # 구독을 끊은 시각. **행을 지우지 않습니다** — 지우면 그 키워드가 내
+    # 삭제 영역에서도 사라져 되살릴 방법이 없어집니다. 예전에 키워드를
+    # `archived` 로만 두고 지우지 않았던 것과 같은 이유입니다.
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (Index("ix_user_keywords_keyword", "keyword_id"),)
+
+
+class UserLecture(Base):
+    """사람이 강의에 대해 누른 것 — 읽음·즐겨찾기·제외.
+
+    **`lecture_id` 가 아니라 `video_id` 로 묶습니다.** 재요약하면
+    `lectures` 에 새 버전 행이 생기는데, 읽음은 영상 단위 개념이라 버전이
+    바뀔 때마다 안 읽음으로 되돌아가면 안 됩니다. 예전 코드도 PATCH 에서
+    같은 video_id 의 모든 버전을 한꺼번에 고쳐 이 문제를 피하고 있었는데,
+    키를 video_id 로 두면 그 손질 자체가 필요 없어집니다.
+    """
+
+    __tablename__ = "user_lectures"
+
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    video_id: Mapped[str] = mapped_column(
+        String(20), ForeignKey("videos.id", ondelete="CASCADE"), primary_key=True
+    )
+    read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    is_favorite: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    excluded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (
+        # 기본 정렬이 "안 읽은 것 먼저" 라 사용자별 읽음을 자주 훑습니다.
+        Index("ix_user_lectures_read", "user_id", "read_at"),
+    )
+
+
 # ── 설정·이력 ────────────────────────────────────────────────
 
 
@@ -343,6 +449,36 @@ class ChannelBlock(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=now_kst)
 
 
+class UserChannelBlock(Base):
+    """이 사람에게만 이 채널을 숨깁니다.
+
+    **`channel_blocks` 와 나뉘어 있는 것이 핵심입니다.** 그쪽은 룰 단계에서
+    걸려 **수집 자체를 멈추고**, 이쪽은 목록 쿼리에서만 걸려 **보이지 않게**
+    합니다.
+
+    나누지 않으면 이런 일이 납니다 — 아내가 어떤 채널을 세 번 빼면
+    자동 차단이 걸리고, 그때부터 주인도 그 채널 영상을 못 받습니다.
+    받은 적이 없으니 화면에 안 나오고, 안 나오니 그런 일이 있었다는 것도
+    모릅니다. 사람 한 명의 취향이 공용 수집을 조용히 바꾸는 셈입니다.
+
+    모두에게서 막고 싶으면 채널 화면에서 주인이 직접 `channel_blocks` 에
+    올립니다 — 그건 비용을 줄이는 결정이라 주인이 내려야 합니다.
+    """
+
+    __tablename__ = "user_channel_blocks"
+
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    channel_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    channel_title: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    auto: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=now_kst)
+
+    __table_args__ = (Index("ix_user_channel_blocks_channel", "channel_id"),)
+
+
 # ── 정식 층 (사용자가 보는 유일한 테이블) ────────────────────
 
 
@@ -421,6 +557,11 @@ LECTURE_FULLTEXT_INDEX = (
 
 # 편의: 스키마 존재 확인용
 ALL_TABLES = [
+    User,
+    UserSession,
+    UserKeyword,
+    UserLecture,
+    UserChannelBlock,
     Keyword,
     CrawlRun,
     UsageLedger,
@@ -434,6 +575,11 @@ ALL_TABLES = [
 
 __all__ = [
     "Base",
+    "User",
+    "UserSession",
+    "UserKeyword",
+    "UserLecture",
+    "UserChannelBlock",
     "Keyword",
     "CrawlRun",
     "UsageLedger",

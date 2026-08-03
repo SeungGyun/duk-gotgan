@@ -130,6 +130,68 @@
   color: var(--muted);
 }
 
+
+/* ── 지금 누구인가 ─────────────────────────────────────────
+   가족이 한 기기를 같이 쓰면 "누구로 들어와 있는지" 가 안 보이는 것이
+   가장 헷갈립니다. 읽음 표시가 남의 것에 붙고 나서야 알게 됩니다. */
+.whoami {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+}
+
+.whoBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 9px 4px 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-2);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s ease;
+}
+
+.whoBtn:hover {
+  border-color: var(--border-strong);
+  color: var(--ink);
+}
+
+.whoBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.whoDot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--surface-sink);
+  color: var(--ink-2);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.whoOwner {
+  background: var(--accent);
+  color: #fff;
+}
+
+.whoName {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  max-width: 8ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 860px) {
   .bar {
     height: auto;
@@ -153,5 +215,12 @@
   .usageMeter,
   .usageCap {
     display: none;
+  }
+  /* 좁으면 이름은 접고 동그라미만 남깁니다 — 메뉴가 이미 꽉 찹니다. */
+  .whoName {
+    display: none;
+  }
+  .whoBtn {
+    padding: 4px;
   }
 }

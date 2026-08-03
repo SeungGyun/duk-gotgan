@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
+import { api } from "../api";
 import type { Usage } from "../api";
 import { tokens } from "../lib/format";
 import { Meter } from "./ui";
@@ -68,11 +69,15 @@ export function TopBar({
   lectureCount,
   keywordCount,
   runCount,
+  name,
+  isOwner,
 }: {
   usage: Usage | null;
   lectureCount: number | null;
   keywordCount: number | null;
   runCount: number | null;
+  name: string;
+  isOwner: boolean;
 }) {
   const tucked = useTuckOnScroll();
   const used = usage ? usage.inputTokens + usage.outputTokens : 0;
@@ -139,7 +144,42 @@ export function TopBar({
           )}
         </div>
       )}
+
+      <Whoami name={name} isOwner={isOwner} />
       </div>
     </header>
+  );
+}
+
+/** 지금 누가 보고 있는지, 그리고 바꾸기.
+ *
+ *  가족이 한 태블릿을 같이 쓰면 **누구로 들어와 있는지가 안 보이는 것**이
+ *  가장 헷갈립니다 — 읽음 표시가 남의 것에 붙고 나서야 알게 됩니다. */
+function Whoami({ name, isOwner }: { name: string; isOwner: boolean }) {
+  const [busy, setBusy] = useState(false);
+
+  const leave = async () => {
+    setBusy(true);
+    await api.leave().catch(() => {});
+    // 셸 전체를 다시 그려야 하므로 통째로 다시 읽습니다. 라우터로만
+    // 옮기면 이미 받아 둔 남의 목록이 화면에 남습니다.
+    window.location.assign("/who");
+  };
+
+  return (
+    <div className={s.whoami}>
+      <button
+        type="button"
+        className={s.whoBtn}
+        onClick={leave}
+        disabled={busy}
+        title="사용자 바꾸기 — 이 기기만 나갑니다"
+      >
+        <span className={`${s.whoDot} ${isOwner ? s.whoOwner : ""}`} aria-hidden="true">
+          {name.slice(0, 1)}
+        </span>
+        <span className={s.whoName}>{name}</span>
+      </button>
+    </div>
   );
 }

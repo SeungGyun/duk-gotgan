@@ -7,6 +7,7 @@ import type {
   LectureDetail,
   LectureSummary,
   Overview,
+  Person,
   Run,
   Usage,
 } from "./types";
@@ -45,6 +46,15 @@ let channelBlocks: ChannelBlock[] = [
   },
 ];
 
+// ── 사람 ──────────────────────────────────────────────────
+// 목에서도 선택 화면이 그대로 돌아야 합니다 — 백엔드 없이 UI 를 만지는
+// 흐름이 이 프로젝트의 기본이라, 로그인만 예외로 두면 그 흐름이 깨집니다.
+let people: Person[] = [
+  { id: "u_1", name: "주인", isOwner: true, hasPin: true, lectureCount: 41 },
+  { id: "u_2", name: "아내", isOwner: false, hasPin: false, lectureCount: 12 },
+];
+let current: Person | null = people[0]!;
+
 let seq = 100;
 const nextId = (p: string) => `${p}_${++seq}`;
 
@@ -64,6 +74,8 @@ let keywords: Keyword[] = [
     lectureCount: 24,
     lastRunAt: runAt(0, 2),
     createdAt: daysAgo(64),
+    isMine: true,
+    subscriberCount: 1,
     archivedAt: null,
   },
   {
@@ -80,6 +92,8 @@ let keywords: Keyword[] = [
     lectureCount: 17,
     lastRunAt: runAt(0, 5),
     createdAt: daysAgo(51),
+    isMine: true,
+    subscriberCount: 1,
     archivedAt: null,
   },
   {
@@ -96,6 +110,8 @@ let keywords: Keyword[] = [
     lectureCount: 31,
     lastRunAt: runAt(1, 11),
     createdAt: daysAgo(88),
+    isMine: true,
+    subscriberCount: 1,
     archivedAt: null,
   },
   {
@@ -112,6 +128,8 @@ let keywords: Keyword[] = [
     lectureCount: 28,
     lastRunAt: runAt(0, 8),
     createdAt: daysAgo(40),
+    isMine: true,
+    subscriberCount: 1,
     archivedAt: null,
   },
   {
@@ -128,6 +146,8 @@ let keywords: Keyword[] = [
     lectureCount: 9,
     lastRunAt: runAt(0, 20),
     createdAt: daysAgo(22),
+    isMine: true,
+    subscriberCount: 1,
     archivedAt: null,
   },
   {
@@ -144,6 +164,8 @@ let keywords: Keyword[] = [
     lectureCount: 0,
     lastRunAt: null,
     createdAt: daysAgo(0),
+    isMine: true,
+    subscriberCount: 1,
     archivedAt: null,
   },
   {
@@ -160,6 +182,8 @@ let keywords: Keyword[] = [
     lectureCount: 28,
     lastRunAt: runAt(19, 4),
     createdAt: daysAgo(120),
+    isMine: true,
+    subscriberCount: 1,
     archivedAt: null,
   },
 ];
@@ -709,6 +733,87 @@ function toSummary(s: Seed): LectureSummary {
 }
 
 export const mockApi: Api = {
+  async listPeople() {
+    await delay();
+    return people.map((p) => ({ ...p }));
+  },
+
+  async pickPerson(id, pin) {
+    await delay();
+    const p = people.find((x) => x.id === id);
+    if (!p) throw new ApiError("그 사람을 찾을 수 없습니다.", 404, "USER_NOT_FOUND");
+    // 목에서는 0000 만 맞다고 봅니다 — 진짜 검증은 서버 몫입니다.
+    if (p.hasPin && pin !== "0000") {
+      throw new ApiError("비밀번호가 다릅니다.", 401, "PIN_WRONG");
+    }
+    current = p;
+    return { ...p };
+  },
+
+  async createPerson(draft) {
+    await delay();
+    const p: Person = {
+      id: nextId("u"),
+      name: draft.name,
+      isOwner: false,
+      hasPin: Boolean(draft.pin),
+      lectureCount: draft.keywordIds.length * 6,
+    };
+    people = [...people, p];
+    current = p;
+    return { ...p };
+  },
+
+  async leave() {
+    await delay();
+    current = null;
+  },
+
+  async getMe() {
+    await delay();
+    if (!current) throw new ApiError("누구인지 먼저 골라 주세요.", 401, "NO_SESSION");
+    return {
+      ...current,
+      keywordCount: keywords.filter((k) => k.isMine && k.status !== "archived").length,
+      keywordLimit: current.isOwner ? 0 : 10,
+      pinIsDefault: current.isOwner,
+    };
+  },
+
+  async renameMe(name) {
+    await delay();
+    if (!current) throw new ApiError("누구인지 먼저 골라 주세요.", 401, "NO_SESSION");
+    const next = { ...current, name };
+    current = next;
+    people = people.map((p) => (p.id === next.id ? next : p));
+    return { ...next };
+  },
+
+  async setPin(_current, next) {
+    await delay();
+    if (!current) throw new ApiError("누구인지 먼저 골라 주세요.", 401, "NO_SESSION");
+    if (current.isOwner && !next) {
+      throw new ApiError("주인은 비밀번호를 비울 수 없습니다.", 400, "OWNER_NEEDS_PIN");
+    }
+    const updated = { ...current, hasPin: Boolean(next) };
+    current = updated;
+    people = people.map((p) => (p.id === updated.id ? updated : p));
+  },
+
+  async listAllKeywords() {
+    await delay();
+    return keywords.filter((k) => k.status !== "archived").map((k) => ({ ...k }));
+  },
+
+  async subscribeKeyword(id) {
+    await delay();
+    const k = keywords.find((x) => x.id === id);
+    if (!k) throw new ApiError("해당 키워드를 찾을 수 없습니다.", 404, "KEYWORD_NOT_FOUND");
+    k.isMine = true;
+    k.subscriberCount += 1;
+    return { ...k };
+  },
+
   async listKeywords() {
     await delay();
     return keywords.filter((k) => k.status !== "archived").map((k) => ({ ...k }));
@@ -735,6 +840,9 @@ export const mockApi: Api = {
       sourceType: draft.sourceType,
       channelTitle: draft.sourceType === "channel" ? term.replace(/^@/, "") : null,
       status: "pending",
+      // 내가 만든 것이니 당연히 내 구독이고, 아직 나 혼자입니다.
+      isMine: true,
+      subscriberCount: 1,
       language: draft.language,
       schedule: draft.schedule,
       minDurationSec: draft.minDurationSec,

@@ -74,3 +74,22 @@
     font-size: 12px;
   }
 }
+
+/* 첫 비밀번호 그대로일 때. 목 안내와 같은 자리·같은 모양이고 색만
+   다릅니다 — 새 띠 형식을 하나 더 만들 이유가 없습니다. */
+.pinNote {
+  background: var(--warn-soft);
+  border-bottom: 1px solid var(--border);
+  color: var(--ink-2);
+}
+
+.pinNote b {
+  color: var(--warn);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.pinNote span {
+  font-size: 13px;
+  line-height: 1.5;
+}

@@ -4,6 +4,37 @@
  * 백엔드를 붙일 때는 이 형태로 직렬화해 주면 됩니다.
  */
 
+// ── 사람 ──────────────────────────────────────────────────
+
+/** 선택 화면에 뜨는 사람. 비밀번호 자체는 절대 내려오지 않습니다. */
+export interface Person {
+  id: string;
+  name: string;
+  /** 주인은 수집을 직접 돌릴 수 있습니다 */
+  isOwner: boolean;
+  /** 비밀번호를 걸었는가. 누른 뒤 입력칸을 띄울지 정하는 데 씁니다 */
+  hasPin: boolean;
+  /** 이 사람 키워드가 데려온 강의 수 — 누르기 전에 뭐가 있을지 보이게 */
+  lectureCount: number;
+}
+
+/** 지금 보고 있는 사람. `/me` 가 주는 것. */
+export interface Me extends Person {
+  keywordCount: number;
+  /** 1인당 상한. **0 이면 상한 없음**(주인) */
+  keywordLimit: number;
+  /** 첫 비밀번호(0000) 그대로면 참 — 화면이 바꾸라고 띄웁니다 */
+  pinIsDefault: boolean;
+}
+
+/** 새 사람 만들기. 비밀번호는 건너뛸 수 있습니다. */
+export interface PersonDraft {
+  name: string;
+  pin: string | null;
+  /** 처음 들어온 사람이 고른 키워드. 빈 곳간으로 시작하지 않게 */
+  keywordIds: string[];
+}
+
 // ── 키워드 ────────────────────────────────────────────────
 export type KeywordStatus =
   | "pending" // 등록 직후, 첫 수집 대기
@@ -50,6 +81,10 @@ export interface Keyword {
   createdAt: string;
   /** 삭제 영역으로 옮긴 시각. 활성 상태면 null */
   archivedAt: string | null;
+  /** 내가 구독 중인가. false 면 "다른 사람도 보는 것" 목록의 항목입니다 */
+  isMine: boolean;
+  /** 몇 명이 함께 보는가. **설정을 고치면 그 사람들 모두에게 적용됩니다** */
+  subscriberCount: number;
 }
 
 /** 키워드 등록 폼이 보내는 값. id·상태·집계는 서버가 채운다. */

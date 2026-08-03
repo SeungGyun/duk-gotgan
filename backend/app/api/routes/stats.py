@@ -11,7 +11,9 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.api.auth import current_user, require_owner
 from app.api.errors import ApiError
+from app.api.routes.lectures import Filters, _filtered
 from app.api.serializers import run_out
 from app.collector import transcript
 from app.collector.schedule import next_due_at
@@ -25,6 +27,8 @@ from app.db.models import (
     Transcript,
     UsageLedger,
     UsageWindow,
+    User,
+    UserKeyword,
     Video,
     VideoKeyword,
 )
@@ -34,31 +38,28 @@ from config.time import KST, now_kst, to_utc_iso
 
 router = APIRouter(tags=["stats"])
 
-# 파이프라인 상태 → 퍼널 단계
-# 화면에 보이는 덕질 = 숨김 아님 + 제외 안 함. 이 조건이 빠지면 뺀 것이
-# 총계와 평균 점수에 계속 잡힙니다.
-def _visible():
-    return (Lecture.is_hidden.is_(False), Lecture.excluded_at.is_(None))
-
-
 @router.get("/stats/overview")
-def overview(db: Session = Depends(get_db)):
+def overview(db: Session = Depends(get_db), user: User = Depends(current_user)):
     today = now_kst().date()
     day_start = _midnight(today)
     week_start = _midnight(today - timedelta(days=7))
 
-    published = db.scalar(select(func.count()).select_from(Lecture).where(*_visible()))
-    new_today = db.scalar(
-        select(func.count())
-        .select_from(Lecture)
-        .where(*_visible(), Lecture.published_at >= day_start)
+    # **보이는 범위를 목록 화면과 같은 함수로 셉니다.** 여기서 따로 조건을
+    # 쓰면 상단바에는 332편인데 목록에는 41편인 상황이 생기고, 그러면
+    # 어느 쪽이 고장인지 알 수 없게 됩니다.
+    def _count(*where):
+        stmt, _ = _filtered(Filters(user.id))
+        if where:
+            stmt = stmt.where(*where)
+        return int(db.scalar(stmt.with_only_columns(func.count()).order_by(None)) or 0)
+
+    published = _count()
+    new_today = _count(Lecture.published_at >= day_start)
+    week_added = _count(Lecture.published_at >= week_start)
+    mine, _ul = _filtered(Filters(user.id))
+    avg_score = db.scalar(
+        mine.with_only_columns(func.avg(Lecture.expert_score)).order_by(None)
     )
-    week_added = db.scalar(
-        select(func.count())
-        .select_from(Lecture)
-        .where(*_visible(), Lecture.published_at >= week_start)
-    )
-    avg_score = db.scalar(select(func.avg(Lecture.expert_score)).where(*_visible()))
 
     # **"오늘 한 일" 기준입니다.**
     #
@@ -78,6 +79,8 @@ def overview(db: Session = Depends(get_db)):
 
     ledger = db.get(UsageLedger, today)
 
+    # 오늘 어느 키워드가 몇 편을 데려왔는지. **내가 구독한 것만** 셉니다 —
+    # 남의 키워드가 올린 실적은 내 화면에서 읽을 수 없는 강의입니다.
     contributions = db.execute(
         select(
             Keyword.id,
@@ -87,7 +90,13 @@ def overview(db: Session = Depends(get_db)):
         )
         .join(VideoKeyword, VideoKeyword.keyword_id == Keyword.id)
         .join(Lecture, Lecture.video_id == VideoKeyword.video_id)
-        .where(*_visible(), Lecture.published_at >= day_start)
+        .join(UserKeyword, UserKeyword.keyword_id == Keyword.id)
+        .where(
+            Lecture.is_hidden.is_(False),
+            Lecture.published_at >= day_start,
+            UserKeyword.user_id == user.id,
+            UserKeyword.archived_at.is_(None),
+        )
         .group_by(Keyword.id, Keyword.term, Keyword.archived_at)
         .order_by(func.count(func.distinct(Lecture.video_id)).desc())
         .limit(8)
@@ -125,7 +134,7 @@ def overview(db: Session = Depends(get_db)):
 
 
 @router.get("/stats/usage")
-def usage(db: Session = Depends(get_db)):
+def usage(db: Session = Depends(get_db), _: User = Depends(current_user)):
     today = now_kst().date()
     ledger = db.get(UsageLedger, today)
     win = db.get(UsageWindow, usage_guard.window_start())
@@ -149,7 +158,7 @@ def usage(db: Session = Depends(get_db)):
 
 
 @router.get("/runs")
-def list_runs(db: Session = Depends(get_db)):
+def list_runs(db: Session = Depends(get_db), _: User = Depends(current_user)):
     rows = db.scalars(select(CrawlRun).order_by(CrawlRun.started_at.desc()).limit(50)).all()
     return [run_out(r) for r in rows]
 
@@ -192,7 +201,7 @@ class LimitPatch(BaseModel):
 
 
 @router.put("/stats/usage/limit", status_code=204)
-def set_limit(patch: LimitPatch, db: Session = Depends(get_db)):
+def set_limit(patch: LimitPatch, db: Session = Depends(get_db), _: User = Depends(require_owner)):
     """토큰 상한을 바꿉니다.
 
     **.env 가 아니라 DB 에 둡니다.** 설정 파일을 고치고 프로세스를
@@ -207,7 +216,7 @@ def set_limit(patch: LimitPatch, db: Session = Depends(get_db)):
 
 
 @router.get("/stats/pipeline")
-def pipeline(db: Session = Depends(get_db)):
+def pipeline(db: Session = Depends(get_db), _: User = Depends(current_user)):
     counts = dict(db.execute(select(Video.state, func.count()).group_by(Video.state)).all())
 
     def take(states):
@@ -280,7 +289,7 @@ def pipeline(db: Session = Depends(get_db)):
 
 
 @router.get("/runs/{run_id}/events")
-def run_events(run_id: str, db: Session = Depends(get_db)):
+def run_events(run_id: str, db: Session = Depends(get_db), _: User = Depends(current_user)):
     """실행 하나가 실제로 무엇을 옮겼는지.
 
     **이미 쌓고 있던 것을 안 보여 주고 있었습니다.** 단계별 합계만으로는
@@ -311,7 +320,7 @@ def run_events(run_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/runs", status_code=202)
-def request_run(db: Session = Depends(get_db)):
+def request_run(db: Session = Depends(get_db), _: User = Depends(require_owner)):
     """"지금 실행" — **요청만 남깁니다.** 워커가 다음 틱에 집어갑니다.
 
     여기서 직접 돌리지 않는 이유: 한 사이클이 몇 분씩 걸려서 HTTP 요청이

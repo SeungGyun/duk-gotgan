@@ -368,3 +368,119 @@
   font-size: 12.5px;
   color: var(--muted);
 }
+
+/* 같이 보는 사람 수. 설정을 고치면 그 사람들에게도 적용된다는 신호라
+   경고색까지는 아니고, 눈에는 걸리게 둡니다. */
+.shared {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── 다른 사람도 보는 키워드 ─────────────────────────────── */
+
+.others {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.other {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 10px 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.other:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.other:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.otherTerm {
+  letter-spacing: -0.02em;
+  font-weight: 600;
+}
+
+.otherMeta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.other:hover .otherMeta {
+  color: var(--accent);
+}
+
+.otherAdd {
+  font-size: 15px;
+  line-height: 1;
+  color: var(--muted);
+}
+
+.other:hover .otherAdd {
+  color: var(--accent);
+}
+
+.othersErr {
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  color: var(--fail);
+}
+
+.othersHint {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* ── 비밀번호 ────────────────────────────────────────────── */
+
+.pinForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.pinForm input {
+  width: 10ch;
+}
+
+.pinDone {
+  margin: 0;
+  font-size: 14px;
+  color: var(--pass);
+}
+
+/* 이미 바꾼 사람에게는 이 한 줄만 남습니다 — 패널이 자리를 차지할
+   이유가 없습니다. */
+.pinOpen {
+  align-self: flex-start;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.pinOpen:hover {
+  color: var(--accent);
+}

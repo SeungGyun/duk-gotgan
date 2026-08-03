@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import errors
-from app.api.routes import channels, keywords, lectures, queue, stats
+from app.api.routes import channels, keywords, lectures, queue, stats, users
 from app.db.session import init_db
 from config.settings import settings
 
@@ -42,6 +42,7 @@ app.add_middleware(
 
 errors.install(app)
 
+app.include_router(users.router, prefix="/api/v1")
 app.include_router(keywords.router, prefix="/api/v1")
 app.include_router(lectures.router, prefix="/api/v1")
 app.include_router(stats.router, prefix="/api/v1")

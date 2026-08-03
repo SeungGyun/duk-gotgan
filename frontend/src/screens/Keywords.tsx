@@ -156,6 +156,8 @@ export function Keywords({ list }: { list: ListState }) {
           : undefined
       }
     >
+      <PinPanel />
+
       {/* 추가 폼 — 항상 펼침 */}
       <form
         className={s.add}
@@ -350,6 +352,16 @@ export function Keywords({ list }: { list: ListState }) {
                             {k.sourceType === "channel"
                               ? `${k.term} · 1회 최대 ${k.maxPerRun}편`
                               : `${k.language} · 1회 최대 ${k.maxPerRun}편`}
+                            {/* 수집 설정은 키워드에 붙어 있어서, 고치면
+                                같이 보는 사람 **모두에게** 적용됩니다.
+                                모르고 바꾸면 남의 것을 건드린 셈이 되므로
+                                미리 알립니다. */}
+                            {k.subscriberCount > 1 && (
+                              <span className={s.shared}>
+                                {" · "}
+                                {k.subscriberCount}명이 함께 봅니다
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td>
@@ -426,6 +438,8 @@ export function Keywords({ list }: { list: ListState }) {
           </div>
         </Panel>
       )}
+
+      <Others mine={rows} onSubscribed={list.reload} />
 
       {/* 삭제 영역 — 비어 있으면 자리를 차지하지 않습니다 */}
       {(bin.data?.length ?? 0) > 0 && (
@@ -680,5 +694,171 @@ function EditForm({
         </div>
       </div>
     </form>
+  );
+}
+
+/** 다른 사람이 이미 등록해 둔 키워드.
+ *
+ *  **여기서 구독하면 수집 비용이 전혀 늘지 않습니다.** 같은 검색어를 두
+ *  사람이 봐도 유튜브 호출도 자막도 요약도 한 번입니다 — `keywords` 의
+ *  `UNIQUE(term)` 이 그걸 보장합니다. 같은 말을 새로 등록하는 것보다
+ *  언제나 이쪽이 낫습니다.
+ *
+ *  아무도 안 쓰는 것이 없으면 패널 자체가 안 나옵니다 — 혼자 쓰는 동안
+ *  빈 상자가 자리를 차지할 이유가 없습니다. */
+function Others({ mine, onSubscribed }: { mine: Keyword[]; onSubscribed: () => void }) {
+  const all = useAsync(() => api.listAllKeywords(), []);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const others = (all.data ?? []).filter((k) => !k.isMine);
+  if (others.length === 0) return null;
+
+  const subscribe = async (k: Keyword) => {
+    setBusy(k.id);
+    setError(null);
+    try {
+      await api.subscribeKeyword(k.id);
+      all.reload();
+      onSubscribed();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "구독하지 못했습니다.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Panel
+      title="다른 사람도 보는 키워드"
+      aside={
+        <span className={s.othersHint}>
+          구독해도 수집은 그대로 한 번입니다 · 내 것 {mine.length}개
+        </span>
+      }
+    >
+      {error && <p className={s.othersErr}>{error}</p>}
+      <div className={s.others}>
+        {others.map((k) => (
+          <button
+            key={k.id}
+            type="button"
+            className={s.other}
+            onClick={() => void subscribe(k)}
+            disabled={busy === k.id}
+          >
+            <span className={s.otherTerm}>{k.channelTitle || k.term}</span>
+            <span className={s.otherMeta}>
+              {k.lectureCount}편 · {k.subscriberCount}명
+            </span>
+            <span className={s.otherAdd} aria-hidden="true">
+              +
+            </span>
+          </button>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+
+/** 비밀번호 바꾸기.
+ *
+ *  **주인은 비울 수 없습니다.** 선택 화면에 주인이 그냥 떠 있어서,
+ *  비밀번호가 없으면 같은 공유기에 붙은 누구나 눌러서 주인이 됩니다 —
+ *  그러면 "주인만 지금 실행" 이 잠금이 아니라 그냥 표시가 됩니다.
+ *
+ *  첫 비밀번호(0000) 그대로일 때만 펼친 채로 시작합니다. 이미 바꾼
+ *  사람에게는 접혀 있어서 자리를 차지하지 않습니다. */
+function PinPanel() {
+  const me = useAsync(() => api.getMe(), []);
+  const [open, setOpen] = useState(false);
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const needsChange = me.data?.pinIsDefault ?? false;
+  const showing = open || needsChange;
+  if (!me.data) return null;
+
+  const only4 = (v: string) => v.replace(/\D/g, "").slice(0, 4);
+
+  const save = async () => {
+    if (next.length !== 4) return setError("비밀번호는 숫자 네 자리입니다.");
+    setBusy(true);
+    setError(null);
+    try {
+      await api.setPin(me.data!.hasPin ? current : null, next);
+      setDone(true);
+      setCurrent("");
+      setNext("");
+      me.reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "바꾸지 못했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!showing) {
+    return (
+      <button type="button" className={s.pinOpen} onClick={() => setOpen(true)}>
+        비밀번호 {me.data.hasPin ? "바꾸기" : "걸기"}
+      </button>
+    );
+  }
+
+  return (
+    <Panel
+      title={needsChange ? "비밀번호가 아직 0000 입니다" : "비밀번호"}
+      aside={
+        <span className={s.othersHint}>
+          {me.data.isOwner
+            ? "주인은 비밀번호가 있어야 합니다"
+            : "안 걸어도 되지만, 걸면 남이 내 것을 못 봅니다"}
+        </span>
+      }
+    >
+      {done ? (
+        <p className={s.pinDone}>바꿨습니다. 다음에 들어올 때부터 새 비밀번호를 씁니다.</p>
+      ) : (
+        <div className={s.pinForm}>
+          {me.data.hasPin && (
+            <label className={s.fld}>
+              <span className={s.label}>지금 비밀번호</span>
+              <input
+                type="tel"
+                inputMode="numeric"
+                value={current}
+                onChange={(e) => setCurrent(only4(e.target.value))}
+                placeholder="0000"
+              />
+            </label>
+          )}
+          <label className={s.fld}>
+            <span className={s.label}>새 비밀번호</span>
+            <input
+              type="tel"
+              inputMode="numeric"
+              value={next}
+              onChange={(e) => setNext(only4(e.target.value))}
+              onKeyDown={(e) => e.key === "Enter" && void save()}
+              placeholder="숫자 네 자리"
+            />
+          </label>
+          <Button onClick={() => void save()} disabled={busy}>
+            바꾸기
+          </Button>
+          {!needsChange && (
+            <Button onClick={() => setOpen(false)} disabled={busy}>
+              닫기
+            </Button>
+          )}
+        </div>
+      )}
+      {error && <p className={s.othersErr}>{error}</p>}
+    </Panel>
   );
 }

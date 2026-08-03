@@ -1,0 +1,312 @@
+/* 로그인 전 화면. 상단바가 없는 유일한 화면이라 자기 여백을 스스로
+   만듭니다. */
+
+.wrap {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 32px 18px;
+  background: var(--canvas);
+}
+
+.card {
+  width: 100%;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  text-align: center;
+}
+
+.ask {
+  margin: 0;
+  font-size: clamp(22px, 5vw, 28px);
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  line-height: 1.3;
+}
+
+.hint {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+  max-width: 34ch;
+  line-height: 1.6;
+}
+
+/* ── 사람 고르기 ─────────────────────────────────────────── */
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.who {
+  width: 112px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 18px 10px 13px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: center;
+  transition: border-color 0.12s ease, transform 0.12s ease;
+}
+
+.who:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+
+.who.owner {
+  border-color: var(--accent-line);
+}
+
+.avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  background: var(--surface-sink);
+  color: var(--ink-2);
+}
+
+.owner .avatar {
+  background: var(--accent);
+  color: #fff;
+}
+
+.add .avatar {
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  color: var(--muted);
+  font-weight: 300;
+  font-size: 26px;
+}
+
+.nm {
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.sub {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 비밀번호 ────────────────────────────────────────────── */
+
+.pinWrap {
+  position: relative;
+  cursor: text;
+}
+
+/* 실제 입력칸은 보이지 않게 깔아 둡니다 — 점 네 개가 화면이고, 입력은
+   이 하나가 받습니다. 칸마다 input 을 두면 지우기·붙여넣기가 어긋납니다.
+   `opacity: 0` 이지 `display: none` 이 아닌 것이 중요합니다: 숨겨 버리면
+   초점을 못 받아 자판이 안 뜹니다. */
+.pinInput {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  border: 0;
+  padding: 0;
+  font: inherit;
+}
+
+.dots {
+  display: flex;
+  gap: 14px;
+  padding: 10px 4px;
+}
+
+.dot,
+.dotOn {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+}
+
+.dotOn {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.pinInput:focus-visible + .dots .dot:first-child,
+.pinWrap:focus-within .dots .dot:first-of-type {
+  border-color: var(--accent);
+}
+
+/* ── 폼 ──────────────────────────────────────────────────── */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 300px;
+  text-align: left;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.fieldLabel {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.text {
+  width: 100%;
+  /* 16px 미만이면 iOS 가 초점을 받을 때 화면을 확대해 버립니다. */
+  font-size: 16px;
+  font-family: inherit;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.text:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: var(--accent);
+}
+
+/* ── 키워드 고르기 ───────────────────────────────────────── */
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  max-height: 42vh;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.chip:hover {
+  border-color: var(--border-strong);
+}
+
+.chipOn {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.chipTerm {
+  letter-spacing: -0.02em;
+}
+
+.chipCount {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.chipOn .chipCount {
+  color: var(--accent);
+}
+
+.picked {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 버튼·오류 ───────────────────────────────────────────── */
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.back {
+  background: none;
+  border: 0;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: var(--r);
+}
+
+.back:hover {
+  color: var(--ink-2);
+}
+
+.go {
+  padding: 9px 20px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r);
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.go:disabled,
+.back:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.err {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--fail);
+  background: var(--fail-soft);
+  border-radius: var(--r);
+  padding: 8px 12px;
+  max-width: 36ch;
+  line-height: 1.5;
+}

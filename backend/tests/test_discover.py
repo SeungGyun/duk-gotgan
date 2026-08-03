@@ -207,13 +207,33 @@ def test_차단한_채널은_룰에서_걸린다(db, monkeypatch):
     assert "차단한 채널" in blocked.state_reason
 
 
+def _excluded_by(db, user_id, video_id):
+    """이 사람이 이 강의를 뺐다고 표시합니다.
+
+    제외는 `lectures` 가 아니라 `user_lectures` 에 쌓입니다 — 한 사람이
+    뺀 것이 모두에게 빠지면 안 되니까요."""
+    from app.db.models import UserLecture
+    from config.time import now_kst
+
+    db.add(UserLecture(user_id=user_id, video_id=video_id, excluded_at=now_kst()))
+
+
+def _a_user(db, name="테스터"):
+    from app.db.models import User
+
+    u = User(name=name)
+    db.add(u)
+    db.flush()
+    return u
+
+
 def test_한_편이라도_남겨_둔_채널은_막지_않는다(db):
     """좋은 채널도 가끔 주제에서 벗어난 것을 올립니다. 그걸로 막으면
     이후의 좋은 것까지 통째로 놓칩니다."""
     from app.collector.channels import consider_block
     from app.db.models import Lecture
-    from config.time import now_kst
 
+    me = _a_user(db)
     keep = Video(id="pub00000001", title="남겨 둔 것", channel_id="ch_mixed",
                  channel_title="괜찮은 채널", state="PUBLISHED", duration_sec=3000)
     db.add(keep)
@@ -227,10 +247,11 @@ def test_한_편이라도_남겨_둔_채널은_막지_않는다(db):
         db.add(v)
         db.flush()
         db.add(Lecture(video_id=v.id, version=1, expert_score=40, verdict="introductory",
-                       one_liner="x", sections=[], tags=[], excluded_at=now_kst()))
+                       one_liner="x", sections=[], tags=[]))
+        _excluded_by(db, me.id, v.id)
     db.flush()
 
-    assert consider_block(db, keep) is None, "남겨 둔 것이 있으면 막지 않아야 합니다"
+    assert consider_block(db, keep, me.id) is None, "남겨 둔 것이 있으면 막지 않아야 합니다"
 
 
 def test_전부_뺀_채널은_자동으로_막는다(db):
@@ -238,8 +259,8 @@ def test_전부_뺀_채널은_자동으로_막는다(db):
     실제로 "이건 아니다"라고 누른 것이라 훨씬 정확합니다."""
     from app.collector.channels import consider_block
     from app.db.models import Lecture
-    from config.time import now_kst
 
+    me = _a_user(db)
     last = None
     for i in range(3):
         v = Video(id=f"bad0000000{i}", title=f"뺀 것 {i}", channel_id="ch_bad",
@@ -247,11 +268,12 @@ def test_전부_뺀_채널은_자동으로_막는다(db):
         db.add(v)
         db.flush()
         db.add(Lecture(video_id=v.id, version=1, expert_score=30, verdict="promotional",
-                       one_liner="x", sections=[], tags=[], excluded_at=now_kst()))
+                       one_liner="x", sections=[], tags=[]))
+        _excluded_by(db, me.id, v.id)
         last = v
     db.flush()
 
-    block = consider_block(db, last)
+    block = consider_block(db, last, me.id)
     assert block is not None and block.auto
     assert "3편" in block.reason
 
@@ -259,8 +281,8 @@ def test_전부_뺀_채널은_자동으로_막는다(db):
 def test_두_번_뺀_정도로는_막지_않는다(db):
     from app.collector.channels import consider_block
     from app.db.models import Lecture
-    from config.time import now_kst
 
+    me = _a_user(db)
     last = None
     for i in range(2):
         v = Video(id=f"two0000000{i}", title=f"뺀 것 {i}", channel_id="ch_two",
@@ -268,7 +290,38 @@ def test_두_번_뺀_정도로는_막지_않는다(db):
         db.add(v)
         db.flush()
         db.add(Lecture(video_id=v.id, version=1, expert_score=30, verdict="introductory",
-                       one_liner="x", sections=[], tags=[], excluded_at=now_kst()))
+                       one_liner="x", sections=[], tags=[]))
+        _excluded_by(db, me.id, v.id)
         last = v
     db.flush()
-    assert consider_block(db, last) is None
+    assert consider_block(db, last, me.id) is None
+
+
+def test_남의_제외는_내_차단이_되지_않는다(db):
+    """**여러 사람이 쓸 때 가장 조용히 어긋나는 곳입니다.**
+
+    예전에는 제외가 쌓이면 전역 `channel_blocks` 에 올라가 룰 단계에서
+    걸렸습니다. 그러면 한 사람이 세 번 뺀 것으로 다른 사람도 그 채널
+    영상을 못 받고, 받은 적이 없으니 그런 일이 있었다는 것조차 모릅니다.
+    """
+    from app.collector.channels import consider_block
+    from app.db.models import Lecture
+
+    아내 = _a_user(db, "아내")
+    주인 = _a_user(db, "주인")
+    last = None
+    for i in range(3):
+        v = Video(id=f"her000000{i}", title=f"뺀 것 {i}", channel_id="ch_hers",
+                  channel_title="아내가 뺀 채널", state="PUBLISHED", duration_sec=3000)
+        db.add(v)
+        db.flush()
+        db.add(Lecture(video_id=v.id, version=1, expert_score=30, verdict="introductory",
+                       one_liner="x", sections=[], tags=[]))
+        _excluded_by(db, 아내.id, v.id)
+        last = v
+    db.flush()
+
+    assert consider_block(db, last, 아내.id) is not None, "뺀 사람에게는 막혀야 합니다"
+    db.flush()
+    # 주인은 한 편도 뺀 적이 없습니다 — 세 편 다 남겨 둔 상태입니다.
+    assert consider_block(db, last, 주인.id) is None, "남이 뺀 것으로 내 채널이 막히면 안 됩니다"
