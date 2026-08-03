@@ -309,6 +309,9 @@ function Account({
       </div>
 
       <div className={s.menuFoot}>
+        <NavLink to="/about" className={s.menuAbout} onClick={onClose}>
+          소개
+        </NavLink>
         <button type="button" className={s.menuLeave} onClick={() => void leave()} disabled={busy}>
           사용자 바꾸기
         </button>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { api } from "../api";
 import type { Keyword, Person } from "../api";
@@ -137,6 +138,12 @@ function Pick({
           <span className={s.sub}>&nbsp;</span>
         </button>
       </div>
+
+      {/* 처음 온 사람은 여기가 뭐 하는 곳인지 모릅니다. 이름만 늘어놓고
+          고르라고 하면 아무것도 알려 주지 않은 셈입니다. */}
+      <Link to="/about" className={s.aboutLink}>
+        덕!곳간이 뭔가요?
+      </Link>
     </>
   );
 }

@@ -1,0 +1,171 @@
+/* 소개. 상단바 밖에 있는 화면이라 여백을 스스로 만듭니다. */
+
+.wrap {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--canvas);
+  padding: 0 20px 80px;
+}
+
+.page {
+  max-width: 640px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+
+/* ── 머리 ────────────────────────────────────────────────── */
+
+.top {
+  padding: 72px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.brand {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--ink-2);
+}
+
+.sep {
+  color: var(--accent);
+}
+
+.title {
+  margin: 0;
+  font-size: clamp(27px, 6.4vw, 38px);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.28;
+  text-wrap: balance;
+}
+
+.lede {
+  margin: 0;
+  font-size: clamp(16px, 2.6vw, 18px);
+  line-height: 1.68;
+  color: var(--ink-2);
+  max-width: 34ch;
+}
+
+/* ── 넷으로 나뉜 흐름 ─────────────────────────────────────
+   순서가 실제로 있는 내용이라 번호를 씁니다. 장식이 아닙니다. */
+
+.how {
+  border-top: 1px solid var(--border);
+  padding-top: 28px;
+}
+
+.steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.steps li {
+  counter-increment: step;
+  position: relative;
+  padding-left: 34px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.steps li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.steps b {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+.steps span {
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--ink-2);
+}
+
+/* ── 설명 묶음 ───────────────────────────────────────────── */
+
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 26px;
+}
+
+.block h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 750;
+  letter-spacing: -0.028em;
+}
+
+.block p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+
+.aside {
+  border-left: 2px solid var(--accent-line);
+  padding-left: 12px;
+  font-size: 14px !important;
+}
+
+/* ── 시작 ────────────────────────────────────────────────── */
+
+.go {
+  display: flex;
+  justify-content: center;
+  padding-top: 4px;
+}
+
+.goBtn {
+  display: inline-block;
+  padding: 12px 30px;
+  border-radius: var(--r);
+  background: var(--accent);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+}
+
+.goBtn:hover {
+  filter: brightness(1.08);
+}
+
+.foot {
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+}

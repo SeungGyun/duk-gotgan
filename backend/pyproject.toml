@@ -12,6 +12,13 @@ dependencies = [
     "pydantic-settings>=2.6.0",
     "youtube-transcript-api>=1.2",
     "yt-dlp>=2026.7",
+    # 요약을 만드는 곳. **인증은 구독입니다** — ANTHROPIC_API_KEY 를 쓰지
+    # 않고, 이 기계에 로그인된 Claude Code 를 그대로 씁니다.
+    #
+    # 이게 여기 빠져 있었습니다. 지금 기계에는 손으로 깔려 있어서 돌지만,
+    # 새 기계에 받아서 `uv sync` 하면 요약 단계가 통째로 안 뜹니다 —
+    # 그것도 첫 요약을 시도할 때까지는 멀쩡해 보입니다.
+    "claude-agent-sdk>=0.2",
 ]
 
 [project.optional-dependencies]

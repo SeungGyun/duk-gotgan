@@ -26,6 +26,14 @@ export const WHO = "/who";
  *  튕기면 **선택 화면이 자기 자신을 부르다가 무한히 새로 고칩니다.** */
 const OPEN = new Set(["/users", "/session"]);
 
+/** 로그인 없이 열리는 화면들.
+ *
+ *  **여기 있는 화면에서는 튕기지 않습니다.** 셸이 화면과 무관하게 `/me` 를
+ *  한 번 부르는데, 쿠키가 없으면 그게 401 로 끝납니다. 그 401 로 무조건
+ *  선택 화면으로 보내면 소개를 열자마자 곧바로 끌려 나갑니다 — 실제로
+ *  `/about` 이 열리지 않았습니다. */
+const PUBLIC_PAGES = new Set([WHO, "/about"]);
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
@@ -52,7 +60,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     // **401 처리는 여기 한 곳뿐입니다.** 모든 호출이 이 함수를 지나가서,
     // 화면마다 "로그인 됐나" 를 챙길 필요가 없습니다.
     const base = path.split("?")[0]!;
-    if (res.status === 401 && !OPEN.has(base) && window.location.pathname !== WHO) {
+    if (res.status === 401 && !OPEN.has(base) && !PUBLIC_PAGES.has(window.location.pathname)) {
       window.location.assign(WHO);
     }
     const err = body?.error;

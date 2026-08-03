@@ -319,6 +319,16 @@
   gap: 8px;
 }
 
+.menuAbout {
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.menuAbout:hover {
+  color: var(--accent);
+}
+
 .menuLeave,
 .menuClose {
   background: none;

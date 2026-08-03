@@ -11,6 +11,7 @@ import { Lectures } from "./screens/Lectures";
 import { Excluded } from "./screens/Excluded";
 import { Queue } from "./screens/Queue";
 import { Runs } from "./screens/Runs";
+import { About } from "./screens/About";
 import { Who } from "./screens/Who";
 import s from "./App.module.css";
 
@@ -26,6 +27,9 @@ export default function App() {
   // 다 고르면 `Who` 가 페이지를 통째로 다시 읽습니다 — 아래 `me` 가
   // 쿠키 없던 시절의 401 을 들고 있어서, 주소만 바꾸면 도로 튕겨납니다.
   if (pathname === "/who") return <Who />;
+  // 소개도 로그인 앞입니다 — 처음 온 사람이 "여기가 뭐 하는 곳인지" 를
+  // 먼저 볼 수 있어야 고를지 말지 정합니다.
+  if (pathname === "/about") return <About />;
 
   if (me.loading && !me.data) return <Loading />;
   if (!me.data) return <Navigate to="/who" replace />;

@@ -310,3 +310,16 @@
   max-width: 36ch;
   line-height: 1.5;
 }
+
+/* 처음 온 사람을 위한 한 줄. 고르는 것을 방해하지 않게 작고 조용히. */
+.aboutLink {
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  margin-top: 2px;
+}
+
+.aboutLink:hover {
+  color: var(--accent);
+}
