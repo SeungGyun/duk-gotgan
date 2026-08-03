@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>덕!곳간 — 유튜브를 뒤지는 대신, 읽을 것만 쌓아 둡니다</title>
+<meta name="description" content="키워드를 걸어 두면 유튜브에서 강의를 찾아 AI 가 요약해 쌓아 주는 개인용 아카이브. 맥 한 대에서 돕니다." />
+<meta property="og:title" content="덕!곳간" />
+<meta property="og:description" content="키워드를 걸어 두면 유튜브에서 강의를 찾아 AI 가 요약해 쌓아 주는 개인용 아카이브." />
+<meta property="og:type" content="website" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗂️</text></svg>" />
+
+<style>
+  /* 앱(frontend/src/styles/tokens.css)과 같은 색을 씁니다 — 소개와 실제
+     화면이 다른 색이면 들어갔을 때 다른 물건처럼 보입니다. */
+  :root {
+    --canvas: #f1f3f5;
+    --surface: #ffffff;
+    --surface-2: #f7f9fa;
+    --surface-sink: #ebeef1;
+    --border: #dce1e6;
+    --border-strong: #c3cbd3;
+    --ink: #14181c;
+    --ink-2: #3d464e;
+    --muted: #6b757e;
+    --accent: #1d5fa8;
+    --accent-soft: #e8f0f9;
+    --accent-line: #b7d2ec;
+    --pass: #2e7d4f;
+
+    --font: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont,
+      "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", "JetBrains Mono", Menlo,
+      Consolas, monospace;
+    --r: 3px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --canvas: #0f1216;
+      --surface: #161a1f;
+      --surface-2: #1c2127;
+      --surface-sink: #12161a;
+      --border: #272e36;
+      --border-strong: #39424c;
+      --ink: #e6eaee;
+      --ink-2: #b4bcc4;
+      --muted: #7c8790;
+      --accent: #4e93d4;
+      --accent-soft: #17293c;
+      --accent-line: #2c4a6b;
+      --pass: #3f9e6c;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 16px;
+    line-height: 1.72;
+    /* 한국어는 글자마다 네모칸을 꽉 채워서, 자간이 0 이면 단어가 뭉치지
+       않고 낱글자로 흩어져 보입니다. */
+    letter-spacing: -0.014em;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 0 22px 100px;
+  }
+
+  h1, h2, h3 { margin: 0; letter-spacing: -0.032em; text-wrap: balance; }
+  p { margin: 0; }
+  a { color: var(--accent); }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    letter-spacing: 0;
+    background: var(--surface-sink);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 0.1em 0.36em;
+  }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ── 머리 ──────────────────────────────────────────────── */
+
+  header.hero {
+    padding: 84px 0 52px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .brand {
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: -0.035em;
+    color: var(--ink-2);
+  }
+  .brand em { font-style: normal; color: var(--accent); }
+
+  h1 {
+    font-size: clamp(30px, 6.6vw, 46px);
+    font-weight: 800;
+    line-height: 1.22;
+  }
+
+  .lede {
+    font-size: clamp(17px, 2.6vw, 19px);
+    line-height: 1.68;
+    color: var(--ink-2);
+    max-width: 40ch;
+  }
+
+  .cta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    padding-top: 6px;
+  }
+
+  .btn {
+    display: inline-block;
+    padding: 11px 22px;
+    border-radius: var(--r);
+    background: var(--accent);
+    color: #fff;
+    font-size: 15px;
+    font-weight: 650;
+    text-decoration: none;
+  }
+  .btn:hover { filter: brightness(1.08); }
+
+  .btn2 {
+    display: inline-block;
+    padding: 11px 18px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r);
+    color: var(--ink-2);
+    font-size: 15px;
+    text-decoration: none;
+  }
+  .btn2:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── 절 ────────────────────────────────────────────────── */
+
+  section {
+    border-top: 1px solid var(--border);
+    padding: 44px 0 0;
+    margin-top: 44px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  h2 { font-size: clamp(20px, 3.2vw, 25px); font-weight: 750; line-height: 1.3; }
+  .col { max-width: 62ch; display: flex; flex-direction: column; gap: 14px; color: var(--ink-2); }
+  .col b, .col strong { color: var(--ink); font-weight: 700; }
+
+  /* ── 흐름 도면 ─────────────────────────────────────────── */
+
+  .flow {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    overflow: hidden;
+  }
+  @media (max-width: 620px) { .flow { grid-template-columns: 1fr; } }
+
+  .job {
+    background: var(--surface);
+    padding: 20px 18px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .job .tick {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .job h3 { font-size: 16px; font-weight: 700; letter-spacing: -0.025em; }
+  .job p { font-size: 14px; line-height: 1.6; color: var(--ink-2); }
+
+  .flowNote {
+    font-size: 14px;
+    color: var(--muted);
+    line-height: 1.6;
+    max-width: 60ch;
+  }
+
+  /* ── 수치 ──────────────────────────────────────────────── */
+
+  .figures {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    overflow: hidden;
+  }
+  .fig {
+    background: var(--surface);
+    padding: 15px 16px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .fig b {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 23px;
+    font-weight: 640;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+  .fig span { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+
+  /* ── 결정 ──────────────────────────────────────────────── */
+
+  .picks { display: flex; flex-direction: column; gap: 14px; }
+  .pick {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent-line);
+    border-radius: var(--r);
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .pick h3 { font-size: 16.5px; font-weight: 700; letter-spacing: -0.025em; }
+  .pick p { font-size: 14.5px; line-height: 1.68; color: var(--ink-2); }
+  .pick p b { color: var(--ink); }
+
+  /* ── 표 ────────────────────────────────────────────────── */
+
+  .scroll {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    background: var(--surface);
+  }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; min-width: 420px; }
+  th, td { text-align: left; padding: 11px 15px; border-bottom: 1px solid var(--border); }
+  thead th {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+    background: var(--surface-2);
+    white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  td:first-child { font-weight: 650; white-space: nowrap; }
+  td.who { font-family: var(--mono); font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+
+  /* ── 설치 ──────────────────────────────────────────────── */
+
+  pre {
+    margin: 0;
+    background: var(--surface-sink);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.7;
+    letter-spacing: 0;
+    color: var(--ink-2);
+  }
+  pre i { font-style: normal; color: var(--muted); }
+
+  footer {
+    border-top: 1px solid var(--border);
+    margin-top: 52px;
+    padding-top: 22px;
+    font-size: 13.5px;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <span class="brand">덕<em>!</em>곳간</span>
+    <h1>유튜브를 뒤지는 대신,<br />읽을 것만 쌓아 둡니다</h1>
+    <p class="lede">
+      관심 주제를 걸어 두면 유튜브에서 강의를 찾아 AI 가 요약해 둡니다.
+      집에 있는 맥 한 대에서 돌고, 같은 공유기에 붙은 기기에서 읽습니다.
+    </p>
+    <div class="cta">
+      <a class="btn" href="https://github.com/SeungGyun/duk-gotgan">소스 보기</a>
+      <a class="btn2" href="https://github.com/SeungGyun/duk-gotgan/blob/master/docs/INSTALL.md">설치 매뉴얼</a>
+    </div>
+  </header>
+
+  <section>
+    <h2>세 가지 일을 따로 돌립니다</h2>
+    <div class="col">
+      <p>
+        처음에는 한 사이클이 검색부터 요약까지 다 했습니다. 그랬더니
+        <b>앞이 막히면 뒤가 통째로 밀렸습니다</b> &mdash; 긴 영상 하나를
+        받아쓰는 동안 요약이 몇 시간씩 놀았습니다.
+      </p>
+    </div>
+
+    <div class="flow">
+      <div class="job">
+        <span class="tick">1분마다</span>
+        <h3>검색</h3>
+        <p>유튜브에서 후보를 찾고, 광고·홍보·너무 오래된 것을 룰로 거릅니다.</p>
+      </div>
+      <div class="job">
+        <span class="tick">30초마다</span>
+        <h3>자막</h3>
+        <p>자막을 받습니다. 막히면 소리를 받아 맥 GPU 로 직접 받아씁니다.</p>
+      </div>
+      <div class="job">
+        <span class="tick">1분마다</span>
+        <h3>요약</h3>
+        <p>5편이 모이거나 한 시간이 지나면 AI 를 한 번 부릅니다.</p>
+      </div>
+    </div>
+
+    <p class="flowNote">
+      각 잡이 끝낼 때 다음 상태를 세워 둡니다. 서로를 기다리지 않고,
+      하나가 죽어도 나머지는 그대로 돕니다.
+    </p>
+  </section>
+
+  <section>
+    <h2>왜 이렇게 만들었는가</h2>
+
+    <div class="picks">
+      <div class="pick">
+        <h3>AI 는 영상 한 편당 한 번만 부릅니다</h3>
+        <p>
+          자막을 읽고 요약을 만들어 <code>save_review</code> 도구를 부르는
+          것으로 끝납니다. <b>그 도구의 구현체는 워커 프로세스 안에 있습니다</b>
+          &mdash; AI 는 스키마에 맞는 값을 넘길 뿐 셸도 DB 도 만지지 않습니다.
+          남이 쓴 자막을 도구 가진 에이전트에 넣는 구조라, 능력이 아니라
+          인터페이스만 줍니다.
+        </p>
+      </div>
+
+      <div class="pick">
+        <h3>자막은 대개 직접 받아씁니다</h3>
+        <p>
+          유튜브 자막 API 가 IP 단위로 막히는 일이 잦습니다(429). 그래서
+          소리를 받아 <b>맥의 GPU 로 받아씁니다</b> &mdash;
+          <code>mlx-whisper</code> 의 large-v3-turbo, M4 실측 5~6배속.
+          자막 경로가 열려 있으면 그쪽을 먼저 씁니다.
+        </p>
+      </div>
+
+      <div class="pick">
+        <h3>사람이 늘어도 비용은 늘지 않습니다</h3>
+        <p>
+          영상 테이블의 기본키가 유튜브 영상 ID 라, 두 사람이 같은 주제를
+          걸어도 <b>자막도 요약도 한 번</b>입니다. 비용은 사람 수가 아니라
+          <b>서로 다른 키워드 수</b>에 비례합니다. 읽음·즐겨찾기·제외만
+          사람마다 따로 쌓입니다.
+        </p>
+      </div>
+
+      <div class="pick">
+        <h3>큐도 브로커도 없습니다</h3>
+        <p>
+          잡 사이의 배타 제어는 MySQL 의 <code>GET_LOCK</code> 으로 합니다.
+          한 대에서 프로세스가 셋뿐이라 Redis 를 하나 더 띄울 이유가
+          없었습니다. <b>16GB 기계에서 메모리가 진짜 병목</b>이라, 안 띄우는
+          것이 이득입니다.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>실측</h2>
+    <div class="figures">
+      <div class="fig"><b>80,261</b><span>요약 한 편당 토큰 · 7일 평균</span></div>
+      <div class="fig"><b>178</b><span>하루 처리 용량 (편)</span></div>
+      <div class="fig"><b>5~6배속</b><span>받아쓰기 · M4</span></div>
+      <div class="fig"><b>55MB</b><span>영상 1,498건 · 요약 339편</span></div>
+    </div>
+    <p class="flowNote">
+      토큰은 5시간 창 단위로 셉니다 &mdash; 구독 사용량이 그 주기로 풀려서,
+      하루로 재면 오전에 다 쓰고 저녁 내내 놀게 됩니다.
+    </p>
+  </section>
+
+  <section>
+    <h2>화면</h2>
+    <div class="col">
+      <p>
+        들어오면 누구인지 고릅니다. 비밀번호를 건 사람만 네 자리를 묻고,
+        고른 결과가 쿠키에 남아 다음부터는 바로 들어갑니다.
+      </p>
+    </div>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>화면</th><th>하는 일</th><th>누가</th></tr></thead>
+        <tbody>
+          <tr><td>덕질</td><td>요약을 읽습니다. 안 읽은 것이 먼저</td><td class="who">모두</td></tr>
+          <tr><td>키워드</td><td>무엇을 모을지. 남이 건 것을 구독할 수도</td><td class="who">모두</td></tr>
+          <tr><td>제외함</td><td>뺀 것. 되돌리기</td><td class="who">모두</td></tr>
+          <tr><td>대시보드</td><td>오늘 얼마나 모았나, 얼마나 썼나</td><td class="who">주인</td></tr>
+          <tr><td>대기 목록</td><td>줄 서 있는 영상. 처리 전에 뺄 수 있습니다</td><td class="who">주인</td></tr>
+          <tr><td>실행 로그</td><td>지금 어디까지 왔는지</td><td class="who">주인</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>설치</h2>
+    <div class="col">
+      <p>
+        애플 실리콘 맥 · 도커 · 유튜브 API 키(무료) · Claude Code 로그인이
+        필요합니다. 30분쯤 걸리고, 다 끝나면 <b>로그인만 하면 알아서 도는
+        상태</b>가 됩니다.
+      </p>
+    </div>
+
+<pre>git clone https://github.com/SeungGyun/duk-gotgan.git
+cd duk-gotgan
+
+cd backend  &amp;&amp; docker compose up -d      <i># MySQL (3307)</i>
+uv sync --extra asr --extra dev
+cp .env.example .env                     <i># 유튜브 키 한 줄만 채웁니다</i>
+
+cd ../frontend &amp;&amp; npm install &amp;&amp; npm run build
+
+cd .. &amp;&amp; ops/install.sh                  <i># 상시 기동 등록 (launchd)</i></pre>
+
+    <div class="col">
+      <p>
+        자세한 것은 <a href="https://github.com/SeungGyun/duk-gotgan/blob/master/docs/INSTALL.md">설치
+        매뉴얼</a>에 있습니다 &mdash; 준비물부터 첫 키워드까지, 안 될 때 어디를
+        보는지까지.
+      </p>
+      <p>
+        <b>집 공유기 안에서만 쓰는 전제로 만들어졌습니다.</b> 비밀번호가 네
+        자리뿐이고 TLS 도 없습니다. 밖으로 열 목적이라면 이 설계로는
+        안 됩니다.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>만든 것</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th></th><th>하는 일</th><th>스택</th></tr></thead>
+        <tbody>
+          <tr><td>api</td><td>화면과 REST 를 한 포트에서</td><td class="who">FastAPI · SQLAlchemy 2 · Python 3.12</td></tr>
+          <tr><td>worker</td><td>검색·자막·요약·정리 네 루프</td><td class="who">asyncio · launchd</td></tr>
+          <tr><td>mysql</td><td>저장 + 한국어 전문 검색</td><td class="who">MySQL 8 (ngram FULLTEXT)</td></tr>
+          <tr><td>화면</td><td>읽고 고르는 곳</td><td class="who">React 19 · Vite · TypeScript</td></tr>
+          <tr><td>요약</td><td>자막 → 강의 노트</td><td class="who">claude-agent-sdk (구독 인증)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <span>개인 프로젝트</span>
+    <a href="https://github.com/SeungGyun/duk-gotgan">GitHub</a>
+    <a href="https://github.com/SeungGyun/duk-gotgan/blob/master/docs/INSTALL.md">설치</a>
+    <a href="https://github.com/SeungGyun/duk-gotgan/blob/master/docs/AI-PIPELINE.md">AI 파이프라인</a>
+  </footer>
+
+</div>
+</body>
+</html>
