@@ -1065,10 +1065,12 @@
   .secList li {
     font-size: 17px;
     line-height: 1.8;
+    letter-spacing: -0.018em;
   }
   .closing {
     font-size: 17px;
     line-height: 1.8;
+    letter-spacing: -0.018em;
   }
   .read .secTitle {
     font-size: 18px;
