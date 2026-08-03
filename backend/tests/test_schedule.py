@@ -197,3 +197,42 @@ def test_자막_줄이_차_있으면_보충하지_않는다():
     from app.collector import jobs
 
     assert "room <= 0" in inspect.getsource(jobs.backfill)
+
+
+# ── 보관 정리 ────────────────────────────────────────────────
+
+
+def test_처리가_안_끝난_영상의_원문은_지우지_않는다():
+    """만료일만 보고 지우면, 오래 밀려 있던 영상의 원문이 요약 직전에
+    사라져 그 영상만 영영 처리되지 않습니다. 조용히 일어나서 알아채기도
+    어렵습니다."""
+    from app.collector.cleanup import DONE_STATES
+
+    for still_working in (
+        "TRANSCRIPT_PENDING",
+        "TRANSCRIBING",
+        "TRANSCRIBED",
+        "REVIEWING",
+        "DISCOVERED",
+    ):
+        assert still_working not in DONE_STATES, f"{still_working} 는 아직 원문이 필요합니다"
+    assert "PUBLISHED" in DONE_STATES
+
+
+def test_룰_탈락_영상은_지우지_않는다():
+    """그 행이 "이미 본 영상"이라는 표시입니다. 지우면 다음 검색에 처음
+    본 것처럼 다시 들어와 또 탈락하는 순환이 생겨 영영 줄지 않습니다."""
+    import inspect
+
+    from app.collector import cleanup
+
+    src = inspect.getsource(cleanup)
+    assert "REJECTED_RULE" not in src.split('"""')[2], "룰 탈락은 지우는 대상이 아닙니다"
+
+
+def test_이력을_실행_기록보다_먼저_지운다():
+    """실행을 먼저 지우면 이력이 사라진 실행을 가리킨 채 남습니다."""
+    import inspect
+
+    src = inspect.getsource(__import__("app.collector.cleanup", fromlist=["sweep"]).sweep)
+    assert src.index("PipelineEvent") < src.index("CrawlRun")

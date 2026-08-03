@@ -28,6 +28,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.collector import asr
+from app.collector import cleanup
 from app.collector import discover as D
 from app.collector import resources
 from app.collector import quota
@@ -45,6 +46,7 @@ logger = logging.getLogger(__name__)
 DISCOVER_LOCK = "dukgotgan:discover"
 TRANSCRIPT_LOCK = "dukgotgan:transcript"
 REVIEW_LOCK = "dukgotgan:review"
+CLEANUP_LOCK = "dukgotgan:cleanup"
 
 # 한 번에 받아쓸 편수. 시간 예산 대신 편수로 끊습니다 — 이제 검토가 뒤에서
 # 기다리지 않으므로 "20분 안에 끝내라"는 제약이 필요 없고, 편수로 끊어야
@@ -340,3 +342,22 @@ __all__ = [
     "take_queued_run",
     "transcript_job",
 ]
+
+
+# ── 4) 정리 ──────────────────────────────────────────────────
+
+
+def cleanup_job(db: Session) -> JobResult:
+    """다 쓴 자막 원문과 오래된 이력을 버립니다.
+
+    **기록을 남기지 않습니다.** 하루 한 번 도는 청소인데 실행 로그에 줄을
+    더하면, 정작 무슨 일이 있었는지 보려는 화면이 청소 기록으로 덮입니다.
+    지운 것이 있으면 워커 로그에만 적습니다.
+    """
+    r = JobResult(job="cleanup")
+    out = cleanup.sweep(db)
+    r.did_work = any(out.values())
+    r.stats = out
+    if r.did_work:
+        r.label = f"자막 {out['transcripts']} · 이력 {out['events']} · 기록 {out['runs']} 정리"
+    return r

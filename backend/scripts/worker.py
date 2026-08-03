@@ -37,7 +37,9 @@ logger = logging.getLogger("worker")
 #   자막   30초 — 대기가 있으면 계속 도는 것이 목적이라 짧게.
 #   검토   1분 — 모였는지만 보므로 자주 봐도 쌉니다. 실제로 부를지는
 #          review_due() 가 정합니다(5건 모임 또는 1시간 조용함).
-TICKS = {"discover": 60, "transcript": 30, "review": 60}
+# 정리는 하루 한 번이면 충분합니다 — 자막 보관이 30일이라 몇 시간
+# 늦어도 아무 차이가 없고, 자주 돌면 지울 것도 없이 테이블만 훑습니다.
+TICKS = {"discover": 60, "transcript": 30, "review": 60, "cleanup": 6 * 3600}
 
 
 # **막는 일은 스레드로 보냅니다.**
@@ -68,6 +70,15 @@ def _discover_blocking() -> str | None:
         db.close()
 
 
+def _cleanup_blocking() -> str | None:
+    db = SessionLocal()
+    try:
+        r = jobs.cleanup_job(db)
+        return r.label if r.did_work else None
+    finally:
+        db.close()
+
+
 def _transcript_blocking() -> str | None:
     db = SessionLocal()
     try:
@@ -82,6 +93,12 @@ async def _run_discover() -> None:
     label = await asyncio.to_thread(_discover_blocking)
     if label:
         logger.info("[discover] %s", label)
+
+
+async def _run_cleanup() -> None:
+    label = await asyncio.to_thread(_cleanup_blocking)
+    if label:
+        logger.info("[cleanup] %s", label)
 
 
 async def _run_transcript() -> None:
@@ -107,6 +124,7 @@ JOBS = {
     "discover": (jobs.DISCOVER_LOCK, _run_discover),
     "transcript": (jobs.TRANSCRIPT_LOCK, _run_transcript),
     "review": (jobs.REVIEW_LOCK, _run_review),
+    "cleanup": (jobs.CLEANUP_LOCK, _run_cleanup),
 }
 
 
