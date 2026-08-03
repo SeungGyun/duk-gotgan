@@ -1050,3 +1050,57 @@
     margin-bottom: 16px;
   }
 }
+
+
+/* ── 모바일 글자 크기 ────────────────────────────────────
+   실측: 본문 불릿이 14.5px 였습니다. 웹에서 모바일 본문 하한은 16px 로
+   보는 것이 표준이고(iOS 는 16px 미만 입력칸에 초점이 가면 화면을 확대
+   합니다), 긴 글을 읽히는 서비스는 17~18px 을 씁니다. 한국어는 글자
+   모양이 조밀해 줄간격도 1.7~1.8 이 필요합니다.
+
+   여기서는 **읽는 글에만** 크게 씁니다. 라벨·메타까지 같이 키우면 화면
+   하나에 들어가는 정보가 줄어 오히려 훑기 나빠집니다. */
+@media (max-width: 640px) {
+  /* 본문 — 읽는 글. 17px + 1.8 */
+  .secList li {
+    font-size: 17px;
+    line-height: 1.8;
+  }
+  .closing {
+    font-size: 17px;
+    line-height: 1.8;
+  }
+  .read .secTitle {
+    font-size: 18px;
+  }
+  .read .secHead {
+    font-size: 18px;
+  }
+  .facts,
+  .facts dd {
+    font-size: 15px;
+    line-height: 1.7;
+  }
+  .facts dt {
+    font-size: 13px;
+  }
+
+  /* 제목과 목록 — 훑는 글. 본문보다 작지만 13px 아래로는 안 내립니다 */
+  .rpTitle {
+    font-size: 20px;
+    line-height: 1.4;
+  }
+  .rpMeta {
+    font-size: 13.5px;
+  }
+  .rowTitle {
+    font-size: 15px;
+    line-height: 1.55;
+  }
+
+  /* 입력칸은 **16px 이상**이어야 합니다. 그 아래면 초점이 갈 때 iOS 가
+     화면을 확대하고, 그러면 가로로 밀려 나간 채로 남습니다. */
+  .search {
+    font-size: 16px;
+  }
+}

@@ -13,7 +13,11 @@ body {
   background: var(--canvas);
   color: var(--ink);
   font-family: var(--font);
-  font-size: 14px;
+  /* 14px 로 깔려 있었습니다. 브라우저 기본이 16px 인데 그보다 작게
+     깔면 화면 전체가 조밀해지고, 모바일에서는 그게 그대로 "읽기 힘들다"가
+     됩니다. 화면이 좁을수록 글자는 커야 합니다 — 한 줄에 들어가는 글자
+     수가 어차피 적어서, 작게 해도 얻는 것이 없습니다. */
+  font-size: 15px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
 }
@@ -54,5 +58,16 @@ a {
   *::after {
     animation: none !important;
     transition: none !important;
+  }
+}
+
+
+/* 모바일 기본. 웹에서 모바일 본문 하한은 16px 로 봅니다 — iOS 는 16px
+   미만 입력칸에 초점이 가면 화면을 확대해 버리고, 그러면 가로로 밀려
+   나간 채로 남습니다. */
+@media (max-width: 640px) {
+  body {
+    font-size: 16px;
+    line-height: 1.65;
   }
 }
