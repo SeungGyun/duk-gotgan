@@ -1059,48 +1059,51 @@
    모양이 조밀해 줄간격도 1.7~1.8 이 필요합니다.
 
    여기서는 **읽는 글에만** 크게 씁니다. 라벨·메타까지 같이 키우면 화면
-   하나에 들어가는 정보가 줄어 오히려 훑기 나빠집니다. */
+   하나에 들어가는 정보가 줄어 오히려 훑기 나빠집니다.
+
+   본문 18px 이 실용적인 상한입니다. 그 위로 올리면 390px 화면에 한 줄
+   19자 안팎만 들어가, 눈이 줄을 너무 자주 바꿔 오히려 피로해집니다. */
 @media (max-width: 640px) {
   /* 본문 — 읽는 글. 17px + 1.8 */
   .secList li {
-    font-size: 17px;
+    font-size: 18px;
     line-height: 1.8;
   }
   .closing {
-    font-size: 17px;
+    font-size: 18px;
     line-height: 1.8;
   }
   .read .secTitle {
-    font-size: 18px;
+    font-size: 19px;
   }
   .read .secHead {
-    font-size: 18px;
+    font-size: 19px;
   }
   .facts,
   .facts dd {
-    font-size: 15px;
+    font-size: 16px;
     line-height: 1.7;
   }
   .facts dt {
-    font-size: 13px;
+    font-size: 14px;
   }
 
   /* 제목과 목록 — 훑는 글. 본문보다 작지만 13px 아래로는 안 내립니다 */
   .rpTitle {
-    font-size: 20px;
+    font-size: 21px;
     line-height: 1.4;
   }
   .rpMeta {
-    font-size: 13.5px;
+    font-size: 14.5px;
   }
   .rowTitle {
-    font-size: 15px;
+    font-size: 16px;
     line-height: 1.55;
   }
 
   /* 입력칸은 **16px 이상**이어야 합니다. 그 아래면 초점이 갈 때 iOS 가
      화면을 확대하고, 그러면 가로로 밀려 나간 채로 남습니다. */
   .search {
-    font-size: 16px;
+    font-size: 17px;
   }
 }
