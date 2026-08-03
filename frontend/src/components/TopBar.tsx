@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { api } from "../api";
-import type { Usage } from "../api";
+import type { Me, Usage } from "../api";
 import { tokens } from "../lib/format";
 import { Meter } from "./ui";
 import s from "./TopBar.module.css";
@@ -69,15 +69,15 @@ export function TopBar({
   lectureCount,
   keywordCount,
   runCount,
-  name,
-  isOwner,
+  me,
+  onMeChanged,
 }: {
   usage: Usage | null;
   lectureCount: number | null;
   keywordCount: number | null;
   runCount: number | null;
-  name: string;
-  isOwner: boolean;
+  me: Me;
+  onMeChanged: () => void;
 }) {
   const tucked = useTuckOnScroll();
   const used = usage ? usage.inputTokens + usage.outputTokens : 0;
@@ -145,18 +145,97 @@ export function TopBar({
         </div>
       )}
 
-      <Whoami name={name} isOwner={isOwner} />
+      <Whoami me={me} onChanged={onMeChanged} />
       </div>
     </header>
   );
 }
 
-/** 지금 누가 보고 있는지, 그리고 바꾸기.
+/** 지금 누가 보고 있는지. 누르면 비밀번호 바꾸기와 사용자 바꾸기가 나옵니다.
  *
- *  가족이 한 태블릿을 같이 쓰면 **누구로 들어와 있는지가 안 보이는 것**이
- *  가장 헷갈립니다 — 읽음 표시가 남의 것에 붙고 나서야 알게 됩니다. */
-function Whoami({ name, isOwner }: { name: string; isOwner: boolean }) {
+ *  **처음에는 누르면 곧바로 로그아웃이었습니다.** 그런데 이름 말고는
+ *  계정을 만질 데가 없어서, 비밀번호를 바꾸려면 어디로 가야 하는지 알
+ *  방법이 없었습니다 — 실제로 "비번은 어디서 바꾸는거야?" 를 듣고 고쳤습니다.
+ *  게다가 잘못 누르면 그대로 나가지던 것도 좋지 않았습니다. */
+function Whoami({ me, onChanged }: { me: Me; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+
+  // 바깥을 누르거나 Esc 로 닫습니다. 열어 놓고 다른 데를 눌렀는데 그대로
+  // 떠 있으면 화면을 가립니다.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!box.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  // 첫 비밀번호 그대로면 펼친 채로 시작합니다 — 바꾸라고 띠까지 띄워 놓고
+  // 한 번 더 누르게 할 이유가 없습니다.
+  useEffect(() => {
+    if (me.pinIsDefault) setOpen(true);
+  }, [me.pinIsDefault]);
+
+  return (
+    <div className={s.whoami} ref={box}>
+      <button
+        type="button"
+        className={s.whoBtn}
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        title="계정"
+      >
+        <span className={`${s.whoDot} ${me.isOwner ? s.whoOwner : ""}`} aria-hidden="true">
+          {me.name.slice(0, 1)}
+        </span>
+        <span className={s.whoName}>{me.name}</span>
+      </button>
+
+      {open && <Account me={me} onChanged={onChanged} onClose={() => setOpen(false)} />}
+    </div>
+  );
+}
+
+function Account({
+  me,
+  onChanged,
+  onClose,
+}: {
+  me: Me;
+  onChanged: () => void;
+  onClose: () => void;
+}) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const only4 = (v: string) => v.replace(/\D/g, "").slice(0, 4);
+
+  const save = async () => {
+    if (next.length !== 4) return setError("비밀번호는 숫자 네 자리입니다.");
+    setBusy(true);
+    setError(null);
+    try {
+      await api.setPin(me.hasPin ? current : null, next);
+      setDone(true);
+      setCurrent("");
+      setNext("");
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "바꾸지 못했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const leave = async () => {
     setBusy(true);
@@ -167,19 +246,65 @@ function Whoami({ name, isOwner }: { name: string; isOwner: boolean }) {
   };
 
   return (
-    <div className={s.whoami}>
-      <button
-        type="button"
-        className={s.whoBtn}
-        onClick={leave}
-        disabled={busy}
-        title="사용자 바꾸기 — 이 기기만 나갑니다"
-      >
-        <span className={`${s.whoDot} ${isOwner ? s.whoOwner : ""}`} aria-hidden="true">
-          {name.slice(0, 1)}
+    <div className={s.menu} role="dialog" aria-label="계정">
+      <div className={s.menuHead}>
+        <b>{me.name}</b>
+        <span>{me.isOwner ? "주인" : "식구"}</span>
+      </div>
+
+      <div className={s.menuBody}>
+        <span className={s.menuLabel}>
+          비밀번호 {me.hasPin ? "바꾸기" : "걸기"}
+          {me.pinIsDefault && <em className={s.menuWarn}>지금 0000</em>}
         </span>
-        <span className={s.whoName}>{name}</span>
-      </button>
+
+        {done ? (
+          <p className={s.menuDone}>바꿨습니다.</p>
+        ) : (
+          <>
+            {me.hasPin && (
+              <input
+                className={s.menuInput}
+                type="tel"
+                inputMode="numeric"
+                value={current}
+                onChange={(e) => setCurrent(only4(e.target.value))}
+                placeholder="지금 비밀번호"
+                aria-label="지금 비밀번호"
+              />
+            )}
+            <input
+              className={s.menuInput}
+              type="tel"
+              inputMode="numeric"
+              value={next}
+              onChange={(e) => setNext(only4(e.target.value))}
+              onKeyDown={(e) => e.key === "Enter" && void save()}
+              placeholder="새 비밀번호 네 자리"
+              aria-label="새 비밀번호"
+            />
+            <button
+              type="button"
+              className={s.menuGo}
+              onClick={() => void save()}
+              disabled={busy}
+            >
+              저장
+            </button>
+          </>
+        )}
+
+        {error && <p className={s.menuErr}>{error}</p>}
+      </div>
+
+      <div className={s.menuFoot}>
+        <button type="button" className={s.menuLeave} onClick={() => void leave()} disabled={busy}>
+          사용자 바꾸기
+        </button>
+        <button type="button" className={s.menuClose} onClick={onClose}>
+          닫기
+        </button>
+      </div>
     </div>
   );
 }

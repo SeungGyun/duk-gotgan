@@ -138,6 +138,8 @@
   margin-left: auto;
   display: flex;
   align-items: center;
+  /* 메뉴가 이 상자를 기준으로 붙습니다. */
+  position: relative;
 }
 
 .whoBtn {
@@ -190,6 +192,155 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+
+/* ── 계정 메뉴 ─────────────────────────────────────────────
+   이름 옆에서 바로 열립니다. 비밀번호를 바꿀 데가 여기 말고 없어야
+   "어디서 바꾸지" 를 묻지 않습니다. */
+.menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  width: 232px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.14);
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+
+.menuHead {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.menuHead b {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.menuHead span {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.menuBody {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.menuLabel {
+  font-size: 12.5px;
+  color: var(--muted);
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.menuWarn {
+  font-style: normal;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-radius: 2px;
+  padding: 1px 5px;
+}
+
+.menuInput {
+  width: 100%;
+  /* 16px 미만이면 iOS 가 초점을 받을 때 화면을 확대해 버립니다. */
+  font-size: 16px;
+  font-family: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.menuInput:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.menuGo {
+  padding: 8px 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r);
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.menuGo:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.menuDone {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--pass);
+}
+
+.menuErr {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--fail);
+}
+
+.menuFoot {
+  padding: 9px 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.menuLeave,
+.menuClose {
+  background: none;
+  border: 0;
+  padding: 4px 2px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.menuLeave {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.menuClose {
+  color: var(--muted);
+}
+
+.menuLeave:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 @media (max-width: 860px) {

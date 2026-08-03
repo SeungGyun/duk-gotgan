@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 
 import { api } from "../api";
 import type { Keyword, Person } from "../api";
@@ -31,14 +30,22 @@ type Step =
  *  그러면 맥과 폰이 서로 다른 사람이 되어서, 둘을 묶을 복구 코드가 따로
  *  필요했습니다. 고르게 하면 폰에서도 그냥 자기 이름을 누르면 그만입니다. */
 export function Who() {
-  const nav = useNavigate();
   const people = useAsync(() => api.listPeople(), []);
   const [step, setStep] = useState<Step>({ at: "list" });
 
   const enter = () => {
-    // replace 로 갑니다 — 뒤로 가기를 눌렀을 때 이 화면이 다시 나오면
-    // 이미 들어간 사람에게는 막다른 골목처럼 보입니다.
-    nav("/", { replace: true });
+    // **주소만 바꾸면 안 들어가집니다.** 위쪽 `getMe()` 는 쿠키가 없던
+    // 시점에 401 로 끝난 채로 남아 있어서, 라우터로만 옮기면 그 값이
+    // 그대로라 곧장 이 화면으로 되돌려 보냅니다 — 비밀번호를 맞혔는데
+    // 아무 일도 안 일어난 것처럼 보입니다.
+    //
+    // 다시 부르라고 알려도 소용이 없었습니다. 다시 부르라는 신호는
+    // **다음 렌더에서야** "부르는 중" 이 되는데, 되돌려 보내는 판단은
+    // 그보다 먼저 일어납니다. 그 사이 한 번의 렌더가 틈입니다.
+    //
+    // 그래서 통째로 다시 읽습니다. 로그인은 자주 하는 일이 아니고,
+    // 나가기(사용자 바꾸기)도 같은 방식이라 흐름이 한 가지로 모입니다.
+    window.location.assign("/");
   };
 
   if (people.error) return <ErrorState message={people.error} onRetry={people.reload} />;

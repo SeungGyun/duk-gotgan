@@ -156,8 +156,6 @@ export function Keywords({ list }: { list: ListState }) {
           : undefined
       }
     >
-      <PinPanel />
-
       {/* 추가 폼 — 항상 펼침 */}
       <form
         className={s.add}
@@ -757,108 +755,6 @@ function Others({ mine, onSubscribed }: { mine: Keyword[]; onSubscribed: () => v
           </button>
         ))}
       </div>
-    </Panel>
-  );
-}
-
-
-/** 비밀번호 바꾸기.
- *
- *  **주인은 비울 수 없습니다.** 선택 화면에 주인이 그냥 떠 있어서,
- *  비밀번호가 없으면 같은 공유기에 붙은 누구나 눌러서 주인이 됩니다 —
- *  그러면 "주인만 지금 실행" 이 잠금이 아니라 그냥 표시가 됩니다.
- *
- *  첫 비밀번호(0000) 그대로일 때만 펼친 채로 시작합니다. 이미 바꾼
- *  사람에게는 접혀 있어서 자리를 차지하지 않습니다. */
-function PinPanel() {
-  const me = useAsync(() => api.getMe(), []);
-  const [open, setOpen] = useState(false);
-  const [current, setCurrent] = useState("");
-  const [next, setNext] = useState("");
-  const [done, setDone] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const needsChange = me.data?.pinIsDefault ?? false;
-  const showing = open || needsChange;
-  if (!me.data) return null;
-
-  const only4 = (v: string) => v.replace(/\D/g, "").slice(0, 4);
-
-  const save = async () => {
-    if (next.length !== 4) return setError("비밀번호는 숫자 네 자리입니다.");
-    setBusy(true);
-    setError(null);
-    try {
-      await api.setPin(me.data!.hasPin ? current : null, next);
-      setDone(true);
-      setCurrent("");
-      setNext("");
-      me.reload();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "바꾸지 못했습니다.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (!showing) {
-    return (
-      <button type="button" className={s.pinOpen} onClick={() => setOpen(true)}>
-        비밀번호 {me.data.hasPin ? "바꾸기" : "걸기"}
-      </button>
-    );
-  }
-
-  return (
-    <Panel
-      title={needsChange ? "비밀번호가 아직 0000 입니다" : "비밀번호"}
-      aside={
-        <span className={s.othersHint}>
-          {me.data.isOwner
-            ? "주인은 비밀번호가 있어야 합니다"
-            : "안 걸어도 되지만, 걸면 남이 내 것을 못 봅니다"}
-        </span>
-      }
-    >
-      {done ? (
-        <p className={s.pinDone}>바꿨습니다. 다음에 들어올 때부터 새 비밀번호를 씁니다.</p>
-      ) : (
-        <div className={s.pinForm}>
-          {me.data.hasPin && (
-            <label className={s.fld}>
-              <span className={s.label}>지금 비밀번호</span>
-              <input
-                type="tel"
-                inputMode="numeric"
-                value={current}
-                onChange={(e) => setCurrent(only4(e.target.value))}
-                placeholder="0000"
-              />
-            </label>
-          )}
-          <label className={s.fld}>
-            <span className={s.label}>새 비밀번호</span>
-            <input
-              type="tel"
-              inputMode="numeric"
-              value={next}
-              onChange={(e) => setNext(only4(e.target.value))}
-              onKeyDown={(e) => e.key === "Enter" && void save()}
-              placeholder="숫자 네 자리"
-            />
-          </label>
-          <Button onClick={() => void save()} disabled={busy}>
-            바꾸기
-          </Button>
-          {!needsChange && (
-            <Button onClick={() => setOpen(false)} disabled={busy}>
-              닫기
-            </Button>
-          )}
-        </div>
-      )}
-      {error && <p className={s.othersErr}>{error}</p>}
     </Panel>
   );
 }

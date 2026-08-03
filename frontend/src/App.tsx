@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { api, apiMode } from "./api";
+import type { Me } from "./api";
 import { TopBar } from "./components/TopBar";
 import { Loading } from "./components/ui";
 import { useAsync } from "./hooks/useAsync";
@@ -21,23 +22,18 @@ export default function App() {
   const me = useAsync(() => api.getMe(), []);
 
   // 선택 화면은 로그인 전 화면이라 셸(상단바·집계) 밖에 있습니다.
+  // 다 고르면 `Who` 가 페이지를 통째로 다시 읽습니다 — 아래 `me` 가
+  // 쿠키 없던 시절의 401 을 들고 있어서, 주소만 바꾸면 도로 튕겨납니다.
   if (pathname === "/who") return <Who />;
 
   if (me.loading && !me.data) return <Loading />;
   if (!me.data) return <Navigate to="/who" replace />;
 
-  return <Shell name={me.data.name} isOwner={me.data.isOwner} pinIsDefault={me.data.pinIsDefault} />;
+  return <Shell me={me.data} onMeChanged={me.reload} />;
 }
 
-function Shell({
-  name,
-  isOwner,
-  pinIsDefault,
-}: {
-  name: string;
-  isOwner: boolean;
-  pinIsDefault: boolean;
-}) {
+function Shell({ me, onMeChanged }: { me: Me; onMeChanged: () => void }) {
+  const { name, pinIsDefault } = me;
   // 상단바 카운트·미터는 화면과 무관하게 항상 필요하므로 셸에서 한 번만 부른다
   const usage = useAsync(() => api.getUsage(), []);
   const overview = useAsync(() => api.getOverview(), []);
@@ -60,14 +56,16 @@ function Shell({
       )}
 
       {/* 첫 비밀번호(0000) 그대로면 선택 화면에서 누구나 주인으로 들어갈 수
-          있습니다 — 그러면 "주인만 지금 실행" 이 잠금이 아니라 표시가 됩니다. */}
+          있습니다 — 그러면 "주인만 지금 실행" 이 잠금이 아니라 표시가 됩니다.
+          **어디서 바꾸는지를 여기서 가리킵니다** — 안 그러면 띠만 보고
+          어디로 가야 할지 몰라 그대로 두게 됩니다. */}
       {pinIsDefault && (
         <div className={s.pinNote}>
           <div className={s.mockNoteInner}>
             <b>비밀번호가 0000 입니다</b>
             <span>
               같은 공유기에 붙은 사람 누구나 <b>주인</b>을 눌러 들어올 수 있습니다.
-              키워드 화면에서 바꿔 주세요.
+              오른쪽 위 <b>{name}</b> 을(를) 눌러 바꿔 주세요.
             </span>
           </div>
         </div>
@@ -78,8 +76,8 @@ function Shell({
         lectureCount={overview.data?.totalLectures ?? null}
         keywordCount={keywords.data?.length ?? null}
         runCount={runs.data?.length ?? null}
-        name={name}
-        isOwner={isOwner}
+        me={me}
+        onMeChanged={onMeChanged}
       />
 
       <main>
