@@ -198,7 +198,10 @@ export function Dashboard({
           <Panel title={`${usage.windowHours}시간 토큰`}>
             <div className={s.usageTop}>
               <span className={s.usageBig}>{tokens(used)}</span>
-              {limit && <span className={s.usageCap}>/ {tokens(limit)} 토큰</span>}
+              {/* **상한은 눌러서 바꿉니다.** .env 를 고치고 프로세스를
+                  재시작해야 한다면, 쓰다가 "조금만 올려 보자"를 할 수
+                  없습니다. */}
+              <LimitEditor limit={limit} onSaved={onRetry} />
             </div>
             {limit && (
               <>
@@ -256,5 +259,72 @@ export function Dashboard({
         </div>
       </div>
     </Screen>
+  );
+}
+
+
+/** 토큰 상한을 그 자리에서 고칩니다.
+ *
+ *  **설정 파일이 아니라 화면에 둡니다.** .env 를 고치고 프로세스를
+ *  재시작해야 한다면, 쓰다가 "조금만 올려 보자"를 할 수 없습니다.
+ *  값은 DB 에 남아서 워커와 화면이 같은 것을 봅니다.
+ *
+ *  단위는 **백만(M)** 으로 받습니다. 3,000,000 을 손으로 치게 하면 0 을
+ *  하나 더 넣거나 빠뜨리기 쉽고, 그 실수가 곧바로 사용량 폭주나 정지로
+ *  이어집니다. */
+function LimitEditor({ limit, onSaved }: { limit: number | null; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const start = () => {
+    setDraft(limit ? String(limit / 1_000_000) : "0");
+    setEditing(true);
+  };
+
+  const save = async () => {
+    const m = Number(draft);
+    if (!Number.isFinite(m) || m < 0) return;
+    setBusy(true);
+    try {
+      await api.setTokenLimit(Math.round(m * 1_000_000));
+      onSaved();
+      setEditing(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <button type="button" className={s.limitBtn} onClick={start} title="눌러서 바꾸기">
+        / {limit ? tokens(limit) : "무제한"} 토큰
+      </button>
+    );
+  }
+
+  return (
+    <span className={s.limitEdit}>
+      /
+      <input
+        type="number"
+        step="0.5"
+        min="0"
+        value={draft}
+        autoFocus
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") void save();
+          if (e.key === "Escape") setEditing(false);
+        }}
+      />
+      <span className={s.limitUnit}>M 토큰</span>
+      <Button onClick={() => void save()} disabled={busy}>
+        {busy ? "…" : "저장"}
+      </Button>
+      <button type="button" className={s.limitCancel} onClick={() => setEditing(false)}>
+        취소
+      </button>
+    </span>
   );
 }

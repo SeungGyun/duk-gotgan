@@ -263,3 +263,54 @@
   color: var(--ink-2);
   font-size: 13px;
 }
+
+/* 토큰 상한 — 눌러서 바꿉니다. 평소엔 그냥 글자처럼 보이다가 커서를
+   올렸을 때만 누를 수 있다는 신호를 줍니다. 늘 버튼처럼 보이면 숫자를
+   읽는 데 방해가 됩니다. */
+.limitBtn {
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+.limitBtn:hover {
+  color: var(--accent);
+  border-color: var(--accent-line);
+}
+.limitEdit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.limitEdit input {
+  width: 66px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 3px 7px;
+  text-align: right;
+}
+.limitUnit {
+  font-size: 12px;
+}
+.limitCancel {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.limitCancel:hover {
+  color: var(--ink-2);
+}

@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.db import state
 from app.db.models import UsageLedger, UsageWindow
 from config.settings import settings
 from config.time import now_kst
@@ -30,6 +31,20 @@ class UsageExceeded(Exception):
 # 창을 자르는 기준점. 자정에 맞추면 24가 5로 나눠떨어지지 않아 마지막
 # 칸만 짧아집니다. 고정 기준점에서 일정하게 끊으면 그런 일이 없습니다.
 _ANCHOR = datetime(2026, 1, 1)
+
+# 상한은 **화면에서 바꿉니다.** .env 를 고치고 프로세스를 재시작해야
+# 한다면, 쓰다가 "조금만 올려 보자"를 할 수 없습니다.
+LIMIT_KEY = "usage.token_limit_per_window"
+
+
+def limit(db: Session) -> int:
+    """이번 창의 토큰 상한. 0 이면 무제한."""
+    stored = state.get_int(db, LIMIT_KEY)
+    return settings.token_limit_per_window if stored is None else stored
+
+
+def set_limit(db: Session, value: int | None) -> None:
+    state.set_int(db, LIMIT_KEY, value)
 
 
 def window_start(at: datetime | None = None) -> datetime:
@@ -65,13 +80,13 @@ def _today(db: Session, day: date | None = None) -> UsageLedger:
 
 def check(db: Session, est_tokens: int = 0) -> None:
     """호출 전에 확인합니다. 상한이 0 이면 무제한으로 봅니다."""
-    limit = settings.token_limit_per_window
-    if not limit:
+    cap = limit(db)
+    if not cap:
         return
     row = _window(db)
     used = row.input_tokens + row.output_tokens
-    if used + est_tokens > limit:
-        raise UsageExceeded(used, limit, window_end())
+    if used + est_tokens > cap:
+        raise UsageExceeded(used, cap, window_end())
 
 
 def record(
@@ -110,6 +125,6 @@ def record(
         f"{input_tokens:,}",
         f"{output_tokens:,}",
         f"{used:,}",
-        f"{settings.token_limit_per_window:,}",
+        f"{limit(db):,}",
         f"{window_end():%H:%M}",
     )

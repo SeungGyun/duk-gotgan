@@ -19,7 +19,9 @@ class Settings(BaseSettings):
     # 재면 오전에 다 쓰고 저녁 내내 놀거나 그 반대가 됩니다.
     # 유튜브 쿼터는 여전히 하루 단위입니다(구글이 그렇게 리셋합니다) —
     # 그래서 장부를 갈라 둡니다.
-    token_limit_per_window: int = 20_000_000
+    # 화면에서 바꿀 수 있습니다 — 여기 값은 **아직 정하지 않았을 때의
+    # 기본값**입니다. 실제 값은 app_state 에 있고 usage.limit() 이 읽습니다.
+    token_limit_per_window: int = 3_000_000
     token_window_hours: int = 5
     youtube_unit_limit: int = 10_000
 

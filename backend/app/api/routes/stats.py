@@ -7,6 +7,7 @@
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -134,7 +135,7 @@ def usage(db: Session = Depends(get_db)):
     return {
         "inputTokens": win.input_tokens if win else 0,
         "outputTokens": win.output_tokens if win else 0,
-        "limitTokens": settings.token_limit_per_window or None,
+        "limitTokens": usage_guard.limit(db) or None,
         "windowHours": settings.token_window_hours,
         "windowResetsAt": to_utc_iso(usage_guard.window_end()),
         # 오늘 하루 합계 — 창과 별개로 "오늘 얼마나 했나"를 보려는 값입니다.
@@ -182,6 +183,27 @@ def _now_working(db: Session, state: str) -> dict | None:
     if v is None:
         return None
     return {"title": v.title, "since": to_utc_iso(v.updated_at)}
+
+
+class LimitPatch(BaseModel):
+    """0 이나 null 이면 상한을 풉니다."""
+
+    limitTokens: int | None = None
+
+
+@router.put("/stats/usage/limit", status_code=204)
+def set_limit(patch: LimitPatch, db: Session = Depends(get_db)):
+    """토큰 상한을 바꿉니다.
+
+    **.env 가 아니라 DB 에 둡니다.** 설정 파일을 고치고 프로세스를
+    재시작해야 한다면, 쓰다가 "조금만 올려 보자"를 할 수 없습니다.
+    워커와 API 가 같은 값을 봅니다.
+    """
+    v = patch.limitTokens
+    if v is not None and v < 0:
+        raise ApiError(400, "INVALID_VALUE", "상한은 0 이상이어야 합니다.")
+    # 0 은 "무제한", 값이 없으면 설정 기본값으로 되돌립니다.
+    usage_guard.set_limit(db, v)
 
 
 @router.get("/stats/pipeline")

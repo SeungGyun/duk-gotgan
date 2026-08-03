@@ -105,6 +105,11 @@ export const httpApi: Api = {
 
   getOverview: () => req("/stats/overview"),
   getUsage: () => req("/stats/usage"),
+  setTokenLimit: (limitTokens) =>
+    req<void>("/stats/usage/limit", {
+      method: "PUT",
+      body: JSON.stringify({ limitTokens }),
+    }),
   listRuns: () => req("/runs"),
   getPipeline: () => req("/stats/pipeline"),
   listRunEvents: (runId) => req(`/runs/${runId}/events`),

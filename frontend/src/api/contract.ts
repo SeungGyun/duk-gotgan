@@ -53,6 +53,8 @@ export interface Api {
   // 운영
   getOverview(): Promise<Overview>;
   getUsage(): Promise<Usage>;
+  /** 토큰 상한을 바꿉니다. 0 이면 무제한, null 이면 설정 기본값으로. */
+  setTokenLimit(limitTokens: number | null): Promise<void>;
   listRuns(): Promise<Run[]>;
   /** 지금 파이프라인 상태 — 각 칸의 대기 수와 지금 하는 일. */
   getPipeline(): Promise<Pipeline>;

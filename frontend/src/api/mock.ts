@@ -866,6 +866,10 @@ export const mockApi: Api = {
     if (found) found.isRead = true;
   },
 
+  async setTokenLimit(_limitTokens: number | null) {
+    await delay(60);
+  },
+
   async getOverview(): Promise<Overview> {
     await delay();
     return {

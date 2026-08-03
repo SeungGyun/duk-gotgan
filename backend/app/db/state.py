@@ -31,3 +31,24 @@ def set_time(db: Session, key: str, when: datetime | None) -> None:
     row.value = when.isoformat() if when else ""
     row.updated_at = now_kst()
     db.commit()
+
+
+def get_int(db: Session, key: str) -> int | None:
+    row = db.get(AppState, key)
+    if row is None or not row.value.strip():
+        return None
+    try:
+        return int(row.value)
+    except ValueError:
+        return None
+
+
+def set_int(db: Session, key: str, value: int | None) -> None:
+    """None 이면 지웁니다 — 설정 파일 기본값으로 되돌아갑니다."""
+    row = db.get(AppState, key)
+    if row is None:
+        row = AppState(key=key)
+        db.add(row)
+    row.value = "" if value is None else str(value)
+    row.updated_at = now_kst()
+    db.commit()
