@@ -179,3 +179,16 @@ def test_받아쓰기_뒤에는_버퍼_캐시를_비운다():
     from app.collector import asr as A
 
     assert "mx.clear_cache()" in inspect.getsource(A._run_whisper)
+
+
+def test_메모리가_빡빡하면_묶음_끝에_모델을_내린다():
+    """발견분 보충을 넣으면서 자막 잡이 쉬지 않고 돌게 됐습니다. 그러면
+    위스퍼 1.6GB 를 계속 쥐고 있어 요약 잡이 뜰 자리를 영영 못 찾습니다 —
+    메모리 가드가 매번 미루기만 하니까요."""
+    import inspect
+
+    from app.collector import jobs
+
+    src = inspect.getsource(jobs.transcript_job)
+    assert "resources.memory_tight()" in src
+    assert "asr.release_model()" in src

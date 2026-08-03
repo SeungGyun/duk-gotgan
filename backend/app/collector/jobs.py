@@ -233,6 +233,18 @@ def transcript_job(db: Session) -> JobResult:
     r.label = f"자막 {t['ok']}건" + (f" · 실패 {t['failed']}건" if t["failed"] else "")
     if cooling:
         r.label += " (자막 경로 냉각 중 — 받아쓰기)"
+
+    # **메모리가 빡빡하면 한 묶음 끝나고 모델을 내려놓습니다.**
+    #
+    # 원래는 자막 줄이 비었을 때만 내려놨습니다. 그런데 발견분 보충을
+    # 넣으면서 줄이 늘 차 있게 되어, 이 잡이 쉬지 않고 돌며 위스퍼
+    # 1.6GB 를 계속 쥐게 됐습니다. 그러면 요약 잡이 뜰 자리를 영영 못
+    # 찾습니다 — 메모리 가드가 매번 미루기만 하니까요.
+    #
+    # 다시 올리는 데 몇 초 걸리지만, 요약이 굶는 것보다 낫습니다.
+    if resources.memory_tight():
+        asr.release_model()
+
     _finish(db, run, r)
     return r
 
