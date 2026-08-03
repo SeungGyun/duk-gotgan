@@ -56,6 +56,16 @@ MAX_RETRY = 3
 # 한국어 토큰 추정치. 실제 값은 M4 에서 실측해 바로잡습니다.
 CHARS_PER_TOKEN = 1.7
 
+# 이보다 짧으면 요약을 시도하지 않습니다.
+#
+# 쇼츠를 받기로 하면서 6초짜리 광고까지 들어왔는데, 자막이 20자 남짓이라
+# AI 가 요약을 못 내놓고 실패로 남았습니다. 편당 6만 토큰을 버린 셈입니다.
+# 실제로 요약에 성공한 것들의 최소 자막이 207자였습니다.
+#
+# 길이가 아니라 **글자 수**로 겁니다. 51초짜리가 1,280자로 멀쩡히 요약된
+# 반면 10분짜리가 8자만 나온 경우도 있어서, 영상 길이는 기준이 못 됩니다.
+MIN_SUMMARY_CHARS = 200
+
 
 # 자막 출처 표시. 화면과 판정 근거에 그대로 남습니다 — 어느 경로로 받은
 # 글인지 모르면 요약이 이상할 때 원인을 좁힐 수 없습니다.
@@ -411,6 +421,21 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
             continue
 
         row = store(db, video, fetched)
+
+        if row.char_count < MIN_SUMMARY_CHARS:
+            # 요약할 내용이 없습니다. 사유에 길이와 글자 수를 같이 적어
+            # 두면, 짧은 영상이라 그런지 받아쓰기가 헛돈 것인지 화면에서
+            # 바로 갈립니다.
+            video.state = "FAILED_TRANSCRIPT"
+            video.state_reason = (
+                f"요약할 내용이 없습니다 · {video.duration_sec}초 영상에 {row.char_count}자"
+            )
+            _event(db, video, run_id, "TRANSCRIBING", video.state, False, video.state_reason)
+            db.commit()
+            result["failed"] += 1
+            result["rows"].append((video.title, "✕", video.state_reason))
+            continue
+
         video.state = "TRANSCRIBED"
         video.state_reason = None
         _event(db, video, run_id, "TRANSCRIBING", video.state, True, fetched.source)

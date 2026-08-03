@@ -227,3 +227,23 @@ def test_냉각은_프로세스_밖에_남는다():
     assert not hasattr(T, "_blocked_until"), "전역으로 되돌아가면 안 됩니다"
     src = inspect.getsource(T)
     assert "state.set_time" in src and "COOLDOWN_KEY" in src
+
+
+def test_요약할_내용이_없으면_AI_를_부르지_않는다():
+    """쇼츠를 받기로 하면서 6초짜리 광고까지 들어왔는데, 자막이 20자
+    남짓이라 AI 가 요약을 못 내놓고 실패로 남았습니다. 편당 6만 토큰을
+    버린 셈입니다. 요약에 성공한 것들의 최소 자막은 207자였습니다."""
+    from app.collector.transcript import MIN_SUMMARY_CHARS
+
+    assert 100 <= MIN_SUMMARY_CHARS <= 207
+
+
+def test_기준은_영상_길이가_아니라_글자_수다():
+    """51초짜리가 1,280자로 멀쩡히 요약된 반면 10분짜리가 8자만 나온
+    경우도 있습니다. 영상 길이로는 가릴 수 없습니다."""
+    import inspect
+
+    from app.collector import transcript
+
+    src = inspect.getsource(transcript.transcribe_pending)
+    assert "row.char_count < MIN_SUMMARY_CHARS" in src
