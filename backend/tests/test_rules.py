@@ -159,3 +159,19 @@ def test_지운_키워드는_기준을_쥐지_않는다():
 
     for src in (inspect.getsource(tools._keywords_of), inspect.getsource(runner.review_video)):
         assert "Keyword.archived_at.is_(None)" in src
+
+
+def test_구독한_채널에는_언어_필터를_걸지_않는다():
+    """`defaultLanguage` 는 업로더가 손으로 넣는 값이라 믿을 게 못 됩니다.
+    `박종훈의 지식한방`(한국어 채널)의 영상 27편이 `ja` 로 찍혀 있어
+    통째로 떨어지고 있었습니다. 직접 고른 채널을 메타데이터로 다시
+    심사할 이유가 없습니다 — 조회수 규칙과 같은 이유입니다."""
+    kw = make_keyword(source_type="channel", language="ko")
+    v = evaluate(make_candidate(default_language="ja"), kw)
+    assert v.ok, v.reason
+
+
+def test_검색_키워드에는_언어_필터가_그대로_걸린다():
+    kw = make_keyword(source_type="search", language="ko")
+    v = evaluate(make_candidate(default_language="ja"), kw)
+    assert not v.ok and "언어 불일치" in v.reason

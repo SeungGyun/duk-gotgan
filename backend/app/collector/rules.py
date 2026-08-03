@@ -83,7 +83,17 @@ def evaluate(c: Candidate, kw: Keyword, blocked: set[str] | None = None) -> Verd
 
     # 언어 — 키워드가 ko/en 을 지정했으면 그 언어만. `any` 면 안 봅니다.
     # 유튜브가 언어를 안 알려주는 경우가 많아, 값이 있을 때만 봅니다.
-    if kw.language in ("ko", "en") and c.default_language:
+    #
+    # **구독한 채널에는 적용하지 않습니다.** 조회수와 같은 이유입니다 —
+    # 사용자가 그 채널을 직접 골랐는데 메타데이터로 다시 심사할 이유가
+    # 없습니다. 게다가 `defaultLanguage` 는 업로더가 손으로 넣는 값이라
+    # 믿을 게 못 됩니다: `박종훈의 지식한방`(한국어 채널)의 영상 27편이
+    # `ja` 로 찍혀 있어 통째로 떨어지고 있었습니다.
+    if (
+        kw.source_type != "channel"
+        and kw.language in ("ko", "en")
+        and c.default_language
+    ):
         if not c.default_language.lower().startswith(kw.language):
             return Verdict(False, f"언어 불일치 · {c.default_language} (기준 {kw.language})")
 
