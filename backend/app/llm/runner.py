@@ -302,6 +302,12 @@ _TRANSIENT = (
     "process exited",
     "cannot allocate",
     "out of memory",
+    # agy 의 catch-all. 뒤에는 서버가 준 `INVALID_ARGUMENT (code 400)` 이
+    # 들어 있는데, **자막 크기와 상관이 없습니다** — 성공한 것과 실패한 것의
+    # 크기 분포가 겹칩니다(중앙값 5,342 vs 5,631). 같은 영상을 다시 돌리면
+    # 그대로 됩니다. 클로드의 `returned an error result` 와 같은 성격이라
+    # 같은 방식으로 둡니다. 이걸 탈락으로 적었더니 12분에 28편이 날아갔습니다.
+    "agent execution terminated",
 )
 
 

@@ -69,3 +69,16 @@ def test_회사가_안_받으면_그_자리에서_접는다():
     src = inspect.getsource(runner.review_pending)
     assert "_provider_down(run.error)" in src
     assert src.index("_provider_down(run.error)") < src.index("if streak[1] >= STOP_AFTER")
+
+
+def test_agy_의_catch_all_은_탈락이_아니다():
+    """`Agent execution terminated due to error.` 안에는 서버가 준
+    `INVALID_ARGUMENT (code 400)` 이 들어 있습니다. **자막 크기와 상관이
+    없습니다** — 성공한 것과 실패한 것의 크기 분포가 겹칩니다(중앙값
+    5,342 vs 5,631). 같은 영상을 다시 돌리면 그대로 됩니다.
+
+    이걸 탈락으로 적었더니 12분에 28편이 날아갔습니다."""
+    assert _is_transient("Agent execution terminated due to error.")
+    assert _is_transient(
+        "Agent execution terminated due to error. — INVALID_ARGUMENT (code 400)"
+    )
