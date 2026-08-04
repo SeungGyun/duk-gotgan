@@ -151,14 +151,17 @@ def test_지운_키워드는_기준을_쥐지_않는다():
     키워드가 데려온 영상들이 계속 80점으로 판정돼 58점짜리가 탈락했습니다.
     살아 있는 키워드 기준은 45점이었는데도요.
 
-    여기서는 쿼리 조건만 잠급니다 — 판정과 프롬프트 양쪽이 같은 집합을
-    봐야 하는데, 한쪽만 고치면 AI 가 요약을 생략해 조용히 어긋납니다."""
+    여기서는 쿼리 조건만 잠급니다. 이 목록은 `workspace.prepare` 를 거쳐
+    프롬프트의 `search_keywords` 로 들어갑니다 — 지운 키워드가 섞이면
+    AI 가 엉뚱한 기준으로 관련도를 재고, 그 값이 `red_flags` 에 남습니다.
+
+    담을지 말지는 이제 키워드 기준을 보지 않습니다(policy.should_publish 는
+    요약이 나왔는지만 봅니다). 그래서 잠글 곳이 한 군데로 줄었습니다."""
     import inspect
 
-    from app.llm import runner, tools
+    from app.llm import runner
 
-    for src in (inspect.getsource(tools._keywords_of), inspect.getsource(runner.review_video)):
-        assert "Keyword.archived_at.is_(None)" in src
+    assert "Keyword.archived_at.is_(None)" in inspect.getsource(runner.review_video)
 
 
 def test_구독한_채널에는_언어_필터를_걸지_않는다():

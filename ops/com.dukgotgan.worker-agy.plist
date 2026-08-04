@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.dukgotgan.worker-agy</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>/Users/layers/git/duk-gotgan/ops/worker-agy.sh</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <!-- 죽자마자 다시 띄우면 도커가 안 뜬 동안 로그가 초당 몇 줄씩 쌓입니다 -->
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>WorkingDirectory</key><string>/Users/layers/git/duk-gotgan/backend</string>
+  <key>StandardOutPath</key><string>/Users/layers/Library/Logs/dukgotgan/worker-agy.log</string>
+  <key>StandardErrorPath</key><string>/Users/layers/Library/Logs/dukgotgan/worker-agy.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- agy 는 ~/.local/bin 에 있습니다. launchd 의 기본 PATH 에는 없어서
+         worker-agy.sh 에서 한 번 더 붙이지만, 여기에도 둡니다. -->
+    <key>PATH</key><string>/Users/layers/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>LANG</key><string>ko_KR.UTF-8</string>
+    <key>REVIEW_PROVIDER</key><string>antigravity</string>
+  </dict>
+</dict>
+</plist>

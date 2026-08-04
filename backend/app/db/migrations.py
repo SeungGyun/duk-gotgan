@@ -137,10 +137,12 @@ def ensure_schema(engine: Engine) -> None:
             conn.execute(
                 text(
                     "CREATE TABLE usage_window ("
-                    " start DATETIME NOT NULL PRIMARY KEY,"
+                    " start DATETIME NOT NULL,"
+                    " provider VARCHAR(32) NOT NULL DEFAULT 'claude',"
                     " input_tokens BIGINT NOT NULL DEFAULT 0,"
                     " output_tokens BIGINT NOT NULL DEFAULT 0,"
-                    " llm_calls INT NOT NULL DEFAULT 0)"
+                    " llm_calls INT NOT NULL DEFAULT 0,"
+                    " PRIMARY KEY (start, provider))"
                 )
             )
             logger.info("[db] usage_window created")
@@ -173,6 +175,47 @@ def ensure_schema(engine: Engine) -> None:
                 text("CREATE INDEX ix_lectures_read ON lectures (is_hidden, read_at)")
             )
             logger.info("[db] ix_lectures_read created")
+
+        # ── 요약 워커를 둘 이상 띄우기 위한 소유권 ────────────────
+        #
+        # 지금까지는 요약 트랙에 소비자가 하나뿐이라 상태만으로 충분했습니다.
+        # 회사를 나눠 맡기면 "누가 붙들었나"를 값으로 남겨야 합니다 —
+        # 안 그러면 한쪽이 도는 중인 영상을 다른 쪽이 좀비로 보고 회수해
+        # 같은 영상을 두 번 요약합니다.
+        # **컬럼마다 따로 봅니다.** 첫 번째만 확인하고 둘을 묶어 넣었더니,
+        # 워커가 도는 중에 `ALTER` 가 메타데이터 락을 기다리다 끊겨 하나만
+        # 들어간 상태가 됐습니다. 그러면 다음 기동부터 "이미 있다"고 보고
+        # 나머지를 영영 건너뜁니다.
+        if not _column_exists(conn, "videos", "claimed_by"):
+            conn.execute(text("ALTER TABLE videos ADD COLUMN claimed_by VARCHAR(64) NULL"))
+            logger.info("[db] videos.claimed_by added")
+        if not _column_exists(conn, "videos", "claimed_at"):
+            conn.execute(text("ALTER TABLE videos ADD COLUMN claimed_at DATETIME NULL"))
+            # 이미 REVIEWING 으로 붙들려 있던 것은 붙든 시각을 모릅니다.
+            # updated_at 을 씁니다 — 그때 상태를 세운 시각이라 가장 가깝고,
+            # 조금 틀려도 회수 시점만 앞뒤로 밀릴 뿐입니다.
+            conn.execute(
+                text(
+                    "UPDATE videos SET claimed_at = updated_at"
+                    " WHERE state IN ('REVIEWING', 'TRANSCRIBING')"
+                )
+            )
+            logger.info("[db] videos.claimed_at added")
+        if not _index_exists(conn, "videos", "ix_videos_claimed"):
+            conn.execute(text("CREATE INDEX ix_videos_claimed ON videos (state, claimed_at)"))
+            logger.info("[db] ix_videos_claimed created")
+
+        # 토큰 창을 회사별로 가릅니다. 기존 행은 전부 클로드 것입니다.
+        if not _column_exists(conn, "usage_window", "provider"):
+            conn.execute(
+                text(
+                    "ALTER TABLE usage_window"
+                    " ADD COLUMN provider VARCHAR(32) NOT NULL DEFAULT 'claude',"
+                    " DROP PRIMARY KEY,"
+                    " ADD PRIMARY KEY (start, provider)"
+                )
+            )
+            logger.info("[db] usage_window.provider added")
 
         _seed_owner(conn)
 

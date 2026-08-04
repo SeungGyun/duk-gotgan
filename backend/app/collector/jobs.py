@@ -45,7 +45,11 @@ logger = logging.getLogger(__name__)
 
 DISCOVER_LOCK = "dukgotgan:discover"
 TRANSCRIPT_LOCK = "dukgotgan:transcript"
-REVIEW_LOCK = "dukgotgan:review"
+# **요약 락은 회사마다 다릅니다.** 이름이 같으면 클로드 워커와 안티그래비티
+# 워커가 번갈아 하나씩만 돌아, 나눈 의미가 없습니다. 갈라 두면 둘이 같이
+# 돌고, 같은 회사 안에서는 여전히 하나만 돕니다 — 좀비 회수가 자기 회사의
+# 진행 중인 작업을 건드리지 않는 근거가 이 직렬화입니다 (runner.recover_zombies).
+REVIEW_LOCK = f"dukgotgan:review:{settings.review_provider}"
 CLEANUP_LOCK = "dukgotgan:cleanup"
 
 # 한 번에 받아쓸 편수. 시간 예산 대신 편수로 끊습니다 — 이제 검토가 뒤에서

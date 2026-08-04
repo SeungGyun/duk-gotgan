@@ -61,6 +61,40 @@ class Settings(BaseSettings):
     # ── AI 검토 (M4) ────────────────────────────────────────
     # 인증은 구독입니다 — ANTHROPIC_API_KEY 를 쓰지 않습니다 (ROADMAP §3-9).
     review_model: str = "claude-opus-5"
+    # **누가 요약하는가.** 요약 워커를 여러 개 띄워 서로 다른 회사 모델에
+    # 나눠 맡길 수 있게 하는 값입니다. 프로세스마다 다르게 주고 띄웁니다.
+    #
+    #   REVIEW_PROVIDER=claude       python -m scripts.worker --only review
+    #   REVIEW_PROVIDER=antigravity  python -m scripts.worker --only review
+    #
+    # 세 군데를 가릅니다 — 워커 락(같으면 둘이 번갈아 하나씩만 돕니다),
+    # 토큰 장부(합치면 한쪽이 상한을 채워 멀쩡한 쪽까지 멈춥니다),
+    # 그리고 좀비 회수 범위(runner.recover_zombies).
+    review_provider: str = "claude"
+
+    # ── 안티그래비티 (두 번째 회사) ──────────────────────────
+    # 구독 사용량이 모자라 요약 줄이 286건까지 밀렸습니다. 다른 회사를
+    # 붙여 같은 줄에서 나눠 가져갑니다 (AI-PIPELINE §8.2.1).
+    #
+    # 클로드와 달리 SDK 가 아니라 **CLI 한 번 실행**입니다. 결과는 도구가
+    # 아니라 `--json-schema` 구조화 출력으로 받습니다.
+    agy_bin: str = "agy"
+    # effort 가 모델 이름에 붙어 있습니다 (`agy models` 참고). 그래서
+    # --effort 를 같이 주면 충돌합니다.
+    agy_model: str = "gemini-3.1-pro-high"
+    # CLI 기본값이 5분인데, 60분 강의 자막을 다 읽고 요약을 쓰기에는
+    # 빠듯합니다. 클로드 쪽 실측이 편당 2~5분이라 넉넉히 잡습니다.
+    agy_timeout_sec: int = 900
+    # **자막은 제3자가 통제하는 텍스트입니다.** 클로드 경로는 도구를
+    # Read 하나로 좁히고 경로 가드를 걸지만(llm/guard.py), agy 에는 그런
+    # 손잡이가 없습니다 — 실측에서 작업 폴더 밖의 `.env` 를 그대로 읽어
+    # 냈습니다. macOS 샌드박스로 홈 디렉터리를 통째로 막습니다.
+    agy_sandbox: bool = True
+
+    @property
+    def active_review_model(self) -> str:
+        """지금 회사가 실제로 쓰는 모델. `evaluations.model` 에 적힙니다."""
+        return self.agy_model if self.review_provider == "antigravity" else self.review_model
     # 판정 위주 작업이라 최고 강도가 필요 없습니다 (ROADMAP §3-5)
     review_effort: str = "medium"
     review_max_turns: int = 15

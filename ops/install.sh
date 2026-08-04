@@ -11,7 +11,9 @@
 set -u
 HERE="${0:A:h}"
 AGENTS="$HOME/Library/LaunchAgents"
-SERVICES=(mysql api worker)
+# worker-agy 는 두 번째 요약 워커입니다(안티그래비티). `agy` 가 없으면
+# 기동 스크립트가 스스로 빠지므로, 안 쓰는 사람이 있어도 그냥 둡니다.
+SERVICES=(mysql api worker worker-agy)
 DOMAIN="gui/$(id -u)"
 
 mkdir -p "$AGENTS" "$HOME/Library/Logs/dukgotgan"

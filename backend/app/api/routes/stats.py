@@ -26,7 +26,6 @@ from app.db.models import (
     PipelineEvent,
     Transcript,
     UsageLedger,
-    UsageWindow,
     User,
     UserKeyword,
     Video,
@@ -137,13 +136,16 @@ def overview(db: Session = Depends(get_db), user: User = Depends(current_user)):
 def usage(db: Session = Depends(get_db), _: User = Depends(current_user)):
     today = now_kst().date()
     ledger = db.get(UsageLedger, today)
-    win = db.get(UsageWindow, usage_guard.window_start())
+    # 창은 회사별로 나뉘어 있습니다. 미터는 "이번 창에 얼마나 썼나"를 보는
+    # 곳이라 합쳐서 보여 줍니다 — 상한도 회사별로 다르게 걸 수 있지만,
+    # 화면에서 바꾸는 것은 공용 값입니다 (llm/usage.py 의 limit).
+    win_input, win_output = usage_guard.window_totals(db)
 
     # **토큰은 5시간 창, 유튜브는 하루** — 주기가 다릅니다. 한 숫자로
     # 합치면 둘 중 하나는 틀린 기준으로 보이게 됩니다.
     return {
-        "inputTokens": win.input_tokens if win else 0,
-        "outputTokens": win.output_tokens if win else 0,
+        "inputTokens": win_input,
+        "outputTokens": win_output,
         "limitTokens": usage_guard.limit(db) or None,
         "windowHours": settings.token_window_hours,
         "windowResetsAt": to_utc_iso(usage_guard.window_end()),

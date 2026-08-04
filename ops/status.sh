@@ -1,8 +1,8 @@
 #!/bin/zsh
-# 세 서비스가 살아 있는지 한눈에.
+# 서비스가 살아 있는지 한눈에.
 set -u
 print "서비스"
-for s in mysql api worker; do
+for s in mysql api worker worker-agy; do
   line=$(launchctl list 2>/dev/null | grep "com.dukgotgan.$s")
   if [[ -z "$line" ]]; then
     print "  ✗ $s — 등록되지 않았습니다 (ops/install.sh)"

@@ -265,11 +265,19 @@ class UsageWindow(Base):
 
     창의 시작 시각을 키로 씁니다. 자정에 맞추면 24가 5로 나눠떨어지지
     않아 마지막 칸만 짧아지므로, 고정 기준점에서 5시간씩 끊습니다.
+
+    **회사별로 칸을 나눕니다.** 상한은 각 구독에 따로 걸리는데 한 줄에
+    합치면, 한쪽이 많이 쓴 것 때문에 아직 여유가 있는 쪽까지 멈춥니다 —
+    토큰이 모자라서 회사를 늘렸는데 정반대가 됩니다. 일일 장부
+    (`usage_ledger`)는 "오늘 얼마나 했나"를 보는 곳이라 합친 채로 둡니다.
     """
 
     __tablename__ = "usage_window"
 
     start: Mapped[datetime] = mapped_column(DateTime, primary_key=True)
+    provider: Mapped[str] = mapped_column(
+        String(32), primary_key=True, nullable=False, default="claude"
+    )
     input_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     output_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     llm_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -303,6 +311,16 @@ class Video(Base):
     # DISCOVERED | RULE_PASSED | TRANSCRIBED | REVIEWING | PUBLISHED | REJECTED | FAILED
     state: Mapped[str] = mapped_column(String(20), nullable=False, default="DISCOVERED")
     state_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # **누가 이 영상을 붙들고 있는가.** 요약 워커를 둘 이상 띄우기 위한
+    # 값입니다 — `<provider>:<host>:<pid>` 꼴이고, 잡을 때만 채워집니다.
+    #
+    # 상태만으로는 부족합니다. 상태는 "누군가 작업 중"까지만 말해 주는데,
+    # 워커가 둘이면 **내가 잡은 것인지**를 알아야 합니다. 결과를 저장할 때
+    # (llm/tools.py) 와 좀비를 회수할 때(llm/runner.py) 이 값을 봅니다.
+    claimed_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # 붙든 시각. `updated_at` 과 갈라 둡니다 — updated_at 은 어떤 수정에도
+    # 움직여서, "얼마나 오래 붙들고 있나"의 기준이 못 됩니다.
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     discovered_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=now_kst)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=now_kst, onupdate=now_kst
@@ -312,6 +330,8 @@ class Video(Base):
         Index("ix_videos_state_discovered", "state", "discovered_at"),
         # 좀비 회수: 오래 REVIEWING 인 항목 조회
         Index("ix_videos_state_updated", "state", "updated_at"),
+        # 좀비 회수는 이제 "누가 언제 붙들었나"로 봅니다
+        Index("ix_videos_claimed", "state", "claimed_at"),
     )
 
 
