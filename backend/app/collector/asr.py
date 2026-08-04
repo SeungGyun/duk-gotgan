@@ -162,15 +162,39 @@ def release_model() -> None:
         logger.warning("[asr] 모델 해제 실패 (%s) — 그냥 둡니다", type(e).__name__)
 
 
+def _whisper_language(language: str) -> str | None:
+    """위스퍼가 아는 코드만 넘깁니다. 모르면 `None` — 스스로 알아냅니다.
+
+    **위스퍼의 표를 직접 물어봅니다.** 우리가 목록을 들고 있으면 그 목록에
+    없는 코드가 새로 오는 날 또 죽습니다. 실제로 유튜브가 `zxx`("언어적
+    내용 없음")를 내려보냈고, 두 글자로 잘린 `zx` 가 그대로 넘어가
+    `ValueError: Unsupported language: zx` 로 받아쓰기 잡이 죽었습니다.
+
+    자동 감지가 조금 느리지만, 한 편도 못 받아쓰는 것보다 낫습니다.
+    """
+    if not language:
+        return None
+    try:
+        from mlx_whisper.tokenizer import LANGUAGES, TO_LANGUAGE_CODE
+    except ImportError:  # 위스퍼가 없으면 판단할 근거도 없습니다
+        return language
+    if language in LANGUAGES or language in TO_LANGUAGE_CODE:
+        return language
+    logger.warning("[asr] '%s' 는 위스퍼가 모르는 언어입니다 — 자동 감지로 넘깁니다", language)
+    return None
+
+
 def _run_whisper(path: str, language: str) -> AsrResult:
     import mlx.core as mx
     import mlx_whisper
+
+    asked = _whisper_language(language)
 
     t0 = time.time()
     res = mlx_whisper.transcribe(
         path,
         path_or_hf_repo=settings.asr_model,
-        language=language,
+        language=asked,
         word_timestamps=False,
         verbose=None,
     )
@@ -197,7 +221,9 @@ def _run_whisper(path: str, language: str) -> AsrResult:
         elapsed, audio_sec / 60, audio_sec / max(elapsed, 0.1), len(segments),
     )
     return AsrResult(
-        language=res.get("language") or language,
+        # 자동 감지로 넘겼으면 감지된 것을 씁니다. `zx` 같은 가짜 코드를
+        # 그대로 되돌려 적으면 다음 단계가 또 그것을 믿습니다.
+        language=res.get("language") or asked or "ko",
         segments=segments,
         elapsed_sec=elapsed,
         audio_sec=audio_sec,

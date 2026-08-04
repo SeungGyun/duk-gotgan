@@ -247,3 +247,37 @@ def test_기준은_영상_길이가_아니라_글자_수다():
 
     src = inspect.getsource(transcript.transcribe_pending)
     assert "row.char_count < MIN_SUMMARY_CHARS" in src
+
+
+def test_언어가_아닌_코드는_위스퍼에_넘기지_않는다():
+    """유튜브가 `zxx`("언어적 내용 없음")를 내려보냅니다. 두 글자로 자르면
+    `zx` 가 되어 진짜 언어 코드처럼 보이고, 그대로 넘기면
+    `ValueError: Unsupported language: zx` 로 받아쓰기 잡이 통째로 죽습니다 —
+    영상 한 편 때문에 그 사이클의 나머지까지 멈췄습니다."""
+    from app.collector.transcript import _pick_languages
+
+    class V:
+        default_language = "zxx"
+
+    assert _pick_languages(V()) == ["ko", "en"], "가짜 코드는 무시하고 기본값으로"
+
+    class V2:
+        default_language = "und"
+
+    assert _pick_languages(V2()) == ["ko", "en"]
+
+    # 진짜 언어는 그대로 앞에 섭니다
+    class V3:
+        default_language = "ja"
+
+    assert _pick_languages(V3())[0] == "ja"
+
+
+def test_위스퍼가_모르는_언어는_자동_감지로_넘긴다():
+    """목록으로 막는 것만으로는 부족합니다 — 우리가 모르는 코드가 새로
+    오는 날 또 죽습니다. 위스퍼 자신의 표에 물어봅니다."""
+    from app.collector.asr import _whisper_language
+
+    assert _whisper_language("ko") == "ko"
+    assert _whisper_language("zx") is None, "모르는 코드는 None (자동 감지)"
+    assert _whisper_language("") is None

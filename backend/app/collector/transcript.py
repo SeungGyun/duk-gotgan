@@ -87,10 +87,24 @@ class Fetched:
     segments: list[dict]  # [{start, dur, text}]
 
 
+# 언어가 아닌 언어 코드들. 유튜브가 실제로 내려보냅니다.
+#
+#   zxx  "언어적 내용 없음" (음악·효과음만 있는 영상)
+#   und  미정   mul  다국어   mis  분류 안 됨
+#
+# 두 글자로 자르면 `zxx` 가 `zx` 가 되어 진짜 언어 코드처럼 보입니다.
+# 이걸 위스퍼에 넘겨 `ValueError: Unsupported language: zx` 로 받아쓰기
+# 잡이 통째로 죽었습니다 — 한 영상 때문에 그 사이클의 나머지까지 멈췄습니다.
+NOT_A_LANGUAGE = {"zx", "zxx", "un", "und", "mul", "mu", "mis", "mi"}
+
+
 def _pick_languages(video: Video) -> list[str]:
     """어느 언어 자막을 먼저 찾을지. 영상 언어를 알면 그것부터."""
     langs = ["ko", "en"]
-    lang = (video.default_language or "").lower()[:2]
+    raw = (video.default_language or "").lower()
+    if raw.split("-")[0] in NOT_A_LANGUAGE:
+        return langs
+    lang = raw[:2]
     if lang and lang not in langs:
         langs.insert(0, lang)
     elif lang == "en":
