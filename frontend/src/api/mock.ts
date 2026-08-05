@@ -1042,6 +1042,7 @@ export const mockApi: Api = {
           calls: 7,
           limitTokens: 12_000_000,
           hasOwnLimit: true,
+          restingUntil: null,
         },
         {
           provider: "antigravity",
@@ -1050,6 +1051,8 @@ export const mockApi: Api = {
           calls: 2,
           limitTokens: 8_000_000,
           hasOwnLimit: false,
+          // 막혀서 쉬는 중인 모습도 화면에서 볼 수 있게 해 둡니다.
+          restingUntil: new Date(Date.now() + 12 * 60_000).toISOString(),
         },
       ],
       limitTokens: 20_000_000,

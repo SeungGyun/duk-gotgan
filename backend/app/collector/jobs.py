@@ -37,6 +37,7 @@ from app.collector.schedule import due_keywords
 from app.collector.transcript import blocked_until, transcribe_pending
 from app.collector.youtube import YouTubeError
 from app.db.models import CrawlRun, Evaluation, Keyword, PipelineEvent, Video
+from app.llm import pace, usage
 from app.llm.runner import recover_zombies, review_pending
 from config.settings import settings
 from config.time import now_kst
@@ -263,6 +264,13 @@ def review_due(db: Session) -> tuple[bool, int, str]:
     )
     if not waiting:
         return False, 0, ""
+
+    # **쉬는 중이면 여기서 끝냅니다.** 막힌 줄 알면서 1분마다 다시
+    # 두드리던 것을 멈추는 자리입니다 (llm/pace.py).
+    resting = pace.resume_at(db, settings.review_provider)
+    if resting is not None:
+        return False, waiting, f"{resting:%H:%M} 까지 쉬는 중"
+
     if waiting >= REVIEW_BATCH:
         return True, waiting, f"{waiting}건 모임"
 
@@ -291,6 +299,18 @@ async def review_job(db: Session) -> JobResult:
     # 뒤 재시도하면 그때까지 쓴 시간이 버려지고 실패 기록도 남습니다.
     if resources.memory_tight():
         logger.info("[review] 메모리가 빡빡해 이번 차례는 건너뜁니다 (대기 %d건)", waiting)
+        return r
+
+    # **상한은 실행 기록을 만들기 전에 봅니다.**
+    #
+    # 예전에는 `review_pending` 안에서 영상마다 확인했습니다. 그래서 창의
+    # 토큰을 다 쓴 뒤에도 매 틱 실행 기록이 하나씩 생기고 "상한에 닿았습니다"
+    # 가 세 줄씩 쌓였습니다 — 아무것도 안 하면서요. 창이 언제 바뀌는지는
+    # 정확히 아니까, 그때까지 쉬고 기록도 남기지 않습니다.
+    try:
+        usage.check(db)
+    except usage.UsageExceeded as e:
+        pace.rest_until(db, settings.review_provider, usage.window_end(), str(e))
         return r
 
     run = _start(db, "review", "scheduled", f"요약 — 대기 {waiting}건 ({why})")

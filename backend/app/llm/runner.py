@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.collector import queue
 from app.db.models import Keyword, PipelineEvent, Transcript, Video, VideoKeyword
-from app.llm import agy, usage, workspace
+from app.llm import agy, pace, usage, workspace
 from app.llm.guard import make_path_guard, make_pretool_hook
 from app.llm.store import ReviewOutcome
 from app.llm.tools import build_server
@@ -389,7 +389,10 @@ async def review_pending(
         try:
             usage.check(db)
         except usage.UsageExceeded as e:
-            logger.warning("[review] %s", e)
+            # 사이클 도중에 창이 찰 수 있습니다. 창이 언제 바뀌는지는
+            # 정확히 아니까, 그때까지 쉬어 두고 다음 틱부터는 여기까지
+            # 오지도 않게 합니다 (llm/pace.py).
+            pace.rest_until(db, settings.review_provider, e.resets_at, str(e))
             runs.append(ReviewRun(video_id=video.id, title=video.title, error=str(e)))
             break
 
@@ -410,6 +413,9 @@ async def review_pending(
 
         if run.ok:
             streak = ("", 0)
+            # **누적을 지웁니다.** 안 지우면 어제 몇 번 막혔던 것 때문에
+            # 오늘 첫 실패가 곧바로 30분짜리 휴식이 됩니다.
+            pace.clear(db, settings.review_provider)
         else:
             same = _streak_key(run.error)
             streak = (same, streak[1] + 1) if same == streak[0] else (same, 1)
@@ -440,10 +446,10 @@ async def review_pending(
             # `_TRANSIENT`) 그대로 나가면 다음 사이클에 다시 봅니다.
             down = _provider_down(run.error)
             if down:
-                logger.error(
-                    "[review] %s 쪽이 지금 안 받습니다 (%s) — 이번 사이클은 접습니다: %s",
-                    settings.review_provider, down, run.error,
-                )
+                # **언제 풀릴지 모릅니다.** 쿼터가 떨어진 상대에게 1분마다
+                # 두드리는 것은 풀리는 데 도움이 안 되고, 상대가 더 세게
+                # 막는 빌미가 됩니다 — 쉬는 시간을 한 칸씩 늘립니다.
+                pace.back_off(db, settings.review_provider, f"{down} · {run.error}"[:200])
                 break
 
             if mine:

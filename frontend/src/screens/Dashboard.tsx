@@ -415,6 +415,12 @@ function ProviderRow({
         </span>
         <span>요약 {p.calls}건</span>
       </div>
+      {/* **쉬는 중이면 말해 줍니다.** 막혔을 때 1분마다 다시 두드리던 것을
+          멈췄더니 로그도 조용해졌습니다 — 그만큼 여기서 보여야, 왜 아무것도
+          안 하는지를 로그를 뒤져 알아내지 않아도 됩니다. */}
+      {p.restingUntil && (
+        <p className={s.resting}>쉬는 중 — {when(p.restingUntil)} 에 다시 봅니다</p>
+      )}
       {err && (
         <p className={s.providerErr} role="alert">
           {err}

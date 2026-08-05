@@ -332,6 +332,11 @@ export interface ProviderUsage {
   limitTokens: number | null;
   /** 이 회사만 따로 걸어 둔 값인가. false 면 공용 값을 물려받은 것입니다. */
   hasOwnLimit: boolean;
+  /** 막혀서 쉬는 중이면 언제까지인지. null 이면 돌고 있습니다.
+   *
+   *  막혔을 때 로그를 조용하게 만들었으니 화면에서는 보여야 합니다 —
+   *  안 그러면 "왜 아무것도 안 하지"를 로그를 뒤져 알아내야 합니다. */
+  restingUntil: string | null;
 }
 
 export interface Usage {

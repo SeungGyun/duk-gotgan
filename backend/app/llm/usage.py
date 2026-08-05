@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.db import state
 from app.db.models import UsageLedger, UsageWindow
 from config.settings import settings
-from config.time import now_kst
+from config.time import now_kst, to_utc_iso
 
 logger = logging.getLogger(__name__)
 
@@ -125,9 +125,21 @@ def window_by_provider(db: Session) -> list[dict]:
                 # 이 회사만 따로 걸어 둔 값이 있는가. 없으면 공용 값을
                 # 물려받은 것이라, 화면이 "공용" 이라고 알려 줄 수 있습니다.
                 "hasOwnLimit": state.get_int(db, f"{LIMIT_KEY}:{name}") is not None,
+                # **쉬는 중이면 언제까지인지.** 막혔을 때 로그를 조용하게
+                # 만들었으니(llm/pace.py), 그만큼 화면에서는 보여야 합니다 —
+                # 안 그러면 "왜 아무것도 안 하지"를 로그를 뒤져 알아내야 합니다.
+                "restingUntil": _resting_iso(db, name),
             }
         )
     return out
+
+
+def _resting_iso(db: Session, provider: str) -> str | None:
+    # **다른 시각들과 같은 방식으로 냅니다.** 우리 시각은 KST naive 라
+    # 그냥 isoformat 하면 브라우저가 자기 표준시로 읽어 9시간 어긋납니다.
+    from app.llm import pace
+
+    return to_utc_iso(pace.resume_at(db, provider))
 
 
 def _today(db: Session, day: date | None = None) -> UsageLedger:
