@@ -413,3 +413,95 @@ def test_상단바_숫자와_목록이_같은_것을_센다(client, db):
 
     login(client, 아내)
     assert client.get(f"{API}/stats/overview").json()["totalLectures"] == len(titles(client))
+
+
+# ── 회사별 토큰 상한 ───────────────────────────────────────────
+
+
+def test_회사별_사용량이_따로_보인다(client, db):
+    """합쳐 놓으면 어느 쪽이 상한에 닿아 멈췄는지 알 수 없습니다 — 실제로
+    한쪽 쿼터가 떨어졌는데 화면에는 "많이 썼네"로만 보였습니다."""
+    from app.db.models import UsageWindow
+    from app.llm import usage as usage_guard
+
+    주인 = a_user(db, "주인", owner=True)
+    start = usage_guard.window_start()
+    db.add(UsageWindow(start=start, provider="claude", input_tokens=100, output_tokens=10))
+    db.add(UsageWindow(start=start, provider="antigravity", input_tokens=7, output_tokens=3))
+    db.commit()
+
+    login(client, 주인)
+    body = client.get(f"{API}/stats/usage").json()
+
+    by = {p["provider"]: p for p in body["providers"]}
+    assert by["claude"]["inputTokens"] == 100
+    assert by["antigravity"]["outputTokens"] == 3
+    # 두 회사 다 나와야 합니다 — 아직 안 쓴 회사도 상한을 걸 수 있어야 합니다
+    assert set(by) >= {"claude", "antigravity"}
+    # 합계는 여전히 맞습니다 (상단 미터가 이걸 씁니다)
+    assert body["inputTokens"] == 107
+
+
+def test_회사별_상한은_따로_걸린다(client, db):
+    """한 값으로 묶으면 한쪽이 많이 쓴 것 때문에 아직 여유가 있는 쪽까지
+    멈춥니다 — 토큰이 모자라서 회사를 늘렸는데 정반대가 됩니다."""
+    from app.llm import usage as usage_guard
+
+    주인 = a_user(db, "주인", owner=True)
+    login(client, 주인)
+
+    r = client.put(
+        f"{API}/stats/usage/limit", json={"limitTokens": 9_000_000, "provider": "antigravity"}
+    )
+    assert r.status_code == 204, r.text
+
+    body = client.get(f"{API}/stats/usage").json()
+    by = {p["provider"]: p for p in body["providers"]}
+    assert by["antigravity"]["limitTokens"] == 9_000_000
+    assert by["antigravity"]["hasOwnLimit"] is True
+    # 건드리지 않은 쪽은 공용 값을 그대로 씁니다
+    assert by["claude"]["hasOwnLimit"] is False
+    assert by["claude"]["limitTokens"] != 9_000_000
+
+
+def test_회사_상한을_공용으로_되돌린다(client, db):
+    """올려 봤다가 무르는 길이 없으면, 한 번 건드린 회사는 영영 따로
+    관리해야 합니다."""
+    주인 = a_user(db, "주인", owner=True)
+    login(client, 주인)
+
+    client.put(f"{API}/stats/usage/limit", json={"limitTokens": 1_000_000, "provider": "claude"})
+    r = client.put(f"{API}/stats/usage/limit", json={"provider": "claude", "inherit": True})
+    assert r.status_code == 204, r.text
+
+    by = {p["provider"]: p for p in client.get(f"{API}/stats/usage").json()["providers"]}
+    assert by["claude"]["hasOwnLimit"] is False
+    assert by["claude"]["limitTokens"] != 1_000_000
+
+
+def test_모르는_회사는_거절한다(client, db):
+    """오타가 조용히 저장되면, 화면에는 안 보이는 값이 DB 에 남아
+    "분명 걸었는데 왜 안 먹지"가 됩니다."""
+    주인 = a_user(db, "주인", owner=True)
+    login(client, 주인)
+    r = client.put(
+        f"{API}/stats/usage/limit", json={"limitTokens": 1_000, "provider": "안티그래비티"}
+    )
+    assert r.status_code == 400
+
+
+def test_상한은_주인만_바꾼다(client, db):
+    """**보는 것은 막지 않습니다** — 식구도 얼마나 썼는지는 봅니다.
+    바꾸는 것만 주인입니다."""
+    a_user(db, "주인", owner=True)
+    아내 = a_user(db, "아내")
+    login(client, 아내)
+
+    assert client.get(f"{API}/stats/usage").status_code == 200
+    assert client.put(f"{API}/stats/usage/limit", json={"limitTokens": 0}).status_code == 403
+    assert (
+        client.put(
+            f"{API}/stats/usage/limit", json={"limitTokens": 0, "provider": "claude"}
+        ).status_code
+        == 403
+    )

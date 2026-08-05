@@ -136,17 +136,26 @@ def overview(db: Session = Depends(get_db), user: User = Depends(current_user)):
 def usage(db: Session = Depends(get_db), _: User = Depends(current_user)):
     today = now_kst().date()
     ledger = db.get(UsageLedger, today)
-    # 창은 회사별로 나뉘어 있습니다. 미터는 "이번 창에 얼마나 썼나"를 보는
-    # 곳이라 합쳐서 보여 줍니다 — 상한도 회사별로 다르게 걸 수 있지만,
-    # 화면에서 바꾸는 것은 공용 값입니다 (llm/usage.py 의 limit).
     win_input, win_output = usage_guard.window_totals(db)
+
+    # **회사별로 나눠서도 내려보냅니다.** 상한이 각 구독에 따로 걸리는데
+    # 합친 숫자만 보면 어느 쪽이 닿아서 멈췄는지 알 수 없습니다 — 실제로
+    # 한쪽 쿼터가 떨어졌는데 화면에는 "많이 썼네"로만 보였습니다.
+    providers = usage_guard.window_by_provider(db)
+
+    # 합계 상한은 **회사별 상한의 합**입니다. 하나라도 무제한이면 합계도
+    # 무제한입니다 — 남은 것들만 더해 놓으면 상단 미터가 실제보다 빨리
+    # 차 보여서, 아직 여유가 있는데도 아껴 쓰게 만듭니다.
+    caps = [p["limitTokens"] for p in providers]
+    total_cap = None if any(c is None for c in caps) else sum(caps)
 
     # **토큰은 5시간 창, 유튜브는 하루** — 주기가 다릅니다. 한 숫자로
     # 합치면 둘 중 하나는 틀린 기준으로 보이게 됩니다.
     return {
         "inputTokens": win_input,
         "outputTokens": win_output,
-        "limitTokens": usage_guard.limit(db) or None,
+        "limitTokens": total_cap,
+        "providers": providers,
         "windowHours": settings.token_window_hours,
         "windowResetsAt": to_utc_iso(usage_guard.window_end()),
         # 오늘 하루 합계 — 창과 별개로 "오늘 얼마나 했나"를 보려는 값입니다.
@@ -200,21 +209,40 @@ class LimitPatch(BaseModel):
     """0 이나 null 이면 상한을 풉니다."""
 
     limitTokens: int | None = None
+    # 어느 회사의 상한인가. 없으면 공용 값 — 자기 값이 없는 회사가 물려받습니다.
+    provider: str | None = None
+    # 이 회사만 걸어 둔 값을 지우고 공용으로 되돌립니다.
+    inherit: bool = False
 
 
 @router.put("/stats/usage/limit", status_code=204)
 def set_limit(patch: LimitPatch, db: Session = Depends(get_db), _: User = Depends(require_owner)):
-    """토큰 상한을 바꿉니다.
+    """토큰 상한을 바꿉니다. **주인만** 할 수 있습니다.
 
     **.env 가 아니라 DB 에 둡니다.** 설정 파일을 고치고 프로세스를
     재시작해야 한다면, 쓰다가 "조금만 올려 보자"를 할 수 없습니다.
     워커와 API 가 같은 값을 봅니다.
+
+    회사를 지정하면 그 회사만 바뀝니다. 상한은 각 구독에 따로 걸리므로,
+    한 값으로 묶으면 한쪽이 많이 쓴 것 때문에 아직 여유가 있는 쪽까지
+    멈춥니다 — 토큰이 모자라서 회사를 늘렸는데 정반대가 됩니다.
     """
+    provider = (patch.provider or "").strip() or None
+    if provider is not None and provider not in usage_guard.PROVIDERS:
+        raise ApiError(400, "UNKNOWN_PROVIDER", f"모르는 회사입니다: {provider}")
+
+    if patch.inherit:
+        if provider is None:
+            raise ApiError(400, "INVALID_VALUE", "공용 값은 물려받을 곳이 없습니다.")
+        # None 을 넣으면 그 회사의 값이 지워지고 공용 값을 다시 씁니다.
+        usage_guard.set_limit(db, None, provider)
+        return
+
     v = patch.limitTokens
     if v is not None and v < 0:
         raise ApiError(400, "INVALID_VALUE", "상한은 0 이상이어야 합니다.")
     # 0 은 "무제한", 값이 없으면 설정 기본값으로 되돌립니다.
-    usage_guard.set_limit(db, v)
+    usage_guard.set_limit(db, v, provider)
 
 
 @router.get("/stats/pipeline")

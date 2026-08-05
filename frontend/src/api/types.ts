@@ -319,11 +319,28 @@ export interface Overview {
   lastRunAt: string;
 }
 
+/** 요약을 맡긴 회사 한 곳의 이번 창 사용량.
+ *
+ *  **합쳐 놓으면 어느 쪽이 멈췄는지 알 수 없습니다.** 상한이 각 구독에
+ *  따로 걸리는데, 한쪽 쿼터가 떨어져도 화면에는 "많이 썼네"로만 보였습니다. */
+export interface ProviderUsage {
+  provider: string;
+  inputTokens: number;
+  outputTokens: number;
+  calls: number;
+  /** 이 회사의 상한. null 이면 무제한 */
+  limitTokens: number | null;
+  /** 이 회사만 따로 걸어 둔 값인가. false 면 공용 값을 물려받은 것입니다. */
+  hasOwnLimit: boolean;
+}
+
 export interface Usage {
   /** **이번 창**의 토큰. 하루 합계가 아닙니다. */
   inputTokens: number;
   outputTokens: number;
-  /** 창당 상한. null 이면 상한 없음 */
+  /** 회사별로 나눈 이번 창 사용량. */
+  providers: ProviderUsage[];
+  /** 창당 상한 **합계**. 하나라도 무제한이면 null 입니다. */
   limitTokens: number | null;
   /** 창의 길이(시간). 구독 사용량이 이 주기로 풀립니다. */
   windowHours: number;

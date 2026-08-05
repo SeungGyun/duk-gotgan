@@ -974,7 +974,11 @@ export const mockApi: Api = {
     if (found) found.isRead = true;
   },
 
-  async setTokenLimit(_limitTokens: number | null) {
+  async setTokenLimit(_limitTokens: number | null, _provider?: string) {
+    await delay(60);
+  },
+
+  async inheritTokenLimit(_provider: string) {
     await delay(60);
   },
 
@@ -1030,6 +1034,24 @@ export const mockApi: Api = {
     return {
       inputTokens: 183_000,
       outputTokens: 24_000,
+      providers: [
+        {
+          provider: "claude",
+          inputTokens: 150_000,
+          outputTokens: 19_000,
+          calls: 7,
+          limitTokens: 12_000_000,
+          hasOwnLimit: true,
+        },
+        {
+          provider: "antigravity",
+          inputTokens: 33_000,
+          outputTokens: 5_000,
+          calls: 2,
+          limitTokens: 8_000_000,
+          hasOwnLimit: false,
+        },
+      ],
       limitTokens: 20_000_000,
       windowHours: 5,
       windowResetsAt: new Date(Date.now() + 3 * 3600_000).toISOString(),

@@ -165,10 +165,15 @@ export const httpApi: Api = {
 
   getOverview: () => req("/stats/overview"),
   getUsage: () => req("/stats/usage"),
-  setTokenLimit: (limitTokens) =>
+  setTokenLimit: (limitTokens, provider) =>
     req<void>("/stats/usage/limit", {
       method: "PUT",
-      body: JSON.stringify({ limitTokens }),
+      body: JSON.stringify({ limitTokens, provider }),
+    }),
+  inheritTokenLimit: (provider) =>
+    req<void>("/stats/usage/limit", {
+      method: "PUT",
+      body: JSON.stringify({ provider, inherit: true }),
     }),
   listRuns: () => req("/runs"),
   getPipeline: () => req("/stats/pipeline"),

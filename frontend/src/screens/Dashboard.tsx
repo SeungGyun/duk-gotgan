@@ -1,11 +1,19 @@
 import { useState } from "react";
 
 import { api } from "../api";
-import type { Failure, Overview, Usage } from "../api";
+import type { Failure, Overview, ProviderUsage, Usage } from "../api";
 import { Screen } from "../components/Screen";
 import { Button, Chip, ErrorState, Loading, Meter, Panel } from "../components/ui";
 import { num, tokens, when } from "../lib/format";
+import { useMe } from "../me";
 import s from "./Dashboard.module.css";
+
+/** 회사 이름을 사람이 읽는 말로. 모르는 이름은 그대로 보여 줍니다 —
+ *  새 회사를 붙였는데 화면에 빈칸이 뜨면 그게 더 헷갈립니다. */
+const PROVIDER_LABEL: Record<string, string> = {
+  claude: "클로드",
+  antigravity: "안티그래비티",
+};
 
 const SEQ = ["var(--seq-1)", "var(--seq-2)", "var(--seq-3)", "var(--seq-4)", "var(--seq-5)"];
 
@@ -29,6 +37,7 @@ export function Dashboard({
   // 뒤 몇 초 안에 실행 로그에 나타납니다 — 여기서 결과를 기다리지 않습니다.
   const [requesting, setRequesting] = useState(false);
   const [runNote, setRunNote] = useState<string | null>(null);
+  const me = useMe();
 
   const requestRun = async () => {
     setRequesting(true);
@@ -80,6 +89,11 @@ export function Dashboard({
 
   const used = usage.inputTokens + usage.outputTokens;
   const limit = usage.limitTokens;
+  // 상한을 바꾸는 것은 **주인만** 입니다. 자물쇠가 셋입니다 — 이 화면 자체가
+  // 주인 전용 라우트이고(App.tsx), 여기서 편집 UI 를 가리고, 서버가 403 으로
+  // 막습니다. 지금은 식구가 이 화면에 못 들어오지만, 나중에 이 패널을 다른
+  // 곳에 옮겨도 편집이 새어 나가지 않게 여기서도 봅니다.
+  const isOwner = me.isOwner;
   const perCall = f.reviewed > 0 ? Math.round(used / f.reviewed) : 0;
   const maxContrib = Math.max(1, ...overview.contributions.map((c) => c.published));
   const idleKeywords = 0; // 서버가 내려주기 전까지는 표시하지 않는다
@@ -198,10 +212,9 @@ export function Dashboard({
           <Panel title={`${usage.windowHours}시간 토큰`}>
             <div className={s.usageTop}>
               <span className={s.usageBig}>{tokens(used)}</span>
-              {/* **상한은 눌러서 바꿉니다.** .env 를 고치고 프로세스를
-                  재시작해야 한다면, 쓰다가 "조금만 올려 보자"를 할 수
-                  없습니다. */}
-              <LimitEditor limit={limit} onSaved={onRetry} />
+              <span className={s.limitBtn} style={{ cursor: "default" }}>
+                / {limit ? tokens(limit) : "무제한"} 토큰
+              </span>
             </div>
             {limit && (
               <>
@@ -212,6 +225,16 @@ export function Dashboard({
                 </div>
               </>
             )}
+
+            {/* **회사별로 나눠 봅니다.** 상한이 각 구독에 따로 걸리는데
+                합친 숫자만 보면 어느 쪽이 닿아서 멈췄는지 알 수 없습니다 —
+                실제로 한쪽 쿼터가 떨어졌는데 "많이 썼네"로만 보였습니다. */}
+            <div className={s.providers}>
+              {usage.providers.map((p) => (
+                <ProviderRow key={p.provider} p={p} canEdit={isOwner} onSaved={onRetry} />
+              ))}
+            </div>
+
             <div className={s.split2}>
               <div>
                 <div className={s.splitKey}>입력</div>
@@ -263,7 +286,11 @@ export function Dashboard({
 }
 
 
-/** 토큰 상한을 그 자리에서 고칩니다.
+/** 회사 한 곳의 사용량과 상한. 상한은 그 자리에서 고칩니다.
+ *
+ *  **회사마다 따로 겁니다.** 상한이 각 구독에 따로 걸리는데 한 값으로
+ *  묶으면, 한쪽이 많이 쓴 것 때문에 아직 여유가 있는 쪽까지 멈춥니다 —
+ *  토큰이 모자라서 회사를 늘렸는데 정반대가 됩니다.
  *
  *  **설정 파일이 아니라 화면에 둡니다.** .env 를 고치고 프로세스를
  *  재시작해야 한다면, 쓰다가 "조금만 올려 보자"를 할 수 없습니다.
@@ -271,60 +298,128 @@ export function Dashboard({
  *
  *  단위는 **백만(M)** 으로 받습니다. 3,000,000 을 손으로 치게 하면 0 을
  *  하나 더 넣거나 빠뜨리기 쉽고, 그 실수가 곧바로 사용량 폭주나 정지로
- *  이어집니다. */
-function LimitEditor({ limit, onSaved }: { limit: number | null; onSaved: () => void }) {
+ *  이어집니다.
+ *
+ *  **바꾸는 것은 주인만입니다.** 눌러도 안 되는 버튼을 보여 주면 "왜 나만
+ *  안 되지"가 되므로, 주인이 아니면 편집 손잡이 없이 숫자만 보여 줍니다. */
+function ProviderRow({
+  p,
+  canEdit,
+  onSaved,
+}: {
+  p: ProviderUsage;
+  canEdit: boolean;
+  onSaved: () => void;
+}) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const used = p.inputTokens + p.outputTokens;
+  const name = PROVIDER_LABEL[p.provider] ?? p.provider;
 
   const start = () => {
-    setDraft(limit ? String(limit / 1_000_000) : "0");
+    setDraft(p.limitTokens ? String(p.limitTokens / 1_000_000) : "0");
+    setErr(null);
     setEditing(true);
   };
 
-  const save = async () => {
-    const m = Number(draft);
-    if (!Number.isFinite(m) || m < 0) return;
+  const run = async (fn: () => Promise<void>) => {
     setBusy(true);
+    setErr(null);
     try {
-      await api.setTokenLimit(Math.round(m * 1_000_000));
+      await fn();
       onSaved();
       setEditing(false);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "바꾸지 못했습니다.");
     } finally {
       setBusy(false);
     }
   };
 
-  if (!editing) {
-    return (
-      <button type="button" className={s.limitBtn} onClick={start} title="눌러서 바꾸기">
-        / {limit ? tokens(limit) : "무제한"} 토큰
-      </button>
-    );
-  }
+  const save = () => {
+    const m = Number(draft);
+    if (!Number.isFinite(m) || m < 0) {
+      setErr("0 이상의 숫자를 넣어 주세요.");
+      return;
+    }
+    void run(() => api.setTokenLimit(Math.round(m * 1_000_000), p.provider));
+  };
 
   return (
-    <span className={s.limitEdit}>
-      /
-      <input
-        type="number"
-        step="0.5"
-        min="0"
-        value={draft}
-        autoFocus
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") void save();
-          if (e.key === "Escape") setEditing(false);
-        }}
-      />
-      <span className={s.limitUnit}>M 토큰</span>
-      <Button onClick={() => void save()} disabled={busy}>
-        {busy ? "…" : "저장"}
-      </Button>
-      <button type="button" className={s.limitCancel} onClick={() => setEditing(false)}>
-        취소
-      </button>
-    </span>
+    <div className={s.provider}>
+      <div className={s.providerTop}>
+        <span className={s.providerName}>{name}</span>
+        {editing ? (
+          <span className={s.limitEdit}>
+            /
+            <input
+              type="number"
+              step="0.5"
+              min="0"
+              value={draft}
+              autoFocus
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") save();
+                if (e.key === "Escape") setEditing(false);
+              }}
+            />
+            <span className={s.limitUnit}>M</span>
+            <Button onClick={save} disabled={busy}>
+              {busy ? "…" : "저장"}
+            </Button>
+            {/* 자기 값이 있을 때만 "공용으로" 가 의미가 있습니다. */}
+            {p.hasOwnLimit && (
+              <button
+                type="button"
+                className={s.limitCancel}
+                disabled={busy}
+                onClick={() => void run(() => api.inheritTokenLimit(p.provider))}
+                title="이 회사만 걸어 둔 값을 지우고 공용 값을 씁니다"
+              >
+                공용으로
+              </button>
+            )}
+            <button type="button" className={s.limitCancel} onClick={() => setEditing(false)}>
+              취소
+            </button>
+          </span>
+        ) : (
+          <span className={s.providerNums}>
+            <span className="mono">{tokens(used)}</span>
+            {canEdit ? (
+              <button
+                type="button"
+                className={s.limitBtn}
+                onClick={start}
+                title="눌러서 이 회사의 상한만 바꾸기"
+              >
+                / {p.limitTokens ? tokens(p.limitTokens) : "무제한"}
+                {!p.hasOwnLimit && <span className={s.inherited}> 공용</span>}
+              </button>
+            ) : (
+              <span className={s.providerCap}>
+                / {p.limitTokens ? tokens(p.limitTokens) : "무제한"}
+              </span>
+            )}
+          </span>
+        )}
+      </div>
+      {p.limitTokens && <Meter value={used} max={p.limitTokens} height={5} />}
+      <div className={s.providerFoot}>
+        <span>
+          {p.limitTokens ? `${Math.round((used / p.limitTokens) * 100)}% 소진` : "상한 없음"}
+        </span>
+        <span>요약 {p.calls}건</span>
+      </div>
+      {err && (
+        <p className={s.providerErr} role="alert">
+          {err}
+        </p>
+      )}
+    </div>
   );
 }

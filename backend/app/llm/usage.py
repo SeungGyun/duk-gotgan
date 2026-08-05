@@ -92,6 +92,44 @@ def window_totals(db: Session) -> tuple[int, int]:
     return int(row[0]), int(row[1])
 
 
+# 요약을 맡길 수 있는 회사들. **아직 한 번도 안 쓴 회사도 보여 줍니다** —
+# 화면에서 상한을 미리 걸어 두려면 칸이 있어야 하는데, 쓴 기록으로만
+# 목록을 만들면 처음 붙이는 회사는 아예 나타나지 않습니다.
+PROVIDERS: tuple[str, ...] = ("claude", "antigravity")
+
+
+def window_by_provider(db: Session) -> list[dict]:
+    """이번 창을 **회사별로** 나눠서. 화면이 각각의 미터를 그리는 값입니다.
+
+    합쳐 놓으면 어느 쪽이 상한에 닿아 멈췄는지 알 수 없습니다 — 실제로
+    한쪽 쿼터가 떨어졌는데 화면에는 그냥 "많이 썼네"로만 보였습니다.
+    """
+    rows = {
+        r.provider: r
+        for r in db.scalars(select(UsageWindow).where(UsageWindow.start == window_start()))
+    }
+    # 기록에만 있고 목록에 없는 회사도 빠뜨리지 않습니다 — 이름을 바꿨거나
+    # 실험적으로 붙여 본 것이 조용히 사라지면 사용량이 안 맞아 보입니다.
+    names = list(PROVIDERS) + [p for p in rows if p not in PROVIDERS]
+    out = []
+    for name in names:
+        row = rows.get(name)
+        out.append(
+            {
+                "provider": name,
+                "inputTokens": row.input_tokens if row else 0,
+                "outputTokens": row.output_tokens if row else 0,
+                "calls": row.llm_calls if row else 0,
+                # 0 은 "무제한"입니다. 화면에서는 null 로 보냅니다.
+                "limitTokens": limit(db, name) or None,
+                # 이 회사만 따로 걸어 둔 값이 있는가. 없으면 공용 값을
+                # 물려받은 것이라, 화면이 "공용" 이라고 알려 줄 수 있습니다.
+                "hasOwnLimit": state.get_int(db, f"{LIMIT_KEY}:{name}") is not None,
+            }
+        )
+    return out
+
+
 def _today(db: Session, day: date | None = None) -> UsageLedger:
     day = day or now_kst().date()
     row = db.scalar(select(UsageLedger).where(UsageLedger.day == day).with_for_update())

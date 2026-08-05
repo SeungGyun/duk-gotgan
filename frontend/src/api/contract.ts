@@ -75,8 +75,13 @@ export interface Api {
   // 운영
   getOverview(): Promise<Overview>;
   getUsage(): Promise<Usage>;
-  /** 토큰 상한을 바꿉니다. 0 이면 무제한, null 이면 설정 기본값으로. */
-  setTokenLimit(limitTokens: number | null): Promise<void>;
+  /** 토큰 상한을 바꿉니다. **주인만 됩니다** (식구는 403).
+   *
+   *  0 이면 무제한, null 이면 설정 기본값으로. `provider` 를 주면 그 회사만
+   *  바뀌고, 안 주면 공용 값이 바뀝니다 — 자기 값이 없는 회사가 물려받습니다. */
+  setTokenLimit(limitTokens: number | null, provider?: string): Promise<void>;
+  /** 이 회사만 걸어 둔 상한을 지우고 공용 값으로 되돌립니다. 주인만 됩니다. */
+  inheritTokenLimit(provider: string): Promise<void>;
   listRuns(): Promise<Run[]>;
   /** 지금 파이프라인 상태 — 각 칸의 대기 수와 지금 하는 일. */
   getPipeline(): Promise<Pipeline>;
