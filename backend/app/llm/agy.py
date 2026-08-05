@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import shutil
+import signal
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -127,6 +128,33 @@ def _argv(ws: workspace.Workspace, schema: Path, profile: Path | None) -> list[s
     return cmd
 
 
+async def _kill_group(proc) -> None:
+    """맏이가 아니라 **프로세스 그룹 전체**를 죽입니다.
+
+    도우미가 남아 파이프를 쥐고 있으면 EOF 가 오지 않습니다. 죽인 뒤에도
+    기다리는 데는 상한을 둡니다 — 정리하다가 다시 멎으면 처음 문제로
+    되돌아갑니다.
+    """
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(os.getpgid(proc.pid), sig)
+        except (ProcessLookupError, PermissionError):
+            break
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=5)
+            break
+        except asyncio.TimeoutError:
+            continue
+    # 파이프를 직접 닫습니다. 안 닫으면 이 파일 서술자가 워커에 남습니다.
+    for pipe in (proc.stdout, proc.stderr, proc.stdin):
+        transport = getattr(pipe, "_transport", None) if pipe is not None else None
+        if transport is not None:
+            try:
+                transport.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+
 async def review(
     ws: workspace.Workspace,
     outcome: store.ReviewOutcome,
@@ -151,6 +179,12 @@ async def review(
             cwd=str(ws.path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            # **자기 프로세스 그룹으로 띄웁니다.** agy 는 언어 서버·agentapi
+            # 같은 도우미를 따로 띄우고, 그것들이 우리 파이프를 물려받습니다.
+            # 맏이만 죽이면 도우미가 쓰기 끝을 쥔 채 남아 EOF 가 오지 않고,
+            # 읽는 쪽이 영원히 기다립니다 — 실제로 워커가 72분을 멈춰 있었고
+            # 그동안 요약이 한 건도 안 됐습니다.
+            start_new_session=True,
             # 자막이 환경변수를 통해 무언가를 흘리지 못하게, 넘기는 것을
             # 최소로 줄입니다. HOME 은 agy 가 인증을 찾는 데 필요합니다.
             env={
@@ -167,8 +201,11 @@ async def review(
                 proc.communicate(), timeout=settings.agy_timeout_sec + 60
             )
         except asyncio.TimeoutError:
-            proc.kill()
-            await proc.communicate()
+            # **여기서 `communicate()` 를 다시 부르면 안 됩니다.** 취소된
+            # 첫 호출이 파이프를 물고 있어서 두 번째 호출이 영영 안 끝납니다.
+            # 그렇게 워커가 통째로 멎었습니다 — 죽은 자식의 파이프 두 개를
+            # 붙든 채, 자식은 이미 없는데도요.
+            await _kill_group(proc)
             result.error = f"agy 가 {settings.agy_timeout_sec}초 안에 끝나지 않았습니다."
             return result
     except Exception as e:  # noqa: BLE001

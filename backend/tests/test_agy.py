@@ -124,3 +124,29 @@ def test_실행_환경을_최소로_넘긴다():
 
     src = inspect.getsource(agy.review)
     assert '"HOME"' in src and "os.environ.copy()" not in src
+
+
+def test_타임아웃에_communicate_를_다시_부르지_않는다():
+    """취소된 첫 호출이 파이프를 물고 있어서 두 번째 호출이 영영 안
+    끝납니다. 그렇게 워커가 72분을 멎어 있었습니다 — 자식은 이미 죽었는데
+    죽은 자식의 파이프 두 개를 붙든 채로요. 그동안 요약은 0건이었습니다."""
+    from app.llm import agy
+
+    src = inspect.getsource(agy.review)
+    after = src.split("except asyncio.TimeoutError:")[1]
+    assert "proc.communicate()" not in after, "타임아웃 뒤에 다시 부르면 안 됩니다"
+    assert "_kill_group(proc)" in after
+
+
+def test_프로세스_그룹째_죽인다():
+    """agy 는 언어 서버·agentapi 같은 도우미를 따로 띄우고, 그것들이 우리
+    파이프를 물려받습니다. 맏이만 죽이면 도우미가 쓰기 끝을 쥔 채 남아
+    EOF 가 오지 않습니다."""
+    from app.llm import agy
+
+    assert "start_new_session=True" in inspect.getsource(agy.review)
+    kill = inspect.getsource(agy._kill_group)
+    assert "killpg" in kill
+    assert "SIGKILL" in kill
+    # 정리하다가 다시 멎으면 처음 문제로 되돌아갑니다
+    assert "wait_for" in kill
