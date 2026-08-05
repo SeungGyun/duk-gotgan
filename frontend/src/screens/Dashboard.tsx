@@ -415,12 +415,17 @@ function ProviderRow({
         </span>
         <span>요약 {p.calls}건</span>
       </div>
-      {/* **쉬는 중이면 말해 줍니다.** 막혔을 때 1분마다 다시 두드리던 것을
-          멈췄더니 로그도 조용해졌습니다 — 그만큼 여기서 보여야, 왜 아무것도
-          안 하는지를 로그를 뒤져 알아내지 않아도 됩니다. */}
-      {p.restingUntil && (
+      {/* **왜 멈춰 있는지 말해 줍니다.** 막혔을 때 1분마다 다시 두드리던
+          것을 멈췄더니 로그도 조용해졌습니다 — 그만큼 여기서 보여야, 왜
+          아무것도 안 하는지를 로그를 뒤져 알아내지 않아도 됩니다.
+
+          둘을 가릅니다. 회사가 안 받는 것은 기다리는 수밖에 없지만, 상한을
+          넘은 것은 위 숫자를 눌러 올리면 곧바로 재개됩니다. */}
+      {p.restingUntil ? (
         <p className={s.resting}>쉬는 중 — {when(p.restingUntil)} 에 다시 봅니다</p>
-      )}
+      ) : p.capped ? (
+        <p className={s.resting}>상한을 넘어 멈춤 — 상한을 올리면 곧바로 재개됩니다</p>
+      ) : null}
       {err && (
         <p className={s.providerErr} role="alert">
           {err}

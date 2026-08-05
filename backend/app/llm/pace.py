@@ -11,13 +11,23 @@
 자막 트랙은 이미 냉각을 두고 있었는데(`transcript.COOLDOWN_KEY`) 요약만
 빠져 있었습니다.
 
-**얼마나 쉴지는 상황이 정합니다.**
+**막힌 이유에 따라 다루는 방식이 다릅니다.**
 
-  창의 토큰을 다 씀   창이 바뀌는 **정확한 시각**을 압니다 → 그때까지
-  회사가 안 받아 줌    언제 풀릴지 모릅니다 → 1·2·4·8·16·30분으로 늘려 가며
+  우리 상한을 넘음   장부를 **매번 다시 봅니다** — 타이머를 두지 않습니다
+  회사가 안 받아 줌   1·2·4·8·16·30분으로 늘려 가며 쉽니다
 
-두 번째가 왜 점점 길어져야 하는가. 쿼터가 떨어진 상대에게 1분마다
-두드리는 것은 풀리는 데 도움이 안 되고, 상대가 더 세게 막는 빌미가 됩니다.
+왜 우리 상한에는 타이머를 두지 않는가. 처음엔 "창이 바뀌는 16:00 까지
+쉰다"고 적어 두었습니다. 그런데 **상한은 화면에서 언제든 올릴 수 있습니다.**
+13:45 에 상한을 올려도 적어 둔 16:00 이 그대로 남아, 여유가 생겼는데도
+두 시간을 놀았습니다.
+
+적어 둔 시각은 **결정을 캐시한 것**인데, 그 결정의 입력(상한·사용량)이
+바뀌는 값이었습니다. 장부를 읽는 것은 인덱스 한 번이라 매 틱 다시 봐도
+쌉니다 — 캐시할 이유가 없었습니다.
+
+회사 쪽 사정은 다릅니다. 풀렸는지 알아보려면 **불러 보는 수밖에** 없어서,
+그때는 타이머가 맞습니다. 쿼터가 떨어진 상대에게 1분마다 두드리는 것은
+풀리는 데 도움이 안 되고, 상대가 더 세게 막는 빌미가 됩니다.
 
 **회사마다 따로 셉니다.** 한쪽이 쉬는 동안 다른 쪽은 그대로 돌아야 합니다 —
 같이 재우면 회사를 나눈 의미가 없습니다.
@@ -46,22 +56,40 @@ def _strikes_key(provider: str) -> str:
     return f"review.strikes:{provider}"
 
 
+def _capped_key(provider: str) -> str:
+    return f"review.capped_since:{provider}"
+
+
 def resume_at(db: Session, provider: str) -> datetime | None:
     """언제까지 쉬기로 했나. 지나갔으면 None — 쉬는 중이 아닙니다."""
     at = state.get_time(db, _resume_key(provider))
     return at if at is not None and at > now_kst() else None
 
 
-def rest_until(db: Session, provider: str, when: datetime, why: str) -> None:
-    """**언제 풀리는지 아는 경우.** 그 시각까지 쉽니다.
+def capped(db: Session, provider: str) -> bool:
+    """우리 상한을 넘어 멈춰 있는 상태인가. 화면이 이유를 말해 줄 때 씁니다."""
+    return state.get_time(db, _capped_key(provider)) is not None
 
-    창의 토큰을 다 썼을 때가 이 경우입니다 — 창이 5시간 단위로 딱 떨어져서
-    어림잡을 이유가 없습니다.
+
+def mark_capped(db: Session, provider: str, why: str) -> None:
+    """우리 상한을 넘었습니다. **타이머를 두지 않습니다** — 다음 틱에
+    장부를 다시 보고, 상한이 올라갔으면 그대로 재개합니다.
+
+    여기서 하는 일은 **한 번만 말하기**뿐입니다. 매 틱 같은 줄을 찍으면
+    실행 로그가 그것으로 덮입니다.
     """
-    if _already_resting(db, provider, when):
+    if capped(db, provider):
         return
-    state.set_time(db, _resume_key(provider), when)
-    logger.info("[review] %s 는 %s 까지 쉽니다 — %s", provider, f"{when:%H:%M}", why)
+    state.set_time(db, _capped_key(provider), now_kst())
+    logger.info("[review] %s 는 상한을 넘어 멈춥니다 — %s", provider, why)
+
+
+def clear_capped(db: Session, provider: str) -> None:
+    """여유가 생겼습니다. 멈춰 있었다면 재개한다고 한 번 알립니다."""
+    if not capped(db, provider):
+        return
+    state.set_time(db, _capped_key(provider), None)
+    logger.info("[review] %s 재개 — 상한에 여유가 생겼습니다", provider)
 
 
 def back_off(db: Session, provider: str, why: str) -> datetime:
@@ -92,13 +120,3 @@ def clear(db: Session, provider: str) -> None:
 
 def _strikes(db: Session, provider: str) -> int:
     return state.get_int(db, _strikes_key(provider)) or 0
-
-
-def _already_resting(db: Session, provider: str, when: datetime) -> bool:
-    """같은 시각으로 다시 세우는 것은 조용히 넘깁니다.
-
-    안 그러면 1분마다 "쉽니다" 한 줄씩 쌓여, 줄이려던 소음이 그대로
-    남습니다 — 문구만 바뀐 채로요.
-    """
-    at = state.get_time(db, _resume_key(provider))
-    return at is not None and abs((at - when).total_seconds()) < 60

@@ -125,10 +125,16 @@ def window_by_provider(db: Session) -> list[dict]:
                 # 이 회사만 따로 걸어 둔 값이 있는가. 없으면 공용 값을
                 # 물려받은 것이라, 화면이 "공용" 이라고 알려 줄 수 있습니다.
                 "hasOwnLimit": state.get_int(db, f"{LIMIT_KEY}:{name}") is not None,
-                # **쉬는 중이면 언제까지인지.** 막혔을 때 로그를 조용하게
-                # 만들었으니(llm/pace.py), 그만큼 화면에서는 보여야 합니다 —
-                # 안 그러면 "왜 아무것도 안 하지"를 로그를 뒤져 알아내야 합니다.
+                # **왜 멈춰 있는지.** 막혔을 때 로그를 조용하게 만들었으니
+                # (llm/pace.py) 그만큼 화면에서는 보여야 합니다 — 안 그러면
+                # "왜 아무것도 안 하지"를 로그를 뒤져 알아내야 합니다.
+                #
+                # 둘을 가릅니다. 회사가 안 받는 것은 기다리는 수밖에 없지만,
+                # 상한을 넘은 것은 **상한을 올리면 곧바로 재개**됩니다 —
+                # 사용자가 할 수 있는 일이 다르므로 같은 말로 뭉뚱그리면 안
+                # 됩니다.
                 "restingUntil": _resting_iso(db, name),
+                "capped": _capped(db, name),
             }
         )
     return out
@@ -140,6 +146,12 @@ def _resting_iso(db: Session, provider: str) -> str | None:
     from app.llm import pace
 
     return to_utc_iso(pace.resume_at(db, provider))
+
+
+def _capped(db: Session, provider: str) -> bool:
+    from app.llm import pace
+
+    return pace.capped(db, provider)
 
 
 def _today(db: Session, day: date | None = None) -> UsageLedger:

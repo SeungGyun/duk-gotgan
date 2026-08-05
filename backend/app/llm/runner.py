@@ -389,10 +389,11 @@ async def review_pending(
         try:
             usage.check(db)
         except usage.UsageExceeded as e:
-            # 사이클 도중에 창이 찰 수 있습니다. 창이 언제 바뀌는지는
-            # 정확히 아니까, 그때까지 쉬어 두고 다음 틱부터는 여기까지
-            # 오지도 않게 합니다 (llm/pace.py).
-            pace.rest_until(db, settings.review_provider, e.resets_at, str(e))
+            # 사이클 도중에 창이 찰 수 있습니다. **여기서는 그냥 나갑니다** —
+            # 다음 틱에 `review_due` 가 장부를 다시 보고 판단합니다. 여기서
+            # 시각을 적어 두면, 그 사이에 상한을 올려도 적어 둔 시각이 남아
+            # 여유가 생겼는데도 계속 놉니다 (llm/pace.py).
+            logger.info("[review] 상한을 넘어 이번 사이클은 여기까지 — %s", e)
             runs.append(ReviewRun(video_id=video.id, title=video.title, error=str(e)))
             break
 

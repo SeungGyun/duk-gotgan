@@ -36,18 +36,36 @@ def test_쉬는_중이_아니면_None(db):
     assert pace.resume_at(db, "claude") is None
 
 
-def test_아는_시각까지는_그대로_쉰다(db):
-    """창의 토큰을 다 썼을 때입니다. 창이 5시간 단위로 딱 떨어져서
-    어림잡을 이유가 없습니다."""
-    until = now_kst() + timedelta(hours=2)
-    pace.rest_until(db, "claude", until, "상한")
-    at = pace.resume_at(db, "claude")
-    assert at is not None and abs((at - until).total_seconds()) < 2
-
-
 def test_지나간_시각은_쉬는_중이_아니다(db):
-    pace.rest_until(db, "claude", now_kst() - timedelta(minutes=1), "지난 것")
+    pace.back_off(db, "claude", "쿼터")
+    from app.db import state
+
+    state.set_time(db, "review.resume_at:claude", now_kst() - timedelta(minutes=1))
     assert pace.resume_at(db, "claude") is None
+
+
+def test_상한을_넘은_것은_시각을_적어_두지_않는다(db):
+    """**여기가 놓쳤던 부분입니다.** 처음엔 "창이 바뀌는 16:00 까지 쉰다"고
+    적어 두었습니다. 그런데 상한은 화면에서 언제든 올릴 수 있어서, 13:45 에
+    올려도 적어 둔 16:00 이 그대로 남아 두 시간을 놀았습니다.
+
+    적어 둔 것은 결정의 캐시인데 그 입력(상한·사용량)이 바뀌는 값이었습니다."""
+    pace.mark_capped(db, "claude", "상한 초과")
+    assert pace.capped(db, "claude") is True
+    # 타이머는 걸리지 않습니다 — 다음 틱에 장부를 다시 봅니다
+    assert pace.resume_at(db, "claude") is None
+
+    pace.clear_capped(db, "claude")
+    assert pace.capped(db, "claude") is False
+
+
+def test_상한을_넘었다는_말은_한_번만(db, caplog):
+    """매 틱 같은 줄을 찍으면 실행 로그가 그것으로 덮입니다."""
+    with caplog.at_level("INFO"):
+        pace.mark_capped(db, "claude", "상한 초과")
+        first = len(caplog.records)
+        pace.mark_capped(db, "claude", "상한 초과")
+        assert len(caplog.records) == first
 
 
 def test_모르면_점점_길게_쉰다(db):
@@ -83,41 +101,38 @@ def test_회사끼리_따로_쉰다(db):
     assert pace.resume_at(db, "claude") is None
 
 
-def test_같은_시각으로_다시_세우면_조용히_넘긴다(db, caplog):
-    """안 그러면 1분마다 "쉽니다" 한 줄씩 쌓여, 줄이려던 소음이 문구만
-    바뀐 채 그대로 남습니다."""
-    until = now_kst() + timedelta(hours=1)
-    with caplog.at_level("INFO"):
-        pace.rest_until(db, "claude", until, "상한")
-        first = len(caplog.records)
-        pace.rest_until(db, "claude", until, "상한")
-        assert len(caplog.records) == first, "같은 휴식을 두 번 알리면 안 됩니다"
-
-
 # ── 부르는 쪽 ────────────────────────────────────────────────
 
 
-def test_쉬는_중이면_실행_기록을_만들지_않는다():
+def test_막혔으면_실행_기록을_만들지_않는다():
     """예전에는 상한에 닿은 뒤에도 매 틱 실행 기록이 하나씩 생겼습니다.
     아무것도 안 했는데요 — 정작 무슨 일이 있었는지 보려는 화면이 같은
-    줄로 덮였습니다."""
+    줄로 덮였습니다. `review_due` 가 먼저 걸러 내야 합니다."""
     from app.collector import jobs
 
     due = inspect.getsource(jobs.review_due)
-    assert "pace.resume_at(" in due, "돌릴지 정할 때 쉬는 중인지 봐야 합니다"
+    assert "pace.resume_at(" in due, "회사가 안 받는 중인지 봐야 합니다"
+    assert "usage.check(db)" in due, "우리 상한도 여기서 봐야 합니다"
 
-    job = inspect.getsource(jobs.review_job)
-    # 상한 확인이 `_start`(실행 기록 생성)보다 앞에 있어야 합니다
-    assert "usage.check(db)" in job
-    assert job.index("usage.check(db)") < job.index("_start(db,")
+    # 실행 기록을 만드는 곳에는 상한 판단이 남아 있으면 안 됩니다 —
+    # 두 군데서 보면 한쪽만 고쳤을 때 조용히 어긋납니다.
+    assert "usage.check(db)" not in inspect.getsource(jobs.review_job)
 
 
-def test_상한은_창이_바뀔_때까지_쉰다():
-    """언제 풀리는지 정확히 아는 경우입니다 — 어림잡을 이유가 없습니다."""
+def test_상한은_매번_장부에서_다시_본다():
+    """**상한을 올리면 다음 틱에 바로 재개돼야 합니다.** 시각을 적어 두면
+    그 사이 상한을 올려도 적어 둔 시각이 남아 계속 놉니다 — 실제로 그렇게
+    설계했다가 두 시간을 놀 뻔했습니다."""
     from app.collector import jobs
+    from app.llm import pace, runner
 
-    assert "pace.rest_until(" in inspect.getsource(jobs.review_job)
-    assert "usage.window_end()" in inspect.getsource(jobs.review_job)
+    # 상한 때문에 멈출 때 타이머를 거는 코드가 없어야 합니다
+    assert not hasattr(pace, "rest_until"), "상한에는 타이머를 두지 않습니다"
+    for src in (inspect.getsource(jobs.review_due), inspect.getsource(runner.review_pending)):
+        assert "window_end()" not in src
+
+    due = inspect.getsource(jobs.review_due)
+    assert "pace.mark_capped(" in due and "pace.clear_capped(" in due
 
 
 def test_회사가_안_받으면_점점_길게_쉰다():
@@ -126,3 +141,43 @@ def test_회사가_안_받으면_점점_길게_쉰다():
     src = inspect.getsource(runner.review_pending)
     assert "pace.back_off(" in src
     assert "pace.clear(" in src, "잘 되면 누적을 지워야 합니다"
+
+
+def test_상한을_올리면_곧바로_재개된다(db):
+    """**사용자가 짚어 준 구멍입니다.**
+
+    "지금 대시보드에서 상한을 늘렸어. 이러면 요약이 재개되어야 할 것 같은데."
+
+    맞습니다. 예전 설계는 막힌 순간 "창이 바뀌는 16:00 까지 쉰다"고 시각을
+    적어 두어서, 13:45 에 상한을 올려도 두 시간을 그대로 놀았습니다.
+    """
+    from app.collector import jobs
+    from app.db.models import Keyword, UsageWindow, Video, VideoKeyword
+    from app.llm import usage
+
+    # 요약 대기 한 편과, 상한을 이미 넘긴 사용량을 만듭니다
+    k = Keyword(term="테스트", status="active")
+    db.add(k)
+    db.flush()
+    db.add(Video(id="vid_pace", title="t", state="TRANSCRIBED", channel_title="c"))
+    db.flush()
+    db.add(VideoKeyword(video_id="vid_pace", keyword_id=k.id))
+    db.add(
+        UsageWindow(
+            start=usage.window_start(), provider=settings.review_provider,
+            input_tokens=900, output_tokens=100,
+        )
+    )
+    usage.set_limit(db, 500, settings.review_provider)
+    db.commit()
+
+    go, waiting, why = jobs.review_due(db)
+    assert go is False and "상한" in why, (go, why)
+    assert pace.capped(db, settings.review_provider) is True
+
+    # 주인이 화면에서 상한을 올립니다
+    usage.set_limit(db, 5_000, settings.review_provider)
+
+    go, waiting, why = jobs.review_due(db)
+    assert go is True, f"상한을 올렸으면 곧바로 재개돼야 합니다 — {why}"
+    assert pace.capped(db, settings.review_provider) is False

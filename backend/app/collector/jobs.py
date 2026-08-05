@@ -265,11 +265,24 @@ def review_due(db: Session) -> tuple[bool, int, str]:
     if not waiting:
         return False, 0, ""
 
-    # **쉬는 중이면 여기서 끝냅니다.** 막힌 줄 알면서 1분마다 다시
-    # 두드리던 것을 멈추는 자리입니다 (llm/pace.py).
+    # **회사가 안 받아 주는 중이면 여기서 끝냅니다.** 풀렸는지는 불러
+    # 봐야만 알 수 있어서 타이머로 셉니다 (llm/pace.py).
     resting = pace.resume_at(db, settings.review_provider)
     if resting is not None:
         return False, waiting, f"{resting:%H:%M} 까지 쉬는 중"
+
+    # **우리 상한은 매번 다시 봅니다.**
+    #
+    # 처음엔 "창이 바뀔 때까지 쉰다"고 시각을 적어 두었습니다. 그런데 상한은
+    # 화면에서 언제든 올릴 수 있어서, 올린 뒤에도 적어 둔 시각이 남아 두
+    # 시간을 그냥 놀았습니다. 적어 둔 것은 결정의 캐시인데 그 입력이 바뀌는
+    # 값이었습니다 — 장부를 읽는 것은 인덱스 한 번이라 매 틱 봐도 쌉니다.
+    try:
+        usage.check(db)
+    except usage.UsageExceeded as e:
+        pace.mark_capped(db, settings.review_provider, str(e))
+        return False, waiting, "상한을 넘어 멈춤"
+    pace.clear_capped(db, settings.review_provider)
 
     if waiting >= REVIEW_BATCH:
         return True, waiting, f"{waiting}건 모임"
@@ -299,18 +312,6 @@ async def review_job(db: Session) -> JobResult:
     # 뒤 재시도하면 그때까지 쓴 시간이 버려지고 실패 기록도 남습니다.
     if resources.memory_tight():
         logger.info("[review] 메모리가 빡빡해 이번 차례는 건너뜁니다 (대기 %d건)", waiting)
-        return r
-
-    # **상한은 실행 기록을 만들기 전에 봅니다.**
-    #
-    # 예전에는 `review_pending` 안에서 영상마다 확인했습니다. 그래서 창의
-    # 토큰을 다 쓴 뒤에도 매 틱 실행 기록이 하나씩 생기고 "상한에 닿았습니다"
-    # 가 세 줄씩 쌓였습니다 — 아무것도 안 하면서요. 창이 언제 바뀌는지는
-    # 정확히 아니까, 그때까지 쉬고 기록도 남기지 않습니다.
-    try:
-        usage.check(db)
-    except usage.UsageExceeded as e:
-        pace.rest_until(db, settings.review_provider, usage.window_end(), str(e))
         return r
 
     run = _start(db, "review", "scheduled", f"요약 — 대기 {waiting}건 ({why})")
