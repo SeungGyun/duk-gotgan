@@ -281,3 +281,44 @@ def test_위스퍼가_모르는_언어는_자동_감지로_넘긴다():
     assert _whisper_language("ko") == "ko"
     assert _whisper_language("zx") is None, "모르는 코드는 None (자동 감지)"
     assert _whisper_language("") is None
+
+
+def test_일시적_다운로드_실패는_탈락이_아니다():
+    """403·네트워크로 실패한 36편이 영구 탈락으로 쌓였는데, 나중에 그중
+    34편이 그대로 받아졌습니다. 사유에 예외 타입만(`(DownloadError)`)
+    적혀 있어서 로그만 봐서는 알 수도 없었습니다.
+
+    요약 쪽에서 두 번 겪은 것과 같은 실수입니다."""
+    import inspect
+
+    from app.collector import asr, transcript as T
+
+    src = inspect.getsource(asr._download_audio)
+    assert "AudioTemporary" in src, "일시적 실패를 갈라야 합니다"
+    assert "_PERMANENT" in src, "영영 안 되는 것만 영구 탈락입니다"
+    # 예외 타입만 적으면 원인을 알 수 없습니다
+    assert "type(e).__name__" not in src
+
+    fetch = inspect.getsource(T.fetch_via_asr)
+    assert "asr.AudioTemporary" in fetch and "TranscriptRetry" in fetch
+
+
+def test_영영_안_되는_것은_그대로_탈락한다():
+    """전부 일시적으로 만들면 멤버십 전용 영상이 큐를 영원히 맴돕니다."""
+    from app.collector.asr import _PERMANENT
+
+    for sig in ("members-only", "video is private", "has been removed"):
+        assert sig in _PERMANENT
+
+
+def test_다시_보기에도_상한이_있다():
+    """되살리려다 큐를 맴도는 영상을 만들면, 그것 때문에 뒤의 멀쩡한
+    것들이 계속 밀립니다."""
+    import inspect
+
+    from app.collector import transcript as T
+
+    assert T.MAX_TRANSCRIPT_RETRY >= 2
+    src = inspect.getsource(T.transcribe_pending)
+    assert "MAX_TRANSCRIPT_RETRY" in src
+    assert "_retries(db, video)" in src

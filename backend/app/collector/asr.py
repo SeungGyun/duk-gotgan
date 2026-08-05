@@ -39,13 +39,42 @@ class AsrUnavailable(Exception):
 
 
 class AudioUnavailable(Exception):
-    """**이 영상의** 소리를 받을 수 없습니다 (403, 비공개, 멤버십 전용 등).
+    """**이 영상의** 소리를 영영 받을 수 없습니다 (비공개·삭제·멤버십 전용).
 
     `AsrUnavailable` 과 갈라 두는 이유가 있습니다. 이걸 구분하지 않았더니
     영상 한 편의 403 이 사이클 전체를 죽였습니다 — 자막도 검토도 못 하고
     실행 기록이 `running` 인 채로 남았습니다. 영상 하나의 문제는 그 영상만
     실패로 적고 다음으로 넘어가야 합니다.
     """
+
+
+class AudioTemporary(Exception):
+    """지금은 못 받지만 **영상 탓은 아닙니다** (403, 네트워크, 스로틀링).
+
+    이걸 `AudioUnavailable` 과 뭉뚱그렸더니 36편이 영구 탈락으로 쌓였고,
+    나중에 그중 **34편이 그대로 받아졌습니다.** 사유에 예외 타입만
+    (`(DownloadError)`) 적혀 있어서 로그만 봐서는 알 수도 없었습니다.
+
+    요약 쪽에서 두 번 겪은 것과 같은 실수입니다 (llm/runner.py `_TRANSIENT`).
+    """
+
+
+# 영영 안 되는 것들. 이 말이 들어 있으면 다시 시도해도 소용없습니다.
+_PERMANENT = (
+    "members-only",
+    "members only",
+    "이 채널의 멤버",
+    "private video",
+    "video is private",
+    "has been removed",
+    "no longer available",
+    "not available",
+    "account associated with this video has been terminated",
+    "removed by the uploader",
+    "age-restricted",
+    "sign in to confirm your age",
+    "copyright",
+)
 
 
 @dataclass
@@ -126,8 +155,13 @@ def _download_audio(video_id: str, workdir: str) -> str:
             path = y.prepare_filename(info)
         size = os.path.getsize(path)
     except Exception as e:  # noqa: BLE001 — yt-dlp 는 예외를 세분화하지 않습니다
-        # 403·비공개·지역제한·멤버십 전용 등. **이 영상만의 문제입니다.**
-        raise AudioUnavailable(f"오디오를 받지 못했습니다 ({type(e).__name__})") from e
+        # **예외 타입만 적으면 안 됩니다.** `(DownloadError)` 라고만 남겼더니
+        # 36편이 왜 실패했는지 알 수 없었고, 그중 34편은 나중에 그대로
+        # 받아졌습니다 — 일시적 403 이었는데 영구 탈락으로 적힌 것입니다.
+        detail = " ".join(str(e).split())[:200]
+        if any(sig in detail.lower() for sig in _PERMANENT):
+            raise AudioUnavailable(f"오디오를 받을 수 없습니다 — {detail}") from e
+        raise AudioTemporary(f"오디오를 지금 받지 못했습니다 — {detail}") from e
     logger.info(
         "[asr] %s 오디오 %.1fMB · %.0f초", video_id, size / 1e6, time.time() - t0
     )

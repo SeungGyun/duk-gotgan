@@ -20,7 +20,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import (
@@ -66,6 +66,11 @@ CHARS_PER_TOKEN = 1.7
 # 반면 10분짜리가 8자만 나온 경우도 있어서, 영상 길이는 기준이 못 됩니다.
 MIN_SUMMARY_CHARS = 200
 
+# 일시적 실패로 미룰 수 있는 횟수. 403 은 대개 한두 번이면 풀립니다 —
+# 다섯 번을 넘기면 일시적이 아니라 그 영상의 문제로 봅니다. 상한이
+# 없으면 안 되는 영상 하나가 큐를 맴돌며 뒤의 멀쩡한 것들을 밀어냅니다.
+MAX_TRANSCRIPT_RETRY = 5
+
 
 # 자막 출처 표시. 화면과 판정 근거에 그대로 남습니다 — 어느 경로로 받은
 # 글인지 모르면 요약이 이상할 때 원인을 좁힐 수 없습니다.
@@ -74,6 +79,16 @@ LOCAL_ASR = "local_asr"
 
 class TranscriptUnavailable(Exception):
     """이 영상에서는 자막을 얻을 수 없습니다. 사유는 사람 말로 씁니다."""
+
+
+class TranscriptRetry(Exception):
+    """지금은 못 얻었지만 **영상 탓이 아닙니다.** 대기로 되돌려 다음에 봅니다.
+
+    `TranscriptUnavailable` 과 갈라 두는 이유. 뭉뚱그렸더니 일시적 403 으로
+    실패한 36편이 영구 탈락으로 쌓였고, 나중에 그중 34편이 그대로
+    받아졌습니다. `Blocked` 와도 다릅니다 — 그쪽은 IP 가 막혀 **전체를**
+    멈춰야 하는 경우이고, 이건 그 영상 하나만 뒤로 미루면 됩니다.
+    """
 
 
 class Blocked(Exception):
@@ -425,6 +440,29 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
             result["blocked"] = True
             result["error"] = f"{e} ({wait}분 후 재개)"
             break
+        except TranscriptRetry as e:
+            # **끝없이 다시 보지는 않습니다.** 되살리려다 큐를 맴도는 영상을
+            # 만들면, 그것 때문에 뒤의 멀쩡한 것들이 계속 밀립니다.
+            tried = _retries(db, video) + 1
+            _event(db, video, run_id, "TRANSCRIBING", "TRANSCRIPT_PENDING", False, str(e))
+            if tried >= MAX_TRANSCRIPT_RETRY:
+                video.state = "FAILED_TRANSCRIPT"
+                video.state_reason = f"자막 없음 · {MAX_TRANSCRIPT_RETRY}번 시도했습니다 — {e}"
+                db.commit()
+                result["failed"] += 1
+                result["rows"].append((video.title, "✕", f"{tried}회 실패 — {e}"))
+                continue
+            # 탈락이 아닙니다. 사유는 비워 둡니다 — 남기면 화면의 "실패"
+            # 목록에 뜨는데, 실패한 게 아니라 줄 뒤로 간 것뿐입니다.
+            video.state = "TRANSCRIPT_PENDING"
+            video.state_reason = None
+            db.commit()
+            logger.info(
+                "[transcript] %s 는 다음에 다시 봅니다 (%d/%d) — %s",
+                video.id, tried, MAX_TRANSCRIPT_RETRY, e,
+            )
+            result["rows"].append((video.title, "·", f"다음에 다시 ({tried}회) — {e}"))
+            continue
         except TranscriptUnavailable as e:
             video.state = "FAILED_TRANSCRIPT"
             video.state_reason = f"자막 없음 · {e}"
@@ -531,12 +569,38 @@ def fetch_via_asr(video: Video) -> Fetched:
         # 이 영상만의 문제입니다. 자막 없음으로 적고 다음 영상으로 넘어갑니다 —
         # 차단으로 다루면 멀쩡한 나머지까지 60분씩 멈춥니다.
         raise TranscriptUnavailable(str(e)) from None
+    except asr.AudioTemporary as e:
+        # **영상 탓이 아닙니다.** 403·네트워크는 다음 사이클에 그대로 됩니다 —
+        # 실제로 이렇게 탈락한 36편 중 34편이 나중에 받아졌습니다.
+        raise TranscriptRetry(str(e)) from None
     except asr.AsrUnavailable as e:
         # 받아쓰기까지 못 하면 **차단으로 다룹니다.** 이 영상만의 문제인지
         # IP 문제인지 구분할 수 없는데, 자막 없음으로 기록해 버리면 나중에
         # 차단이 풀려도 다시 시도하지 않습니다.
         raise Blocked(f"자막 경로가 모두 막혔고 받아쓰기도 못 했습니다 — {e}") from None
     return Fetched(source=LOCAL_ASR, language=r.language, segments=r.segments)
+
+
+def _retries(db: Session, video: Video) -> int:
+    """이 영상을 일시적 실패로 몇 번 미뤘나.
+
+    **이력에서 셉니다.** 컬럼을 더할 만한 값이 아니고, `pipeline_events` 는
+    이미 영상별 이력을 들고 있습니다. 미룰 때만 `TRANSCRIBING →
+    TRANSCRIPT_PENDING` 이벤트를 남기므로 그것만 세면 됩니다.
+    """
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(PipelineEvent)
+            .where(
+                PipelineEvent.video_id == video.id,
+                PipelineEvent.stage == "transcript",
+                PipelineEvent.from_state == "TRANSCRIBING",
+                PipelineEvent.to_state == "TRANSCRIPT_PENDING",
+            )
+        )
+        or 0
+    )
 
 
 def _event(db: Session, video: Video, run_id, frm: str, to: str, ok: bool, detail: str) -> None:
