@@ -217,7 +217,7 @@ class LimitPatch(BaseModel):
 
 @router.put("/stats/usage/limit", status_code=204)
 def set_limit(patch: LimitPatch, db: Session = Depends(get_db), _: User = Depends(require_owner)):
-    """토큰 상한을 바꿉니다. **주인만** 할 수 있습니다.
+    """토큰 상한을 바꿉니다. **관리자만** 할 수 있습니다.
 
     **.env 가 아니라 DB 에 둡니다.** 설정 파일을 고치고 프로세스를
     재시작해야 한다면, 쓰다가 "조금만 올려 보자"를 할 수 없습니다.

@@ -806,8 +806,8 @@ UPDATE videos
   app_state  usage.token_limit_per_window              공용
              usage.token_limit_per_window:antigravity  이 회사만
 
-**바꾸는 것은 주인만입니다.** 자물쇠가 셋입니다 — `/dashboard` 라우트가
-주인 전용이고(App.tsx), 패널이 편집 손잡이를 가리고, `PUT
+**바꾸는 것은 관리자만입니다.** 자물쇠가 셋입니다 — `/dashboard` 라우트가
+관리자 전용이고(App.tsx), 패널이 편집 손잡이를 가리고, `PUT
 /stats/usage/limit` 이 `require_owner` 로 403 을 냅니다. **보는 것은 막지
 않습니다** — 식구도 얼마나 썼는지는 봅니다.
 

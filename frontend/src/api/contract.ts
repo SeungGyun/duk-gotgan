@@ -3,8 +3,8 @@ import type {
   Keyword,
   KeywordDraft,
   LectureDetail,
+  LecturePage,
   LectureQuery,
-  LectureSummary,
   Me,
   Overview,
   Person,
@@ -39,7 +39,7 @@ export interface Api {
   /** 지금 누구인지. 쿠키가 없으면 401 이 나고 선택 화면으로 갑니다. */
   getMe(): Promise<Me>;
   renameMe(name: string): Promise<Person>;
-  /** 비밀번호를 걸거나 바꿉니다. next 가 null 이면 풀기(주인은 불가). */
+  /** 비밀번호를 걸거나 바꿉니다. next 가 null 이면 풀기(관리자는 불가). */
   setPin(current: string | null, next: string | null): Promise<void>;
 
   // 키워드
@@ -60,7 +60,9 @@ export interface Api {
   restoreKeyword(id: string): Promise<Keyword>;
 
   // 강의
-  listLectures(query: LectureQuery): Promise<LectureSummary[]>;
+  /** 목록 한 쪽. **전체를 다 주지 않습니다** — 809편이 374KB 였습니다.
+   *  `limit`·`offset` 으로 끊어 받고, 개수와 최신 시각은 전체 기준으로 옵니다. */
+  listLectures(query: LectureQuery): Promise<LecturePage>;
   getLecture(videoId: string): Promise<LectureDetail>;
   setFavorite(videoId: string, isFavorite: boolean): Promise<void>;
   /** 읽음 표시. 목록을 다시 부르지 않으므로 보는 중에 순서가 흔들리지 않습니다. */
@@ -75,12 +77,12 @@ export interface Api {
   // 운영
   getOverview(): Promise<Overview>;
   getUsage(): Promise<Usage>;
-  /** 토큰 상한을 바꿉니다. **주인만 됩니다** (식구는 403).
+  /** 토큰 상한을 바꿉니다. **관리자만 됩니다** (식구는 403).
    *
    *  0 이면 무제한, null 이면 설정 기본값으로. `provider` 를 주면 그 회사만
    *  바뀌고, 안 주면 공용 값이 바뀝니다 — 자기 값이 없는 회사가 물려받습니다. */
   setTokenLimit(limitTokens: number | null, provider?: string): Promise<void>;
-  /** 이 회사만 걸어 둔 상한을 지우고 공용 값으로 되돌립니다. 주인만 됩니다. */
+  /** 이 회사만 걸어 둔 상한을 지우고 공용 값으로 되돌립니다. 관리자만 됩니다. */
   inheritTokenLimit(provider: string): Promise<void>;
   listRuns(): Promise<Run[]>;
   /** 지금 파이프라인 상태 — 각 칸의 대기 수와 지금 하는 일. */

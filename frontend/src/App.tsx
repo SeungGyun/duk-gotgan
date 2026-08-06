@@ -43,7 +43,7 @@ function Shell({ me, onMeChanged }: { me: Me; onMeChanged: () => void }) {
   const usage = useAsync(() => api.getUsage(), []);
   const overview = useAsync(() => api.getOverview(), []);
   const keywords = useAsync(() => api.listKeywords(), []);
-  // 실행 기록은 주인만 봅니다 — 식구에게는 세어 봐야 쓸 데가 없습니다.
+  // 실행 기록은 관리자만 봅니다 — 식구에게는 세어 봐야 쓸 데가 없습니다.
   const runs = useAsync(() => (isOwner ? api.listRuns() : Promise.resolve([])), [isOwner]);
 
   return (
@@ -61,16 +61,18 @@ function Shell({ me, onMeChanged }: { me: Me; onMeChanged: () => void }) {
         </div>
       )}
 
-      {/* 첫 비밀번호(0000) 그대로면 선택 화면에서 누구나 주인으로 들어갈 수
-          있습니다 — 그러면 "주인만 지금 실행" 이 잠금이 아니라 표시가 됩니다.
+      {/* 첫 비밀번호(0000) 그대로면 선택 화면에서 누구나 관리자로 들어갈 수
+          있습니다 — 그러면 "관리자만 지금 실행" 이 잠금이 아니라 표시가 됩니다.
           **어디서 바꾸는지를 여기서 가리킵니다** — 안 그러면 띠만 보고
           어디로 가야 할지 몰라 그대로 두게 됩니다. */}
       {pinIsDefault && (
         <div className={s.pinNote}>
           <div className={s.mockNoteInner}>
             <b>비밀번호가 0000 입니다</b>
+            {/* 선택 화면의 버튼에는 이 사람의 **이름**이 적혀 있습니다.
+                이름을 바꾸면 문구도 따라가야 하므로 값에서 가져옵니다. */}
             <span>
-              같은 공유기에 붙은 사람 누구나 <b>주인</b>을 눌러 들어올 수 있습니다.
+              같은 공유기에 붙은 사람 누구나 <b>{name}</b>을(를) 눌러 들어올 수 있습니다.
               오른쪽 위 <b>{name}</b> 을(를) 눌러 바꿔 주세요.
             </span>
           </div>
@@ -90,7 +92,7 @@ function Shell({ me, onMeChanged }: { me: Me; onMeChanged: () => void }) {
         <Routes>
           {/* **메인은 덕질입니다.** 곳간에 들어오는 이유가 읽으려는
               것이지 기계가 잘 도는지 보려는 것이 아닙니다. 대시보드는
-              주인이 필요할 때 찾아가는 화면이라 주소를 따로 줍니다. */}
+              관리자가 필요할 때 찾아가는 화면이라 주소를 따로 줍니다. */}
           <Route path="/" element={<Navigate to="/lectures" replace />} />
 
           <Route path="/lectures" element={<Lectures />} />

@@ -117,9 +117,10 @@ def fresh(db):
 
 
 def titles(client):
-    r = client.get(f"{API}/lectures")
+    """목록은 쪽으로 옵니다. 시험은 몇 편 안 되니 한 번에 받습니다."""
+    r = client.get(f"{API}/lectures", params={"limit": 200})
     assert r.status_code == 200, r.text
-    return {x["title"] for x in r.json()}
+    return {x["title"] for x in r.json()["items"]}
 
 
 # ── 시험 ───────────────────────────────────────────────────────
@@ -206,10 +207,10 @@ def test_읽음은_누른_사람만_바뀐다(client, db):
 
     login(client, 주인)
     assert client.patch(f"{API}/lectures/vid_k_000001", json={"isRead": True}).status_code == 204
-    assert client.get(f"{API}/lectures").json()[0]["isRead"] is True
+    assert client.get(f"{API}/lectures").json()["items"][0]["isRead"] is True
 
     login(client, 아내)
-    assert client.get(f"{API}/lectures").json()[0]["isRead"] is False, (
+    assert client.get(f"{API}/lectures").json()["items"][0]["isRead"] is False, (
         "남이 읽은 것이 내게 읽음으로 보이면 안 됩니다"
     )
 
@@ -228,7 +229,7 @@ def test_제외도_누른_사람만_바뀐다(client, db):
     login(client, 주인)
     client.patch(f"{API}/lectures/vid_k_000001", json={"isExcluded": True})
     assert titles(client) == set()
-    assert client.get(f"{API}/lectures?excluded=true").json()[0]["title"] == "CNI 플러그인"
+    assert client.get(f"{API}/lectures?excluded=true").json()["items"][0]["title"] == "CNI 플러그인"
 
     login(client, 아내)
     assert titles(client) == {"CNI 플러그인"}, "남이 뺀 것이 내게서 사라지면 안 됩니다"
@@ -314,6 +315,57 @@ def test_남이_만든_키워드는_구독만_하면_된다(client, db):
     assert client.post(f"{API}/keywords/{kw.id}/subscribe").status_code == 201
     assert titles(client) == {"CNI 플러그인"}
     assert fresh(db).query(Keyword).count() == 1, "키워드 행이 늘면 수집이 두 배가 됩니다"
+
+
+def test_남이_만든_키워드는_구독해도_못_고친다(client, db):
+    """설정은 키워드에 붙어 있어 고치면 **구독자 모두에게** 퍼집니다.
+
+    구독자면 누구나 고칠 수 있게 두면 남이 정해 둔 값을 모르고 바꾸게
+    됩니다 — 알림도 되돌릴 방법도 없이. 그래서 만든 사람에게만 엽니다.
+    """
+    아내 = a_user(db, "아내")
+    주인 = a_user(db, "주인", owner=True)
+
+    # 아내가 만듭니다 — 라우트를 그대로 태워야 created_by 가 찍힙니다.
+    login(client, 아내)
+    made = client.post(f"{API}/keywords", json={"term": "쿠버네티스", "minDurationSec": 300})
+    assert made.status_code == 201, made.text
+    kid = made.json()["id"]
+    assert made.json()["canEdit"] is True
+    assert made.json()["createdByName"] == "아내"
+
+    # 주인이 구독합니다. 구독은 누구나 됩니다.
+    login(client, 주인)
+    assert client.post(f"{API}/keywords/{kid}/subscribe").status_code == 201
+
+    mine = client.get(f"{API}/keywords").json()
+    assert [k["term"] for k in mine] == ["쿠버네티스"]
+    assert mine[0]["isMine"] is True, "구독은 됐습니다"
+    assert mine[0]["canEdit"] is False, "만든 사람이 아니면 못 고칩니다"
+    assert mine[0]["createdByName"] == "아내", "왜 못 고치는지 화면이 말할 수 있어야 합니다"
+
+    # 설정 수정도, 일시정지도 같은 통로로 막힙니다.
+    r = client.patch(f"{API}/keywords/{kid}", json={"minExpertScore": 10})
+    assert r.status_code == 403, r.text
+    assert r.json()["error"]["code"] == "NOT_KEYWORD_AUTHOR"
+    assert client.patch(f"{API}/keywords/{kid}", json={"status": "paused"}).status_code == 403
+    assert fresh(db).get(Keyword, kid).min_expert_score != 10, "값이 실제로 안 바뀌어야 합니다"
+
+    # **주인도 예외가 아닙니다.** 규칙이 하나라야 화면에서 설명할 것이 없습니다.
+    assert fresh(db).get(Keyword, kid).status != "paused"
+
+    # 빼기는 내 구독만 끊는 일이라 그대로 됩니다.
+    assert client.delete(f"{API}/keywords/{kid}").status_code == 204
+
+
+def test_만든_사람은_고칠_수_있다(client, db):
+    아내 = a_user(db, "아내")
+    login(client, 아내)
+    kid = client.post(f"{API}/keywords", json={"term": "카프카"}).json()["id"]
+
+    r = client.patch(f"{API}/keywords/{kid}", json={"minExpertScore": 10})
+    assert r.status_code == 200, r.text
+    assert fresh(db).get(Keyword, kid).min_expert_score == 10
 
 
 def test_키워드는_열_개까지_주인은_예외(client, db):

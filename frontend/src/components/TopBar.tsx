@@ -12,28 +12,80 @@ const TB_H = 54;
  * 아래로 스크롤하면 상단바를 접고, 위로 올리거나 커서를 화면 맨 위로
  * 가져가면 편다. sticky 패널들이 같이 올라붙도록 --tb-off 도 함께 바꾼다.
  *
- * 모션 축소 설정에서는 자동 숨김 자체를 끈다.
+ * **높이는 재서 씁니다.** 54px 을 박아 두었었는데, 좁은 화면에서는 메뉴가
+ * 두 줄로 접혀 상단바가 133px 이 됩니다 — 그런데 목록 패널이 이 값을
+ * 기준으로 붙어 있어서 79px 만큼 상단바 뒤로 들어가 있었습니다. 재면
+ * 메뉴가 몇 줄이 되든 따라갑니다.
+ *
+ * 지금 상태는 `<html data-chrome>` 으로 내보냅니다. **세 단계입니다** —
+ * 되돌아오는 이유가 저마다 달라서 한 단계로는 맞출 수가 없습니다:
+ *
+ * - `hidden` — 내리는 중. 읽는 중이니 본문만 남깁니다.
+ * - `peek`   — 스크롤을 올림. 메뉴와 **검색칸까지만**. 되돌아온 김에
+ *              찾으려는 것이지 거르려는 것이 아닙니다. 목록·필터 손잡이까지
+ *              따라 나오면 읽던 자리를 두 줄이나 덮습니다.
+ * - `full`   — 맨 위이거나 커서를 화면 꼭대기로 가져감. 작정하고 만지러
+ *              온 것이니 손잡이를 다 냅니다.
+ *
+ * 접힘의 근거를 화면마다 따로 두면 둘이 어긋나 한쪽만 남습니다. 그래서
+ * 여기 한 곳에서만 정하고, 따라 움직일 것들이 이 값을 봅니다.
+ *
+ * 모션 축소 설정에서는 자동 숨김만 끕니다. 높이 재기는 그대로입니다.
  */
-function useTuckOnScroll() {
+type Chrome = "hidden" | "peek" | "full";
+
+function useTuckOnScroll(barRef: React.RefObject<HTMLElement | null>) {
   const [tucked, setTucked] = useState(false);
   const lastY = useRef(0);
   const nearTop = useRef(false);
+  // 지금 펼쳐진 상단바의 실제 높이와, 지금 접혀 있는지
+  const shown = useRef(TB_H);
+  const isTucked = useRef(false);
+
+  // 높이 재기 — 폭이 바뀌어 메뉴 줄 수가 달라지면 다시 잽니다.
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el) return;
+    const measure = () => {
+      const h = el.getBoundingClientRect().height;
+      if (!h) return;
+      shown.current = h;
+      if (!isTucked.current)
+        document.documentElement.style.setProperty("--tb-off", `${h}px`);
+    };
+    measure();
+    // 모션 축소 설정이면 아래 효과가 통째로 빠지므로 여기서 세워 둡니다 —
+    // 값이 없으면 따라 움직이는 쪽이 어느 상태인지 알 수 없습니다.
+    if (!document.documentElement.dataset.chrome)
+      document.documentElement.dataset.chrome = "full";
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [barRef]);
 
   useEffect(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
     let queued = false;
 
-    const apply = (next: boolean) => {
-      setTucked(next);
-      document.documentElement.style.setProperty("--tb-off", next ? "0px" : `${TB_H}px`);
+    const apply = (next: Chrome) => {
+      const hidden = next === "hidden";
+      isTucked.current = hidden;
+      setTucked(hidden);
+      document.documentElement.style.setProperty(
+        "--tb-off",
+        hidden ? "0px" : `${shown.current}px`,
+      );
+      document.documentElement.dataset.chrome = next;
     };
 
     const onFrame = () => {
       const y = window.scrollY;
-      if (nearTop.current || y <= 8) apply(false);
-      else if (y > lastY.current + 4 && y > 90) apply(true);
-      else if (y < lastY.current - 4) apply(false);
+      // 맨 위이거나 커서가 꼭대기에 있으면 다 냅니다. 내리는 중이면 감추고,
+      // 올리는 중이면 메뉴와 검색까지만.
+      if (nearTop.current || y <= 8) apply("full");
+      else if (y > lastY.current + 4 && y > 90) apply("hidden");
+      else if (y < lastY.current - 4) apply("peek");
       lastY.current = y;
       queued = false;
     };
@@ -46,7 +98,7 @@ function useTuckOnScroll() {
 
     const onPointer = (e: PointerEvent) => {
       nearTop.current = e.clientY < 56;
-      if (nearTop.current) apply(false);
+      if (nearTop.current) apply("full");
     };
 
     window.addEventListener("scroll", onScroll, { passive: true });
@@ -54,7 +106,8 @@ function useTuckOnScroll() {
     return () => {
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("pointermove", onPointer);
-      document.documentElement.style.setProperty("--tb-off", `${TB_H}px`);
+      document.documentElement.style.setProperty("--tb-off", `${shown.current}px`);
+      document.documentElement.dataset.chrome = "full";
     };
   }, []);
 
@@ -79,7 +132,8 @@ export function TopBar({
   me: Me;
   onMeChanged: () => void;
 }) {
-  const tucked = useTuckOnScroll();
+  const bar = useRef<HTMLElement>(null);
+  const tucked = useTuckOnScroll(bar);
   const used = usage ? usage.inputTokens + usage.outputTokens : 0;
   const limit = usage?.limitTokens ?? null;
   // 언제 풀리는지가 "지금 아껴야 하나"의 답입니다. 남은 시간이 짧으면
@@ -91,8 +145,14 @@ export function TopBar({
 
   return (
     <header
+      ref={bar}
       className={`${s.bar} ${tucked ? s.tucked : ""}`}
-      onFocus={() => document.documentElement.style.setProperty("--tb-off", `${TB_H}px`)}
+      onFocus={() =>
+        document.documentElement.style.setProperty(
+          "--tb-off",
+          `${bar.current?.getBoundingClientRect().height ?? TB_H}px`,
+        )
+      }
     >
       <div className={s.inner}>
       {/* 이름표는 덕질로 갑니다 — 여기가 메인입니다. */}
@@ -258,9 +318,14 @@ function Account({
 
   return (
     <div className={s.menu} role="dialog" aria-label="계정">
+      {/* 이름 옆의 역할. 이름이 곧 역할 이름이면(기본 계정이 "관리자") 같은
+          말이 두 번 나오므로 접습니다. */}
       <div className={s.menuHead}>
         <b>{me.name}</b>
-        <span>{me.isOwner ? "주인" : "식구"}</span>
+        {(() => {
+          const role = me.isOwner ? "관리자" : "식구";
+          return me.name === role ? null : <span>{role}</span>;
+        })()}
       </div>
 
       <div className={s.menuBody}>

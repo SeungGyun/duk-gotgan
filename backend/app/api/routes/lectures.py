@@ -31,7 +31,7 @@ from app.db.models import (
     VideoKeyword,
 )
 from app.db.session import get_db
-from config.time import from_utc_iso, now_kst
+from config.time import from_utc_iso, now_kst, to_utc_iso
 
 router = APIRouter(prefix="/lectures", tags=["lectures"])
 
@@ -143,7 +143,7 @@ def _filtered(f: Filters):
                 ul.is_favorite.is_(True),
             ),
             # 내가 막은 채널은 숨깁니다. **수집을 멈추지는 않습니다** —
-            # 그건 모두에게 영향을 주는 결정이라 채널 화면에서 주인이 합니다.
+            # 그건 모두에게 영향을 주는 결정이라 채널 화면에서 관리자가 합니다.
             ~select(UserChannelBlock.channel_id)
             .where(
                 UserChannelBlock.user_id == f.user_id,
@@ -208,9 +208,22 @@ def list_lectures(
     favorites_only: bool = Query(default=False),
     excluded: bool = Query(default=False, description="제외함을 봅니다"),
     sort: str = Query(default=DEFAULT_SORT),
+    limit: int = Query(default=60, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):
+    """**한 쪽씩 줍니다.**
+
+    예전에는 걸린 것을 통째로 돌려줬습니다. 809편이 되자 한 번에 374KB 를
+    보내게 됐고, 집 안 와이파이로 폰에서 열면 첫 글자가 뜨기까지 그 전부를
+    기다려야 했습니다. 정작 화면에 처음 보이는 것은 열몇 편입니다.
+
+    `total` 과 `latestAddedAt` 은 **걸린 것 전체**를 두고 셉니다 — 쪽을
+    나눴다고 "805편"이 "60편"으로 보이면 안 되고, "새로 온 것" 기준 시각도
+    받아 둔 쪽에서만 고르면 다음 쪽에 있는 더 최신 것을 놓쳐 이미 본 것을
+    새 것으로 셉니다.
+    """
     if sort not in SORT_KEYS:
         raise ApiError(
             400,
@@ -223,14 +236,22 @@ def list_lectures(
             favorites_only, excluded,
         )
     )
-    stmt = stmt.order_by(*_sort("added" if excluded else sort, ul))
+    total = int(db.scalar(stmt.with_only_columns(func.count()).order_by(None)) or 0)
+    latest = db.scalar(stmt.with_only_columns(func.max(Lecture.published_at)).order_by(None))
 
-    rows = db.execute(stmt).unique().all()
+    stmt = stmt.order_by(*_sort("added" if excluded else sort, ul))
+    rows = db.execute(stmt.limit(limit).offset(offset)).unique().all()
     kmap = _keyword_map(db, [r[0].video_id for r in rows])
-    return [
-        lecture_summary_out(lec, kmap.get(lec.video_id, []), _marks(r, fav, exc))
-        for lec, r, fav, exc in rows
-    ]
+    return {
+        "items": [
+            lecture_summary_out(lec, kmap.get(lec.video_id, []), _marks(r, fav, exc))
+            for lec, r, fav, exc in rows
+        ],
+        "total": total,
+        # 곳간에 가장 마지막으로 들어온 시각. 화면이 "새로 온 것" 을 셀 때
+        # 기준으로 씁니다.
+        "latestAddedAt": to_utc_iso(latest) if latest else None,
+    }
 
 
 @router.get("/updates")
@@ -354,11 +375,11 @@ def patch_lecture(
 def delete_lecture(
     video_id: str, db: Session = Depends(get_db), user: User = Depends(require_owner)
 ):
-    """완전삭제 — 요약을 지웁니다. **주인만.**
+    """완전삭제 — 요약을 지웁니다. **관리자만.**
 
     이건 모두에게 영향이 갑니다. 요약 행 하나를 지우면 그것을 구독한 다른
     사람의 곳간에서도 사라지고, 그 사람은 **지운 적이 없는데 없어진 것**을
-    보게 됩니다. 되돌릴 방법도 없습니다. 그래서 주인만 누릅니다 — 식구는
+    보게 됩니다. 되돌릴 방법도 없습니다. 그래서 관리자만 누릅니다 — 식구는
     제외함에 두거나 복구하면 됩니다.
 
     **영상 행은 남깁니다.** `videos` 의 PK 가 유튜브 id 라서, 그 행이

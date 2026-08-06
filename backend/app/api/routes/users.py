@@ -19,7 +19,7 @@ from config.settings import settings
 
 router = APIRouter(tags=["users"])
 
-# 처음 만들어 두는 주인 비밀번호. 화면이 이 값 그대로인지 알아보고
+# 처음 만들어 두는 관리자 비밀번호. 화면이 이 값 그대로인지 알아보고
 # "바꾸세요" 를 띄웁니다.
 DEFAULT_PIN = "0000"
 
@@ -91,7 +91,7 @@ def user_out(u: User, lecture_count: int = 0) -> dict:
 def list_users(db: Session = Depends(get_db)):
     """선택 화면. **로그인 없이 열립니다** — 이게 로그인 전 화면입니다."""
     rows = db.scalars(
-        # 주인이 앞에, 나머지는 만든 순서대로. 매번 자리가 바뀌면 누르는
+        # 관리자가 앞에, 나머지는 만든 순서대로. 매번 자리가 바뀌면 누르는
         # 위치를 외울 수 없습니다.
         select(User).order_by(User.is_owner.desc(), User.created_at)
     ).all()
@@ -174,12 +174,12 @@ def me(user: User = Depends(current_user), db: Session = Depends(get_db)):
         {
             "keywordCount": _keyword_count(db, user.id),
             "keywordLimit": (
-                # 주인은 상한을 넘겨 쓰고 계실 수 있습니다 — 상한을 넣었다고
+                # 관리자는 상한을 넘겨 쓰고 계실 수 있습니다 — 상한을 넣었다고
                 # 지금 쓰는 것을 지우라고 할 수는 없어서 예외로 둡니다.
                 0 if user.is_owner else settings.max_keywords_per_user
             ),
             # 첫 비밀번호(0000) 그대로면 화면이 바꾸라고 띄웁니다. 선택
-            # 화면에 주인이 그냥 떠 있으므로, 이게 그대로면 "주인만" 이라는
+            # 화면에 관리자가 그냥 떠 있으므로, 이게 그대로면 "관리자만" 이라는
             # 제한이 잠금이 아니라 표시가 됩니다.
             "pinIsDefault": verify_pin(DEFAULT_PIN, user.password_hash),
         }
@@ -205,9 +205,9 @@ def set_pin(
 ):
     """비밀번호를 걸거나 바꾸거나 풉니다 (`next` 를 비우면 풀림).
 
-    **주인은 풀 수 없습니다.** 선택 화면에 주인이 그냥 떠 있어서, 비밀번호가
-    없으면 같은 공유기에 붙은 누구나 눌러서 주인이 됩니다 — 그러면
-    "주인만 지금 실행" 이 잠금이 아니라 그냥 표시가 됩니다.
+    **관리자는 풀 수 없습니다.** 선택 화면에 관리자가 그냥 떠 있어서, 비밀번호가
+    없으면 같은 공유기에 붙은 누구나 눌러서 관리자가 됩니다 — 그러면
+    "관리자만 지금 실행" 이 잠금이 아니라 그냥 표시가 됩니다.
     """
     if user.password_hash:
         if not body.current:
@@ -219,7 +219,7 @@ def set_pin(
             raise ApiError(
                 400,
                 "OWNER_NEEDS_PIN",
-                "주인은 비밀번호를 비울 수 없습니다. 선택 화면에서 누구나 주인으로 들어가게 됩니다.",
+                "관리자는 비밀번호를 비울 수 없습니다. 선택 화면에서 누구나 관리자로 들어가게 됩니다.",
             )
         user.password_hash = None
     else:

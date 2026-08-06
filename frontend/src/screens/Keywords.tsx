@@ -15,17 +15,18 @@ import { useMe } from "../me";
 import { languageLabel, num, scheduleLabel, when } from "../lib/format";
 import s from "./Keywords.module.css";
 
-/** 수집 방식마다 최소 길이 기본값이 다릅니다.
+/** 최소 길이 기본값 — 두 방식 모두 5분.
  *
- *  검색(20분) — 유튜브 검색이 short/medium/long 세 칸으로만 걸러서, 20분보다
- *  낮게 잡아도 실제로는 20분 초과만 들어옵니다. **API 제약에서 나온 숫자**이지
- *  강의 품질 기준이 아닙니다.
+ *  **쇼츠만 걸러내는 자리입니다.** 0 으로 두면 1분짜리 클립이 그대로 들어와
+ *  자막도 요약도 한 번씩 태우는데, 남는 것이 없습니다. 5분이면 클립은 빠지고
+ *  짧은 본편은 남습니다.
  *
- *  채널(10분) — 업로드 목록에는 그 제약이 없어 우리가 직접 거릅니다. 실측해
- *  보니 채널은 보통 "5분 미만 클립"과 "10분 이상 본편"으로 갈립니다
- *  (가인지TV 50건: ~5분 35건, 5~10분 0건, 10분 이상 15건). 20분으로 두면
- *  10~20분대 본편이 통째로 버려집니다. */
-const MIN_DURATION: Record<SourceType, number> = { search: 0, channel: 0 };
+ *  더 올리는 것은 방식에 따라 뜻이 다릅니다. 검색은 유튜브가 short/medium/long
+ *  세 칸으로만 걸러서 20분 이상으로 올려야 검색 단계에서부터 긴 영상만
+ *  받아옵니다. 채널은 그 제약이 없어 우리가 직접 거릅니다 — 실측해 보면 채널은
+ *  "5분 미만 클립"과 "10분 이상 본편"으로 갈립니다(가인지TV 50건: ~5분 35건,
+ *  5~10분 0건, 10분 이상 15건). */
+const MIN_DURATION: Record<SourceType, number> = { search: 300, channel: 300 };
 
 const DEFAULT_DRAFT: KeywordDraft = {
   term: "",
@@ -70,7 +71,7 @@ export function Keywords({ list }: { list: ListState }) {
   const [blocksOpen, setBlocksOpen] = useState(false);
   const [blockHandle, setBlockHandle] = useState("");
 
-  // 쿼터는 주인만 봅니다 — 식구는 손댈 수 없는 숫자입니다.
+  // 쿼터는 관리자만 봅니다 — 식구는 손댈 수 없는 숫자입니다.
   const usage = useAsync(
     () => (me.isOwner ? api.getUsage() : Promise.resolve(null)),
     [me.isOwner],
@@ -371,39 +372,66 @@ export function Keywords({ list }: { list: ListState }) {
                         <td>
                           <Chip tone={st.tone}>{st.label}</Chip>
                         </td>
-                        <td className={s.mutedCell}>
+                        {/* data-label 은 좁은 화면에서 머리글 대신 값 앞에
+                            붙습니다 — 표가 카드로 접히면 어느 칸이었는지
+                            알 길이 없어집니다. */}
+                        <td className={s.mutedCell} data-label="주기">
                           {k.status === "pending"
                             ? "등록 직후"
                             : k.status === "paused"
                               ? "—"
                               : scheduleLabel[k.schedule]}
                         </td>
-                        <td className={s.num}>{Math.round(k.minDurationSec / 60)}분</td>
-                        <td className={s.num}>{k.minExpertScore}</td>
-                        <td className={s.num}>{k.lectureCount || "—"}</td>
-                        <td className={s.mutedCell}>{when(k.lastRunAt)}</td>
+                        <td className={s.num} data-label="최소 길이">
+                          {Math.round(k.minDurationSec / 60)}분
+                        </td>
+                        <td className={s.num} data-label="기준 점수">
+                          {k.minExpertScore}
+                        </td>
+                        <td className={s.num} data-label="수집">
+                          {k.lectureCount || "—"}
+                        </td>
+                        <td className={s.mutedCell} data-label="마지막 실행">
+                          {when(k.lastRunAt)}
+                        </td>
                         <td>
                           <div className={s.actions}>
-                            <Button
-                              size="small"
-                              onClick={() => setEditing(open ? null : k.id)}
-                              aria-expanded={open}
-                            >
-                              {open ? "닫기" : "수정"}
-                            </Button>
-                            <Button
-                              size="small"
-                              onClick={() =>
-                                void rowAction(() =>
-                                  api.setKeywordStatus(
-                                    k.id,
-                                    k.status === "paused" ? "active" : "paused",
-                                  ),
-                                )
-                              }
-                            >
-                              {k.status === "paused" ? "재개" : "일시정지"}
-                            </Button>
+                            {/* **수정·일시정지는 만든 사람만.** 설정이 구독자
+                                모두에게 퍼지므로, 남이 정해 둔 값을 모르고
+                                바꾸는 일이 없게 막습니다. 빼기는 내 구독만
+                                끊는 일이라 누구나 됩니다. */}
+                            {k.canEdit ? (
+                              <>
+                                <Button
+                                  size="small"
+                                  onClick={() => setEditing(open ? null : k.id)}
+                                  aria-expanded={open}
+                                >
+                                  {open ? "닫기" : "수정"}
+                                </Button>
+                                <Button
+                                  size="small"
+                                  onClick={() =>
+                                    void rowAction(() =>
+                                      api.setKeywordStatus(
+                                        k.id,
+                                        k.status === "paused" ? "active" : "paused",
+                                      ),
+                                    )
+                                  }
+                                >
+                                  {k.status === "paused" ? "재개" : "일시정지"}
+                                </Button>
+                              </>
+                            ) : (
+                              // 버튼이 그냥 없으면 "왜 나만 안 되지" 가 됩니다.
+                              // 누가 만든 것인지 보이면 물어볼 데가 생깁니다.
+                              <span className={s.byOther}>
+                                {k.createdByName
+                                  ? `${k.createdByName} 님이 만듦`
+                                  : "만든 사람만 고칠 수 있음"}
+                              </span>
+                            )}
                             {/* 되돌릴 수 있는 동작이라 확인 창을 띄우지 않습니다.
                                 대신 바로 위에 되돌리기를 한 번 더 내줍니다. */}
                             <Button
@@ -484,8 +512,8 @@ export function Keywords({ list }: { list: ListState }) {
       )}
 
       {/* 차단한 채널 — 자동 차단은 오판할 수 있어 화면에서 풀 수 있어야 합니다.
-          **주인만 봅니다.** 여기 올리면 수집 자체가 멈춰서 모두에게 영향이
-          갑니다 — 비용을 줄이는 결정이라 주인이 내려야 합니다. 식구가 어떤
+          **관리자만 봅니다.** 여기 올리면 수집 자체가 멈춰서 모두에게 영향이
+          갑니다 — 비용을 줄이는 결정이라 관리자가 내려야 합니다. 식구가 어떤
           채널을 안 보고 싶으면 그냥 빼면 되고, 그건 그 사람 목록에서만
           사라집니다. */}
       {me.isOwner && (

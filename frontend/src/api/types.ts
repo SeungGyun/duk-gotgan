@@ -10,7 +10,7 @@
 export interface Person {
   id: string;
   name: string;
-  /** 주인은 수집을 직접 돌릴 수 있습니다 */
+  /** 관리자는 수집을 직접 돌릴 수 있습니다 */
   isOwner: boolean;
   /** 비밀번호를 걸었는가. 누른 뒤 입력칸을 띄울지 정하는 데 씁니다 */
   hasPin: boolean;
@@ -21,7 +21,7 @@ export interface Person {
 /** 지금 보고 있는 사람. `/me` 가 주는 것. */
 export interface Me extends Person {
   keywordCount: number;
-  /** 1인당 상한. **0 이면 상한 없음**(주인) */
+  /** 1인당 상한. **0 이면 상한 없음**(관리자) */
   keywordLimit: number;
   /** 첫 비밀번호(0000) 그대로면 참 — 화면이 바꾸라고 띄웁니다 */
   pinIsDefault: boolean;
@@ -85,6 +85,16 @@ export interface Keyword {
   isMine: boolean;
   /** 몇 명이 함께 보는가. **설정을 고치면 그 사람들 모두에게 적용됩니다** */
   subscriberCount: number;
+  /**
+   * 내가 고칠 수 있는가 — **만든 사람만** true.
+   *
+   * 설정이 구독자 모두에게 퍼지므로 수정과 일시정지를 만든 사람에게만
+   * 엽니다. 빼기(구독 끊기)는 내 것만 건드리므로 누구나 됩니다.
+   * 서버의 `PATCH /keywords/{id}` 가 같은 값으로 막습니다.
+   */
+  canEdit: boolean;
+  /** 만든 사람의 이름. 내 것이면 굳이 쓸 일이 없고, 남의 것이면 왜 못 고치는지의 답입니다 */
+  createdByName: string | null;
 }
 
 /** 키워드 등록 폼이 보내는 값. id·상태·집계는 서버가 채운다. */
@@ -370,6 +380,22 @@ export interface LectureQuery {
   sort?: LectureSort;
   /** 제외함을 봅니다. */
   excluded?: boolean;
+  /** 한 쪽에 몇 편. 기본 60 (서버 상한 200) */
+  limit?: number;
+  offset?: number;
+}
+
+/** 목록 한 쪽.
+ *
+ *  **`total` 과 `latestAddedAt` 은 쪽이 아니라 걸린 것 전체를 두고 셉니다.**
+ *  쪽을 나눴다고 "805편"이 "60편"으로 보이면 안 되고, "새로 온 것"의 기준
+ *  시각을 받아 둔 쪽에서만 고르면 다음 쪽에 있는 더 최신 것을 놓쳐 이미 본
+ *  것을 새 것으로 셉니다. */
+export interface LecturePage {
+  items: LectureSummary[];
+  total: number;
+  /** 곳간에 마지막으로 들어온 시각. 없으면 목록이 비었습니다. */
+  latestAddedAt: string | null;
 }
 
 

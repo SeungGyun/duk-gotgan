@@ -8,7 +8,7 @@ import s from "./About.module.css";
  *
  *  기능을 나열하지 않습니다. 새로 온 사람이 실제로 궁금한 것은 **여기서
  *  뭘 하는 곳이고, 내가 뭘 하면 되는가** 뿐입니다. 파이프라인이 몇 단계인지는
- *  주인만 알면 됩니다. */
+ *  관리자만 알면 됩니다. */
 export function About() {
   return (
     <div className={s.wrap}>

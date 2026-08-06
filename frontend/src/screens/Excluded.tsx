@@ -18,7 +18,10 @@ import s from "./Excluded.module.css";
  *  수집하지도 않습니다. */
 export function Excluded() {
   const me = useMe();
-  const list = useAsync(() => api.listLectures({ excluded: true }), []);
+  // 제외함은 뺀 것만 모이는 자리라 목록만큼 길어지지 않습니다(지금 16편).
+  // 끊어 받는 장치를 따로 두는 대신 서버 상한까지 한 번에 받고, 그보다
+  // 많아지면 아래에 몇 편이 안 보이는지 알립니다.
+  const list = useAsync(() => api.listLectures({ excluded: true, limit: 200 }), []);
   const [busy, setBusy] = useState<string | null>(null);
   const [asking, setAsking] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -49,12 +52,13 @@ export function Excluded() {
     );
   }
 
-  const rows = list.data;
+  const rows = list.data.items;
+  const total = list.data.total;
 
   return (
     <Screen
       title="제외함"
-      subtitle={`${rows.length}편 · 되돌리거나 완전히 지울 수 있습니다`}
+      subtitle={`${total}편 · 되돌리거나 완전히 지울 수 있습니다`}
     >
       {error && <p className={s.error}>{error}</p>}
       <Panel>
@@ -88,7 +92,7 @@ export function Excluded() {
                       >
                         되돌리기
                       </Button>
-                      {/* **완전삭제는 주인만.** 요약 행 하나를 지우면 그걸
+                      {/* **완전삭제는 관리자만.** 요약 행 하나를 지우면 그걸
                           구독한 다른 사람의 곳간에서도 사라지고, 그 사람은
                           지운 적이 없는데 없어진 것을 보게 됩니다. 식구는
                           제외함에 두거나 되돌리면 됩니다. */}
@@ -108,6 +112,12 @@ export function Excluded() {
               </li>
             ))}
           </ul>
+        )}
+        {rows.length < total && (
+          <p className={s.meta}>
+            앞 {rows.length}편만 보입니다 · 나머지 {total - rows.length}편은 되돌린 뒤에 이어
+            나옵니다.
+          </p>
         )}
       </Panel>
     </Screen>

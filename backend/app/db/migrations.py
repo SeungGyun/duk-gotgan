@@ -123,6 +123,39 @@ def ensure_schema(engine: Engine) -> None:
             conn.execute(text("ALTER TABLE keywords ADD COLUMN archived_at DATETIME NULL"))
             logger.info("[db] keywords.archived_at added")
 
+        # 만든 사람 — 수정 권한의 근거입니다.
+        #
+        # 이미 있던 키워드에는 만든 사람이 적혀 있지 않습니다. **가장 먼저
+        # 구독한 사람**을 만든 사람으로 봅니다 — 등록할 때 같은 트랜잭션에서
+        # `user_keywords` 행이 생기므로, 만든 사람의 구독이 언제나 가장
+        # 오래된 것입니다. 끊었다 되살려도 `created_at` 은 그대로라 이 추론이
+        # 나중에 뒤집히지 않습니다.
+        #
+        # 같은 시각에 둘이 걸리면 user_id 로 갈라 한 명만 고릅니다. 값을
+        # 못 고른 키워드(구독자가 아무도 없는 것)는 NULL 로 남아 잠깁니다.
+        if not _column_exists(conn, "keywords", "created_by"):
+            conn.execute(text("ALTER TABLE keywords ADD COLUMN created_by VARCHAR(36) NULL"))
+            conn.execute(
+                text(
+                    """
+                    UPDATE keywords k
+                    JOIN (
+                        SELECT uk.keyword_id, MIN(uk.user_id) AS user_id
+                        FROM user_keywords uk
+                        JOIN (
+                            SELECT keyword_id, MIN(created_at) AS first_at
+                            FROM user_keywords GROUP BY keyword_id
+                        ) f
+                          ON f.keyword_id = uk.keyword_id AND f.first_at = uk.created_at
+                        GROUP BY uk.keyword_id
+                    ) first_sub ON first_sub.keyword_id = k.id
+                    SET k.created_by = first_sub.user_id
+                    WHERE k.created_by IS NULL
+                    """
+                )
+            )
+            logger.info("[db] keywords.created_by added (최초 구독자로 채움)")
+
         # 읽음 표시. NULL 이면 안 읽은 것 — 기본 정렬이 이걸로 앞뒤를 가릅니다.
         if not _column_exists(conn, "lectures", "read_at"):
             conn.execute(text("ALTER TABLE lectures ADD COLUMN read_at DATETIME NULL"))
@@ -221,11 +254,11 @@ def ensure_schema(engine: Engine) -> None:
 
 
 def _seed_owner(conn) -> None:
-    """주인 한 명을 만들고, 지금까지 쌓인 것을 그 사람 이름으로 옮깁니다.
+    """관리자 한 명을 만들고, 지금까지 쌓인 것을 그 사람 이름으로 옮깁니다.
 
     **여러 번 돌려도 같은 결과여야 합니다.** 매 기동마다 실행되므로,
     이미 사용자가 있으면 통째로 건너뜁니다 — 안 그러면 서버를 재시작할
-    때마다 주인이 늘거나, 사용자가 지운 구독이 되살아납니다.
+    때마다 관리자가 늘거나, 사용자가 지운 구독이 되살아납니다.
 
     옛 컬럼(`lectures.read_at` 등)은 **지우지 않습니다.** 옮긴 값이 틀렸을
     때 되돌릴 곳이 있어야 합니다. 코드는 이미 새 표만 읽으므로 남아 있어도
@@ -248,7 +281,7 @@ def _seed_owner(conn) -> None:
         # (routes/users.py 의 `pinIsDefault`).
         # 시각은 파이썬에서 넣습니다 — MySQL 의 NOW() 는 컨테이너 표준시라
         # 다른 시각들과 몇 시간씩 어긋납니다.
-        {"id": owner_id, "name": "주인", "pw": hash_pin("0000"), "now": now_kst()},
+        {"id": owner_id, "name": "관리자", "pw": hash_pin("0000"), "now": now_kst()},
     )
 
     # 보관된 키워드까지 전부 옮깁니다 — 되살렸을 때 남의 것이 되어 있으면
@@ -278,7 +311,7 @@ def _seed_owner(conn) -> None:
         {"u": owner_id},
     ).rowcount
 
-    # 지금까지 쌓인 자동 차단은 주인이 뺀 결과입니다. 개인 차단으로 옮기되
+    # 지금까지 쌓인 자동 차단은 관리자가 뺀 결과입니다. 개인 차단으로 옮기되
     # **전역 차단도 그대로 둡니다** — 이미 수집을 멈춰 둔 채널이라, 여기서
     # 풀면 다음 수집에 도로 들어와 비용만 다시 듭니다.
     ch = conn.execute(
@@ -292,6 +325,6 @@ def _seed_owner(conn) -> None:
     ).rowcount
 
     logger.info(
-        "[db] 주인 계정 생성 — 키워드 %d · 읽음/제외 %d · 차단 채널 %d 이관 (첫 비밀번호 0000)",
+        "[db] 관리자 계정 생성 — 키워드 %d · 읽음/제외 %d · 차단 채널 %d 이관 (첫 비밀번호 0000)",
         kw, lec, ch,
     )

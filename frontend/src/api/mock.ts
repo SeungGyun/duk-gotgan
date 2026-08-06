@@ -50,7 +50,7 @@ let channelBlocks: ChannelBlock[] = [
 // 목에서도 선택 화면이 그대로 돌아야 합니다 — 백엔드 없이 UI 를 만지는
 // 흐름이 이 프로젝트의 기본이라, 로그인만 예외로 두면 그 흐름이 깨집니다.
 let people: Person[] = [
-  { id: "u_1", name: "주인", isOwner: true, hasPin: true, lectureCount: 41 },
+  { id: "u_1", name: "관리자", isOwner: true, hasPin: true, lectureCount: 41 },
   { id: "u_2", name: "아내", isOwner: false, hasPin: false, lectureCount: 12 },
 ];
 let current: Person | null = people[0]!;
@@ -76,6 +76,8 @@ let keywords: Keyword[] = [
     createdAt: daysAgo(64),
     isMine: true,
     subscriberCount: 1,
+    canEdit: true,
+    createdByName: "관리자",
     archivedAt: null,
   },
   {
@@ -94,6 +96,8 @@ let keywords: Keyword[] = [
     createdAt: daysAgo(51),
     isMine: true,
     subscriberCount: 1,
+    canEdit: true,
+    createdByName: "관리자",
     archivedAt: null,
   },
   {
@@ -112,6 +116,8 @@ let keywords: Keyword[] = [
     createdAt: daysAgo(88),
     isMine: true,
     subscriberCount: 1,
+    canEdit: true,
+    createdByName: "관리자",
     archivedAt: null,
   },
   {
@@ -130,6 +136,8 @@ let keywords: Keyword[] = [
     createdAt: daysAgo(40),
     isMine: true,
     subscriberCount: 1,
+    canEdit: true,
+    createdByName: "관리자",
     archivedAt: null,
   },
   {
@@ -147,7 +155,11 @@ let keywords: Keyword[] = [
     lastRunAt: runAt(0, 20),
     createdAt: daysAgo(22),
     isMine: true,
-    subscriberCount: 1,
+    // 아내가 만든 것을 내가 구독한 경우 — 읽기는 되고 수정은 안 되는 상태를
+    // 목에서도 볼 수 있게 하나 둡니다.
+    subscriberCount: 2,
+    canEdit: false,
+    createdByName: "아내",
     archivedAt: null,
   },
   {
@@ -166,6 +178,8 @@ let keywords: Keyword[] = [
     createdAt: daysAgo(0),
     isMine: true,
     subscriberCount: 1,
+    canEdit: true,
+    createdByName: "관리자",
     archivedAt: null,
   },
   {
@@ -184,6 +198,8 @@ let keywords: Keyword[] = [
     createdAt: daysAgo(120),
     isMine: true,
     subscriberCount: 1,
+    canEdit: true,
+    createdByName: "관리자",
     archivedAt: null,
   },
 ];
@@ -793,7 +809,7 @@ export const mockApi: Api = {
     await delay();
     if (!current) throw new ApiError("누구인지 먼저 골라 주세요.", 401, "NO_SESSION");
     if (current.isOwner && !next) {
-      throw new ApiError("주인은 비밀번호를 비울 수 없습니다.", 400, "OWNER_NEEDS_PIN");
+      throw new ApiError("관리자는 비밀번호를 비울 수 없습니다.", 400, "OWNER_NEEDS_PIN");
     }
     const updated = { ...current, hasPin: Boolean(next) };
     current = updated;
@@ -843,6 +859,9 @@ export const mockApi: Api = {
       // 내가 만든 것이니 당연히 내 구독이고, 아직 나 혼자입니다.
       isMine: true,
       subscriberCount: 1,
+      // 만든 사람이 나이므로 고칠 수 있습니다.
+      canEdit: true,
+      createdByName: "관리자",
       language: draft.language,
       schedule: draft.schedule,
       minDurationSec: draft.minDurationSec,
@@ -862,6 +881,13 @@ export const mockApi: Api = {
     const i = keywords.findIndex((k) => k.id === id);
     const found = keywords[i];
     if (!found) throw new ApiError("키워드를 찾을 수 없습니다.", 404, "NOT_FOUND");
+    // 서버와 같은 자리에서 막습니다 — 목이 더 허용하면 화면 버그를 못 잡습니다.
+    if (!found.canEdit)
+      throw new ApiError(
+        `${found.createdByName ?? "다른 사람"} 님이 만든 키워드라 고칠 수 없습니다. 빼는 것은 됩니다.`,
+        403,
+        "NOT_KEYWORD_AUTHOR",
+      );
     const updated: Keyword = { ...found, ...patch };
     keywords[i] = updated;
     return { ...updated };
@@ -872,6 +898,13 @@ export const mockApi: Api = {
     const i = keywords.findIndex((k) => k.id === id);
     const found = keywords[i];
     if (!found) throw new ApiError("키워드를 찾을 수 없습니다.", 404, "NOT_FOUND");
+    // 일시정지도 같은 통로입니다 — 남의 키워드를 멈추면 그 사람 수집이 멎습니다.
+    if (!found.canEdit)
+      throw new ApiError(
+        `${found.createdByName ?? "다른 사람"} 님이 만든 키워드라 멈출 수 없습니다.`,
+        403,
+        "NOT_KEYWORD_AUTHOR",
+      );
     const updated: Keyword = { ...found, status };
     keywords[i] = updated;
     return { ...updated };
@@ -935,7 +968,20 @@ export const mockApi: Api = {
       if (sort === "duration") return b.durationSec - a.durationSec;
       return b.expertScore - a.expertScore;
     });
-    return rows;
+
+    // 서버와 같이 한 쪽씩 줍니다. 목이 전부 주면 지연 로딩이 목에서는
+    // 한 번도 안 돌아, 끊어 받는 코드의 버그가 실제로 붙일 때 드러납니다.
+    const offset = query.offset ?? 0;
+    const limit = query.limit ?? 60;
+    return {
+      items: rows.slice(offset, offset + limit),
+      // 개수와 최신 시각은 **쪽이 아니라 걸린 것 전체** 기준입니다.
+      total: rows.length,
+      latestAddedAt: rows.reduce<string | null>(
+        (max, l) => (max === null || l.addedAt > max ? l.addedAt : max),
+        null,
+      ),
+    };
   },
 
   async getLecture(videoId) {

@@ -39,7 +39,8 @@ class KeywordDraft(BaseModel):
     sourceType: str = "search"
     language: str = "ko"
     schedule: str = "daily"
-    minDurationSec: int = Field(default=900, ge=0)
+    # 5분 — 쇼츠만 걸러내는 자리입니다. 화면의 기본값과 같게 둡니다.
+    minDurationSec: int = Field(default=300, ge=0)
     minExpertScore: int = Field(default=75, ge=0, le=100)
     maxPerRun: int = Field(default=10, ge=1, le=50)
 
@@ -101,7 +102,7 @@ def _sub(db: Session, user_id: str, keyword_id: str) -> UserKeyword | None:
 def _check_room(db: Session, user: User) -> None:
     """상한에 걸리면 여기서 막습니다.
 
-    **주인은 예외입니다.** 상한을 넣은 시점에 이미 13개를 쓰고 계셨는데,
+    **관리자는 예외입니다.** 상한을 넣은 시점에 이미 13개를 쓰고 계셨는데,
     상한이 생겼다고 셋을 지우라고 할 수는 없습니다.
     """
     if user.is_owner:
@@ -149,11 +150,31 @@ def _wake(kw: Keyword) -> None:
         kw.archived_at = None
 
 
+def _user_names(db: Session) -> dict[str, str]:
+    """id → 이름. 식구가 몇 안 되니 통째로 읽습니다 — 행마다 조인할 값이 아닙니다."""
+    return {u.id: u.name for u in db.scalars(select(User)).all()}
+
+
+def _mark_author(d: dict, k: Keyword, user_id: str, names: dict[str, str]) -> dict:
+    """누가 만들었고, 내가 고칠 수 있는가.
+
+    화면이 버튼을 감추는 근거이자 라우트가 막는 근거를 **한 값으로** 둡니다.
+    둘이 갈리면 눌리는 버튼이 403 을 뱉습니다.
+
+    이름까지 같이 내는 것은, 버튼이 그냥 없으면 "왜 나만 안 되지" 가 되기
+    때문입니다 — 누가 만든 것인지 보이면 물어볼 데가 생깁니다.
+    """
+    d["canEdit"] = k.created_by is not None and k.created_by == user_id
+    d["createdByName"] = names.get(k.created_by) if k.created_by else None
+    return d
+
+
 def _out(db: Session, k: Keyword, user_id: str) -> dict:
     sub = _sub(db, user_id, k.id)
     out = keyword_out(k, lecture_counts(db).get(k.id, 0))
     out["isMine"] = sub is not None and sub.archived_at is None
     out["subscriberCount"] = subscriber_counts(db).get(k.id, 0)
+    _mark_author(out, k, user_id, _user_names(db))
     # 삭제 영역이 "언제 지웠는지" 를 보여 줍니다. 키워드 행의 값이 아니라
     # **내가 끊은 시각**입니다 — 남이 언제 끊었는지는 내 화면과 무관합니다.
     if sub is not None and sub.archived_at is not None:
@@ -185,6 +206,7 @@ def list_keywords(
     """
     counts = lecture_counts(db)
     subs = subscriber_counts(db)
+    names = _user_names(db)
 
     if archived:
         # **내가 끊은 것**만입니다. 키워드가 아직 살아 있어도(남이 보고 있어도)
@@ -204,7 +226,7 @@ def list_keywords(
             d["isMine"] = False
             d["subscriberCount"] = subs.get(k.id, 0)
             d["archivedAt"] = to_utc_iso(s.archived_at)
-            out.append(d)
+            out.append(_mark_author(d, k, user.id, names))
         return out
 
     owned = _my_subs(db, user.id, archived=False)
@@ -219,7 +241,7 @@ def list_keywords(
         d = keyword_out(k, counts.get(k.id, 0))
         d["isMine"] = k.id in owned
         d["subscriberCount"] = subs.get(k.id, 0)
-        out.append(d)
+        out.append(_mark_author(d, k, user.id, names))
     return out
 
 
@@ -229,9 +251,9 @@ def create_keyword(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):
-    """새 키워드. **주인이 아니어도 만들 수 있습니다.**
+    """새 키워드. **관리자가 아니어도 만들 수 있습니다.**
 
-    비용을 쓰는 일이라 주인만으로 막을까 했지만, 그러면 두 번째 사람에게는
+    비용을 쓰는 일이라 관리자만으로 막을까 했지만, 그러면 두 번째 사람에게는
     곳간이 "남이 고른 것만 읽는 곳" 이 됩니다. 1인 10개 상한이 이미 피해를
     묶고 있어서 그쪽으로 충분합니다.
     """
@@ -277,6 +299,8 @@ def create_keyword(
         channel_title=channel.title if channel else None,
         uploads_playlist_id=channel.uploads_playlist_id if channel else None,
         status="pending",  # 이 상태가 수집 스케줄러의 트리거입니다
+        # 앞으로 이 키워드를 고칠 수 있는 사람. 남이 구독해도 바뀌지 않습니다.
+        created_by=user.id,
         language=draft.language,
         schedule=draft.schedule,
         min_duration_sec=draft.minDurationSec,
@@ -321,10 +345,19 @@ def update_keyword(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):
-    """**구독한 사람만 고칠 수 있습니다.**
+    """**만든 사람만 고칠 수 있습니다.**
 
-    고친 결과는 같이 보는 사람 모두에게 적용됩니다 — 수집이 공유라 그게
-    맞습니다. 화면이 `subscriberCount` 로 그 사실을 미리 알립니다.
+    수집 설정은 키워드에 붙어 있어 고친 결과가 같이 보는 사람 모두에게
+    적용됩니다. 예전에는 구독자면 누구나 고칠 수 있었는데, 그러면 남이
+    정해 둔 값을 모르고 바꾸게 됩니다 — 되돌릴 방법도 알림도 없이.
+
+    구독은 그대로 누구나 합니다. 빼는 것(DELETE)도 내 구독만 끊는 일이라
+    누구나 합니다. **막는 것은 모두에게 퍼지는 변경뿐입니다** — 일시정지도
+    여기를 지나므로 같이 막힙니다. 남의 키워드를 멈추면 그 사람 수집이
+    통째로 멎기 때문에, 설정을 바꾸는 것보다 오히려 셉니다.
+
+    상태를 `status` 로 바꾸는 것도 같은 통로입니다. 화면은 `canEdit` 으로
+    버튼을 감추고, 막는 근거는 여기 하나뿐입니다.
     """
     kw = db.get(Keyword, keyword_id)
     if kw is None:
@@ -332,6 +365,15 @@ def update_keyword(
     mine = _sub(db, user.id, keyword_id)
     if mine is None or mine.archived_at is not None:
         raise ApiError(403, "NOT_SUBSCRIBED", "구독한 키워드만 고칠 수 있습니다.")
+    if kw.created_by != user.id:
+        owner = _user_names(db).get(kw.created_by) if kw.created_by else None
+        raise ApiError(
+            403,
+            "NOT_KEYWORD_AUTHOR",
+            f"{owner} 님이 만든 키워드라 고칠 수 없습니다. 빼는 것은 됩니다."
+            if owner
+            else "만든 사람만 고칠 수 있는 키워드입니다. 빼는 것은 됩니다.",
+        )
 
     _validate(patch.status, STATUSES, "status")
     _validate(patch.language, LANGUAGES, "language")

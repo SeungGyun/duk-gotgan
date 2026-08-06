@@ -94,3 +94,48 @@
   font-size: 12px;
   color: var(--muted);
 }
+
+/* ── 좁은 화면 ───────────────────────────────────────────
+   네 칸을 한 줄에 세우면 제목 칸에 남는 것이 폰에서 164px, 작은 폰에서는
+   94px 뿐이었습니다 — "Energy Blocks:…" 처럼 여덟 자쯤에서 잘려 어느
+   영상인지 알 수 없었습니다.
+
+   **이 화면은 제목을 읽고 뺄지 말지 정하는 자리입니다.** 제목이 안 보이면
+   화면이 하는 일이 없어지므로, 번호·길이·버튼을 윗줄로 올리고 제목에는
+   줄 전체를 줍니다. 자르지 않고 접습니다 — 길어서 두세 줄이 되는 편이
+   못 읽는 것보다 낫습니다. */
+@media (max-width: 640px) {
+  .row {
+    grid-template-areas:
+      "order len . action"
+      "info  info info info";
+    gap: 7px 10px;
+    align-items: center;
+  }
+  .order {
+    grid-area: order;
+    text-align: left;
+  }
+  .len {
+    grid-area: len;
+  }
+  .info {
+    grid-area: info;
+  }
+  .row > button {
+    grid-area: action;
+    justify-self: end;
+  }
+  /* 한글이 음절 아무 데서나 끊기지 않게 — 띄어쓰기에서만 넘깁니다 */
+  .title,
+  .sub {
+    overflow: visible;
+    white-space: normal;
+    text-overflow: clip;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+  .title {
+    line-height: 1.45;
+  }
+}

@@ -152,13 +152,13 @@ def current_user(
 
 
 def require_owner(user: User = Depends(current_user)) -> User:
-    """주인만 누를 수 있는 것 — 수집을 직접 돌리는 버튼 같은 것.
+    """관리자만 누를 수 있는 것 — 수집을 직접 돌리는 버튼 같은 것.
 
     **보는 것은 막지 않습니다.** 실행 로그와 대기열은 식구도 봅니다 —
     "왜 아직 안 올라왔지"를 스스로 확인할 수 있어야 물어볼 일이 줍니다.
     """
     if not user.is_owner:
-        raise ApiError(403, "OWNER_ONLY", "주인만 할 수 있습니다.")
+        raise ApiError(403, "OWNER_ONLY", "관리자만 할 수 있습니다.")
     return user
 
 

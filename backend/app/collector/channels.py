@@ -57,9 +57,9 @@ def consider_block(db: Session, video: Video, user_id: str) -> UserChannelBlock 
 
     **이 차단은 수집을 멈추지 않습니다.** 예전에는 전역 `channel_blocks` 에
     쌓여 룰 단계에서 걸렸는데, 여러 사람이 쓰면 그게 사고가 됩니다 — 아내가
-    세 번 빼면 그때부터 주인도 그 채널 영상을 못 받고, 받은 적이 없으니
+    세 번 빼면 그때부터 관리자도 그 채널 영상을 못 받고, 받은 적이 없으니
     그런 일이 있었다는 것조차 모릅니다. 수집을 멈추는 결정은 비용을 줄이는
-    결정이라 주인이 채널 화면에서 직접 내립니다.
+    결정이라 관리자가 채널 화면에서 직접 내립니다.
     """
     if not video.channel_id:
         return None

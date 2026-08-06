@@ -132,6 +132,15 @@
 { "status": "paused" }
 ```
 
+> **만든 사람만 고칠 수 있습니다.** 설정은 키워드에 붙어 있어 고친 결과가 구독자
+> 모두에게 퍼집니다. 남이 만든 것이면 403 `NOT_KEYWORD_AUTHOR` — 일시정지도 이
+> 경로라 같이 막힙니다(남의 키워드를 멈추면 그 사람 수집이 통째로 멎습니다).
+> **관리자도 예외가 아닙니다.**
+>
+> 구독(`POST /keywords/{id}/subscribe`)과 빼기(`DELETE`)는 내 것만 건드리므로
+> 누구나 됩니다. 응답의 `canEdit` 이 화면과 서버가 함께 보는 하나의 근거이고,
+> `createdByName` 은 왜 못 고치는지를 화면이 말할 수 있게 합니다.
+
 ### `DELETE /keywords/{id}` → 204
 
 지우지 않고 **삭제 영역으로 옮깁니다**(`status='archived'`, `archivedAt` 기록).
@@ -151,7 +160,7 @@
 
 ## 2. 강의
 
-### `GET /lectures` → `LectureSummary[]`
+### `GET /lectures` → `{ items, total, latestAddedAt }`
 
 쿼리 파라미터 (전부 선택):
 
@@ -163,8 +172,26 @@
 | `q` | `CNI` | 제목·요약·채널·태그 전문 검색 |
 | `favorites_only` | `true` | 즐겨찾기만 |
 | `sort` | `score` \| `recent` \| `duration` | 기본 `score` |
+| `limit` / `offset` | `60` / `120` | 한 쪽의 크기와 시작점. 기본 60, 상한 200 |
 
-응답 항목:
+> **한 쪽씩 옵니다.** 예전에는 걸린 것을 통째로 줬는데, 809편이 되자 한 번에
+> 374KB 였습니다(실측 596ms). 폰에서는 첫 글자가 뜨기까지 그 전부를 기다리는데
+> 정작 처음 보이는 것은 열몇 편입니다. 60편이면 28KB · 201ms 입니다.
+>
+> `total` 과 `latestAddedAt` 은 **쪽이 아니라 걸린 것 전체**를 두고 셉니다.
+> 쪽을 나눴다고 "809편"이 "60편"으로 보이면 안 되고, `latestAddedAt` 을 받아 둔
+> 쪽에서만 고르면 더 최신인 것이 다음 쪽에 있을 때 기준이 과거로 잡혀
+> `GET /lectures/updates` 가 이미 목록에 있는 것을 새 것으로 셉니다.
+
+```jsonc
+{
+  "items": [ /* LectureSummary … */ ],
+  "total": 809,
+  "latestAddedAt": "2026-08-05T14:10:57Z"   // 비어 있으면 null
+}
+```
+
+`items` 의 항목:
 
 ```jsonc
 {

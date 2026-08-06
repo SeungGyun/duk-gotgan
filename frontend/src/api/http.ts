@@ -83,6 +83,8 @@ function qs(query: LectureQuery): string {
   if (query.favoritesOnly) p.set("favorites_only", "true");
   if (query.sort) p.set("sort", query.sort);
   if (query.excluded) p.set("excluded", "true");
+  if (query.limit != null) p.set("limit", String(query.limit));
+  if (query.offset) p.set("offset", String(query.offset));
   const s = p.toString();
   return s ? `?${s}` : "";
 }

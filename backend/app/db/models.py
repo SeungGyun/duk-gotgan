@@ -56,9 +56,9 @@ class User(Base):
     무한정 찍으면 뚫리므로, `auth.py` 가 틀린 횟수를 세어 잠급니다 —
     **짧은 비밀번호를 쓸 수 있게 만드는 것이 그 잠금입니다.**
 
-    `password_hash` 가 NULL 이면 비밀번호 없이 눌러서 들어갑니다. 주인만은
+    `password_hash` 가 NULL 이면 비밀번호 없이 눌러서 들어갑니다. 관리자만은
     NULL 을 허용하지 않습니다 (`auth.set_pin` 이 막습니다) — 선택 화면에
-    주인이 그냥 떠 있는데 비밀번호가 없으면 "주인만" 이라는 제한이 잠금이
+    관리자가 그냥 떠 있는데 비밀번호가 없으면 "관리자만" 이라는 제한이 잠금이
     아니라 표시가 됩니다.
     """
 
@@ -193,6 +193,16 @@ class Keyword(Base):
     run_hour: Mapped[int] = mapped_column(Integer, nullable=False, default=4)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=now_kst)
+    # **누가 만들었는가.** 수집 설정은 키워드에 붙어 있어 고치면 같이 보는
+    # 사람 모두에게 적용됩니다. 구독자면 누구나 고칠 수 있게 두었더니 남이
+    # 정한 값을 모르고 바꾸는 일이 생겨서, 고칠 수 있는 사람을 만든 사람
+    # 하나로 좁혔습니다. 구독은 그대로 누구나 합니다 — 막는 것은 수정뿐입니다.
+    #
+    # 사용자가 지워지면 NULL 이 되고, 그러면 아무도 못 고칩니다. 임자 없는
+    # 설정이 모두에게 열려 있는 것보다 잠겨 있는 편이 낫습니다.
+    created_by: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     # 삭제(보관)한 시각. 삭제 영역에서 "언제 지웠는지"를 보여주고, 복구하면 다시 비웁니다.
     archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -477,12 +487,12 @@ class UserChannelBlock(Base):
     합니다.
 
     나누지 않으면 이런 일이 납니다 — 아내가 어떤 채널을 세 번 빼면
-    자동 차단이 걸리고, 그때부터 주인도 그 채널 영상을 못 받습니다.
+    자동 차단이 걸리고, 그때부터 관리자도 그 채널 영상을 못 받습니다.
     받은 적이 없으니 화면에 안 나오고, 안 나오니 그런 일이 있었다는 것도
     모릅니다. 사람 한 명의 취향이 공용 수집을 조용히 바꾸는 셈입니다.
 
-    모두에게서 막고 싶으면 채널 화면에서 주인이 직접 `channel_blocks` 에
-    올립니다 — 그건 비용을 줄이는 결정이라 주인이 내려야 합니다.
+    모두에게서 막고 싶으면 채널 화면에서 관리자가 직접 `channel_blocks` 에
+    올립니다 — 그건 비용을 줄이는 결정이라 관리자가 내려야 합니다.
     """
 
     __tablename__ = "user_channel_blocks"

@@ -192,17 +192,19 @@ function TrackRow({ t }: { t: Track }) {
       <span className={s.trackWhat}>
         {t.working ? (
           <>
-            {t.working.title}
-            <em className={s.trackSince}> · {ago(t.working.since)} 시작</em>
+            <span className={s.trackTitle}>{t.working.title}</span>
+            <em className={s.trackSince}>· {ago(t.working.since)} 시작</em>
           </>
-        ) : running ? (
-          (t.runLabel ?? "도는 중")
-        ) : t.nextAt ? (
-          `쉬는 중 · 다음 차례 ${clock(t.nextAt)}`
-        ) : t.lastAt ? (
-          `쉬는 중 · 마지막 ${ago(t.lastAt)}`
         ) : (
-          "쉬는 중"
+          <span className={s.trackTitle}>
+            {running
+              ? (t.runLabel ?? "도는 중")
+              : t.nextAt
+                ? `쉬는 중 · 다음 차례 ${clock(t.nextAt)}`
+                : t.lastAt
+                  ? `쉬는 중 · 마지막 ${ago(t.lastAt)}`
+                  : "쉬는 중"}
+          </span>
         )}
       </span>
     </li>
