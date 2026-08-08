@@ -31,6 +31,8 @@ import logging
 import os
 import shutil
 import signal
+import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -60,6 +62,11 @@ _SANDBOX_PROFILE = """(version 1)
 class AgyResult:
     ok: bool = False
     error: str | None = None
+    # **우리가 쓴 오류는 우리가 판정합니다.** `None` 이면 실행기가 글자를 보고
+    # 짐작합니다(남이 준 메시지는 그 방법밖에 없습니다). 우리말로 쓴 사유는
+    # 그 짐작을 통과하지 못합니다 — 시그니처가 전부 영어라서요. 실제로
+    # 900초 시한을 넘긴 15편이 그렇게 영구 탈락으로 쌓였습니다.
+    transient: bool | None = None
     input_tokens: int = 0
     cache_read_tokens: int = 0
     output_tokens: int = 0
@@ -206,6 +213,10 @@ async def review(
             # 그렇게 워커가 통째로 멎었습니다 — 죽은 자식의 파이프 두 개를
             # 붙든 채, 자식은 이미 없는데도요.
             await _kill_group(proc)
+            # **영상 탓이 아닙니다.** 시한을 넘긴 15편의 자막 크기가
+            # 1,295~20,086 토큰으로 고르게 퍼져 있습니다 — 가장 작은 것도
+            # 걸렸으니 분량 문제가 아니고, CLI 가 먹통이 된 것입니다.
+            result.transient = True
             result.error = f"agy 가 {settings.agy_timeout_sec}초 안에 끝나지 않았습니다."
             return result
     except Exception as e:  # noqa: BLE001
@@ -268,6 +279,100 @@ async def review(
         # 자막을 처음부터 다시 읽어 입력을 통째로 또 냅니다.
         result.error = outcome.error or str(e)
     return result
+
+
+def ask_json(prompt: str, schema: dict, timeout_sec: int) -> dict | None:
+    """작업 폴더 없이 **한 번 묻고 구조화 답만** 받습니다. 실패하면 None.
+
+    요약(`review`)과 나누어 둡니다. 저쪽은 자막 파일을 폴더로 건네주고 결과를
+    DB 에 담는 긴 일이고, 이쪽은 이미 만들어진 우리 글을 프롬프트에 실어
+    짧은 답 하나를 받는 일입니다. 블로그 제목을 짓는 데 씁니다.
+
+    **샌드박스는 그대로 겁니다.** 넘기는 글이 우리가 만든 요약이라 자막보다
+    한 겹 멀지만, 그 요약의 출처는 여전히 제3자의 자막입니다. 같은 바이너리를
+    부르면서 이쪽만 홈을 열어 둘 이유가 없습니다.
+
+    **동기 함수입니다.** 부르는 쪽(발행 잡)이 워커의 스레드에서 도는 동기
+    코드라, 여기만 async 로 두면 이벤트 루프를 하나 더 세워야 합니다.
+    """
+    if shutil.which(settings.agy_bin) is None:
+        return None
+
+    work = Path(tempfile.mkdtemp(prefix="dukgotgan-ask-")).resolve()
+    schema_path = work / "schema.json"
+    schema_path.write_text(json.dumps(schema, ensure_ascii=False), encoding="utf-8")
+
+    cmd = [
+        settings.agy_bin,
+        "-p", prompt,
+        "--model", settings.agy_model,
+        "--output-format", "json",
+        "--json-schema", str(schema_path),
+        "--dangerously-skip-permissions",
+        "--print-timeout", f"{timeout_sec}s",
+    ]
+    if settings.agy_sandbox:
+        profile = work / "ask.sb"
+        profile.write_text(
+            _SANDBOX_PROFILE.format(home=str(Path.home().resolve()), workspace=str(work)),
+            encoding="utf-8",
+        )
+        cmd = ["sandbox-exec", "-f", str(profile), *cmd]
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(work),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            # 요약 쪽과 같은 이유 — agy 는 도우미 프로세스를 따로 띄우고,
+            # 맏이만 죽이면 그것들이 파이프를 쥔 채 남아 EOF 가 오지 않습니다.
+            start_new_session=True,
+            env={
+                "HOME": os.environ.get("HOME", ""),
+                "PATH": os.environ.get("PATH", ""),
+                "USER": os.environ.get("USER", ""),
+                "TERM": "dumb",
+            },
+        )
+        try:
+            out, err = proc.communicate(timeout=timeout_sec + 30)
+        except subprocess.TimeoutExpired:
+            _kill_group_sync(proc)
+            logger.warning("[agy] 한 번 묻기가 %d초 안에 끝나지 않았습니다", timeout_sec)
+            return None
+    except Exception as e:  # noqa: BLE001 — 제목 하나 때문에 발행을 멈추지 않습니다
+        logger.warning("[agy] 한 번 묻기 실행 실패 — %s", e)
+        return None
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+    payload = _last_json_object(out or "")
+    if payload is None:
+        logger.warning("[agy] 한 번 묻기 출력을 읽지 못했습니다: %s", (err or out or "")[:200])
+        return None
+    if payload.get("status") != "SUCCESS":
+        logger.warning("[agy] 한 번 묻기가 실패로 끝났습니다: %s", str(payload.get("error"))[:200])
+        return None
+
+    data = payload.get("structured_output")
+    if not isinstance(data, dict):
+        data = _last_json_object(str(payload.get("response") or ""))
+    return data if isinstance(data, dict) else None
+
+
+def _kill_group_sync(proc: subprocess.Popen) -> None:
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(os.getpgid(proc.pid), sig)
+        except (ProcessLookupError, PermissionError):
+            break
+        try:
+            proc.wait(timeout=5)
+            break
+        except subprocess.TimeoutExpired:
+            continue
 
 
 def _last_json_object(text: str) -> dict | None:

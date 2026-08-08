@@ -192,3 +192,113 @@ def test_메모리가_빡빡하면_묶음_끝에_모델을_내린다():
     src = inspect.getsource(jobs.transcript_job)
     assert "resources.memory_tight()" in src
     assert "asr.release_model()" in src
+
+
+# ── 나눠서 받아쓰기 ──────────────────────────────────────────
+#
+# 상한을 90분에 묶어 둔 것은 시간이 아니라 **메모리** 때문이었습니다.
+# 위스퍼가 오디오를 통째로 16kHz float32 로 올려서, 두 시간이면 그것만
+# 460MB 이고 그 순간 요약 프로세스가 뜰 자리가 없어집니다(16GB 기계).
+# 그 상한에 95~142분짜리 33편이 걸려 탈락했습니다.
+#
+# 상한을 올리는 것으로는 못 풉니다 — 그 OOM 이 그대로 돌아옵니다. 대신
+# 나눠서 한 조각씩 올려, 최대 사용량이 **영상 길이가 아니라 조각 길이로**
+# 정해지게 했습니다.
+
+
+def _fake_chunks(monkeypatch, per_chunk):
+    """`_cut` 을 껍데기로 바꾸고, 조각마다 정해진 결과를 돌려줍니다."""
+    cut: list[tuple[int, int]] = []
+
+    def fake_cut(src, dst, start_sec, length_sec):
+        cut.append((start_sec, length_sec))
+        Path(dst).write_bytes(b"fake")
+
+    calls: list[str] = []
+
+    def fake_whisper(path, language):
+        calls.append(language)
+        got = per_chunk[len(calls) - 1]
+        if got is None:
+            raise asr.AsrUnavailable("받아쓴 내용이 비었습니다")
+        return got
+
+    monkeypatch.setattr(asr, "_cut", fake_cut)
+    monkeypatch.setattr(asr, "_run_whisper", fake_whisper)
+    return cut, calls
+
+
+def _res(*texts, lang="ko"):
+    segs = [{"start": float(i * 10), "dur": 5.0, "text": t} for i, t in enumerate(texts)]
+    return asr.AsrResult(language=lang, segments=segs, elapsed_sec=1.0, audio_sec=100.0)
+
+
+def test_짧은_영상은_나누지_않는다(monkeypatch):
+    """멀쩡히 통째로 되는 것을 굳이 자르면 ffmpeg 만 한 번 더 돕니다."""
+    cut, _ = _fake_chunks(monkeypatch, [_res("가")])
+    monkeypatch.setattr(asr.settings, "asr_chunk_sec", 20 * 60)
+
+    asr._transcribe_file("a.webm", "ko", 10 * 60, "/tmp")
+    assert cut == [], "20분 안쪽이면 자르지 않아야 합니다"
+
+
+def test_긴_영상은_조각내어_이어_붙인다(monkeypatch):
+    """**시각을 밀어 줘야 합니다.** 조각마다 0초부터 다시 세므로, 그대로
+    이으면 두 시간짜리 강의의 타임스탬프가 전부 앞 20분에 몰립니다 —
+    원본 링크의 시각이 어긋나면 요약에 붙은 근거를 짚을 수 없습니다."""
+    cut, _ = _fake_chunks(monkeypatch, [_res("첫"), _res("둘"), _res("셋")])
+    monkeypatch.setattr(asr.settings, "asr_chunk_sec", 600)
+
+    out = asr._transcribe_file("a.webm", "ko", 1800, "/tmp")
+
+    assert cut == [(0, 600), (600, 600), (1200, 600)]
+    assert [s["start"] for s in out.segments] == [0.0, 600.0, 1200.0]
+    assert [s["text"] for s in out.segments] == ["첫", "둘", "셋"]
+
+
+def test_말소리_없는_조각은_건너뛰고_나머지를_살린다(monkeypatch):
+    """음악이나 침묵으로 채워진 조각 하나 때문에 두 시간짜리 강의를
+    통째로 버릴 이유가 없습니다."""
+    _fake_chunks(monkeypatch, [_res("첫"), None, _res("셋")])
+    monkeypatch.setattr(asr.settings, "asr_chunk_sec", 600)
+
+    out = asr._transcribe_file("a.webm", "ko", 1800, "/tmp")
+    assert [s["text"] for s in out.segments] == ["첫", "셋"]
+    assert [s["start"] for s in out.segments] == [0.0, 1200.0]
+
+
+def test_전부_비면_그때는_실패다(monkeypatch):
+    _fake_chunks(monkeypatch, [None, None])
+    monkeypatch.setattr(asr.settings, "asr_chunk_sec", 600)
+
+    with pytest.raises(asr.AsrUnavailable):
+        asr._transcribe_file("a.webm", "ko", 1200, "/tmp")
+
+
+def test_앞_조각이_알아낸_언어를_뒤에_물려준다(monkeypatch):
+    """조각마다 따로 감지하면 음악이나 침묵으로 시작하는 조각이 엉뚱한
+    언어로 새고, 그 조각만 통째로 헛소리가 됩니다."""
+    _, calls = _fake_chunks(monkeypatch, [_res("첫", lang="en"), _res("둘"), _res("셋")])
+    monkeypatch.setattr(asr.settings, "asr_chunk_sec", 600)
+
+    asr._transcribe_file("a.webm", "", 1800, "/tmp")
+    assert calls == ["", "en", "en"], "첫 조각이 감지한 언어를 뒤가 물려받아야 합니다"
+
+
+def test_조각_파일은_바로_지운다(monkeypatch, tmp_path):
+    """세 시간짜리를 20분씩 자르면 wav 가 아홉 개 340MB 입니다. 대기가
+    세 자리라 남겨 두면 디스크가 먼저 찹니다."""
+    _fake_chunks(monkeypatch, [_res("첫"), _res("둘")])
+    monkeypatch.setattr(asr.settings, "asr_chunk_sec", 600)
+
+    asr._transcribe_file("a.webm", "ko", 1200, str(tmp_path))
+    assert list(tmp_path.iterdir()) == [], "조각이 남아 있으면 안 됩니다"
+
+
+def test_상한은_이제_메모리가_아니라_시간이_정한다():
+    """90분은 메모리 상한이었습니다. 나눠서 올리게 된 지금은 메모리와
+    무관하고, 3시간짜리도 M4 실측 5배속이면 36분입니다."""
+    from config.settings import settings as s
+
+    assert s.asr_max_duration_sec == 180 * 60
+    assert s.asr_chunk_sec < s.asr_max_duration_sec

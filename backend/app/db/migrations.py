@@ -156,6 +156,19 @@ def ensure_schema(engine: Engine) -> None:
             )
             logger.info("[db] keywords.created_by added (최초 구독자로 채움)")
 
+        # 검색 기간을 키워드마다 따로. 예전에는 전역 180일 하나였는데,
+        # `경제`·`주식` 은 하루만 지나도 헌 이야기이고 `면역력`·`과학` 은 석 달
+        # 전 것이 그대로 쓸모 있습니다. 기존 행은 90일(상한)로 채웁니다 —
+        # 180에서 줄어드는 쪽이라, 이미 데려온 것을 다시 심사하지는 않습니다.
+        if not _column_exists(conn, "keywords", "search_window_days"):
+            conn.execute(
+                text(
+                    "ALTER TABLE keywords"
+                    " ADD COLUMN search_window_days INT NOT NULL DEFAULT 90"
+                )
+            )
+            logger.info("[db] keywords.search_window_days added (기본 90일)")
+
         # 읽음 표시. NULL 이면 안 읽은 것 — 기본 정렬이 이걸로 앞뒤를 가릅니다.
         if not _column_exists(conn, "lectures", "read_at"):
             conn.execute(text("ALTER TABLE lectures ADD COLUMN read_at DATETIME NULL"))
@@ -249,6 +262,30 @@ def ensure_schema(engine: Engine) -> None:
                 )
             )
             logger.info("[db] usage_window.provider added")
+
+        # 블로그 발행 이력 (.spec/tistory.md). `create_all` 이 만들지만,
+        # 이미 돌고 있는 DB 에도 들어가야 해서 여기서도 확인합니다.
+        if not _table_exists(conn, "blog_posts"):
+            conn.execute(
+                text(
+                    "CREATE TABLE blog_posts ("
+                    " video_id VARCHAR(20) NOT NULL PRIMARY KEY,"
+                    " lecture_id VARCHAR(36) NOT NULL DEFAULT '',"
+                    " post_id VARCHAR(20) NULL,"
+                    " url VARCHAR(500) NULL,"
+                    " title VARCHAR(200) NOT NULL DEFAULT '',"
+                    " category VARCHAR(190) NOT NULL DEFAULT '',"
+                    " state VARCHAR(16) NOT NULL DEFAULT 'PENDING',"
+                    " attempts INT NOT NULL DEFAULT 0,"
+                    " error TEXT NULL,"
+                    " created_at DATETIME NOT NULL,"
+                    " posted_at DATETIME NULL,"
+                    " KEY ix_blog_posts_state (state),"
+                    " CONSTRAINT fk_blog_posts_video FOREIGN KEY (video_id)"
+                    "   REFERENCES videos (id) ON DELETE CASCADE)"
+                )
+            )
+            logger.info("[db] blog_posts created")
 
         _seed_owner(conn)
 

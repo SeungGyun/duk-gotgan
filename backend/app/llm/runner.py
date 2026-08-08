@@ -33,6 +33,12 @@ logger = logging.getLogger(__name__)
 
 PROMPTS = Path(__file__).resolve().parent.parent.parent / "prompts"
 
+# 일시적 실패로 되돌릴 수 있는 횟수. 자막 쪽과 같은 이유로 같은 값입니다
+# (collector/transcript.py `MAX_TRANSCRIPT_RETRY`) — 되살리려다 큐를 맴도는
+# 영상을 만들면 뒤의 멀쩡한 것들이 계속 밀립니다. 요약은 한 편에 몇 분씩
+# 걸리므로 상한이 없으면 손해가 자막 쪽보다 큽니다.
+MAX_REVIEW_RETRY = 5
+
 
 def _system_prompt() -> str:
     """본문 + 이 회사의 전달 방식.
@@ -77,6 +83,10 @@ class ReviewRun:
 
     denials: list[str] = field(default_factory=list)
     error: str | None = None
+    # 실패가 일시적인가. `None` 이면 `_is_transient` 가 오류 글자를 보고
+    # 짐작합니다 — 남이 준 메시지(SDK·CLI stderr)에는 그 방법뿐입니다.
+    # **우리가 우리말로 쓴 사유는 반드시 여기에 적어야 합니다.**
+    transient: bool | None = None
 
     @property
     def input_total(self) -> int:
@@ -246,6 +256,7 @@ async def _via_agy(
     run.cost_usd = 0.0
     if r.error and not outcome.error:
         run.error = r.error
+        run.transient = r.transient
 
 
 def _absorb(run: ReviewRun, msg: ResultMessage, transcript_tokens: int) -> None:
@@ -311,9 +322,40 @@ _TRANSIENT = (
 )
 
 
-def _is_transient(error: str | None) -> bool:
+def _is_transient(error: str | None, declared: bool | None = None) -> bool:
+    """일시적 실패인가. **적어 둔 것이 있으면 그것을 믿습니다.**
+
+    글자 맞히기는 남이 준 메시지에만 씁니다. 우리가 만든 사유는 우리말이라
+    영어 시그니처에 걸리지 않습니다 — `agy 가 900초 안에 끝나지 않았습니다`
+    가 그래서 영구 탈락으로 적혔고, 그렇게 15편이 다시 시도되지 않았습니다.
+    """
+    if declared is not None:
+        return declared
     low = (error or "").lower()
     return any(sig in low for sig in _TRANSIENT)
+
+
+def _retries(db: Session, video_id: str) -> int:
+    """이 영상을 일시적 실패로 몇 번 되돌렸나.
+
+    **이력에서 셉니다.** 자막 쪽과 같은 방식입니다
+    (collector/transcript.py `_retries`) — 컬럼을 더할 만한 값이 아니고,
+    `pipeline_events` 는 이미 영상별 이력을 들고 있습니다. 되돌릴 때만
+    `REVIEWING → TRANSCRIBED` 이벤트를 남기므로 그것만 세면 됩니다.
+    """
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(PipelineEvent)
+            .where(
+                PipelineEvent.video_id == video_id,
+                PipelineEvent.stage == "review",
+                PipelineEvent.from_state == "REVIEWING",
+                PipelineEvent.to_state == "TRANSCRIBED",
+            )
+        )
+        or 0
+    )
 
 
 def _provider_down(error: str | None) -> str | None:
@@ -427,10 +469,20 @@ async def review_pending(
             # initialize` 로 죽는 일이 밤새 18번 있었습니다. 이걸 FAILED_REVIEW
             # 로 적었더니 그 영상들은 두 번 다시 검토되지 않았습니다 —
             # 영상에는 아무 문제가 없는데도요.
-            transient = _is_transient(run.error)
+            transient = _is_transient(run.error, run.transient)
+            # **끝없이 다시 보지는 않습니다.** 다섯 번을 미룬 영상은 일시적
+            # 고장이 아니라 그 영상의 문제로 봅니다 — 상한이 없으면 안 되는
+            # 한 편이 큐를 맴돌며 뒤의 멀쩡한 것들을 계속 밀어냅니다.
+            tried = _retries(db, video.id) + 1 if transient else 0
+            if transient and tried >= MAX_REVIEW_RETRY:
+                transient = False
+                run.error = f"{MAX_REVIEW_RETRY}번 시도했습니다 — {run.error}"
             to_state = "TRANSCRIBED" if transient else "FAILED_REVIEW"
             if transient:
-                logger.warning("[review] 일시적 실패 — 다음 사이클에 다시 봅니다: %s", run.error)
+                logger.warning(
+                    "[review] 일시적 실패 %d/%d — 다음 사이클에 다시 봅니다: %s",
+                    tried, MAX_REVIEW_RETRY, run.error,
+                )
             # **놓기도 조건부입니다.** 이 건이 오래 걸려 회수당하고 다른
             # 워커가 이어받았을 수 있습니다. 그때 조건 없이 쓰면 지금 잘
             # 돌고 있는 남의 작업을 실패로 덮어씁니다.

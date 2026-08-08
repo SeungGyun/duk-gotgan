@@ -142,7 +142,8 @@ erDiagram
 | `min_expert_score` | int | 기본 70. 이 점수 미만은 요약하지 않음 |
 | `max_videos_per_run` | int | 기본 10. 1회 실행당 요약 상한 (비용 가드) |
 | `language` | text | `ko` / `en` / `any`. 기본 `ko` |
-| `published_after` | date | 이 날짜 이후 영상만. 기본 = 등록일 - 2년 |
+| `search_window_days` | int | 며칠 안에 올라온 것까지 볼 것인가 (1~90). 기본 90. **키워드마다 다릅니다** — 시황은 1일, 잘 안 변하는 주제는 90일 |
+| `published_after` | date | 이 날짜 이후 영상만. 창이 "얼마나 최근까지"라면 이쪽은 바닥 |
 | `created_at` / `last_run_at` | timestamptz | |
 
 > **`status = pending`이 스케줄러의 트리거입니다.** 신규 등록 시 `pending`으로 들어가고, Beat가 1분 주기로 `pending` 키워드를 발견하면 즉시 1회 실행 후 `active`로 전환합니다. 이후에는 `schedule` cron을 따릅니다.
@@ -349,7 +350,7 @@ def discover(keyword_id, run_id):
         videoDuration="long",                        # 20분 초과. long/medium 2회 호출 가능
         videoCaption="closedCaption",                # 자막 있는 영상 우선
         relevanceLanguage=kw.language,
-        publishedAfter=kw.published_after,
+        publishedAfter=rules.window_start(kw),        # 키워드가 정한 기간 (1~90일)
         order="relevance",
         maxResults=50,
     )

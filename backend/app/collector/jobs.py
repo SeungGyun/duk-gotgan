@@ -33,6 +33,7 @@ from app.collector import discover as D
 from app.collector import resources
 from app.collector import quota
 from app.collector import queue
+from app.blog import publish
 from app.collector.schedule import due_keywords
 from app.collector.transcript import blocked_until, transcribe_pending
 from app.collector.youtube import YouTubeError
@@ -52,6 +53,9 @@ TRANSCRIPT_LOCK = "dukgotgan:transcript"
 # 진행 중인 작업을 건드리지 않는 근거가 이 직렬화입니다 (runner.recover_zombies).
 REVIEW_LOCK = f"dukgotgan:review:{settings.review_provider}"
 CLEANUP_LOCK = "dukgotgan:cleanup"
+# **회사로 가르지 않습니다.** 요약은 두 회사가 나눠 하지만 블로그는 하나뿐이라,
+# 워커가 둘 떠 있어도 발행은 한 번에 하나만 돌아야 합니다.
+PUBLISH_LOCK = "dukgotgan:publish"
 
 # 한 번에 받아쓸 편수. 시간 예산 대신 편수로 끊습니다 — 이제 검토가 뒤에서
 # 기다리지 않으므로 "20분 안에 끝내라"는 제약이 필요 없고, 편수로 끊어야
@@ -328,6 +332,40 @@ async def review_job(db: Session) -> JobResult:
     return r
 
 
+# ── 4) 블로그 발행 ───────────────────────────────────────────
+
+
+def publish_job(db: Session) -> JobResult:
+    """차례가 되면 한 편을 블로그로 내보냅니다 (.spec/tistory.md).
+
+    **기본은 꺼져 있습니다.** 공개 발행은 되돌리기 번거로워서, 워커를
+    재시작했다는 이유만으로 글이 나가서는 안 됩니다 (`BLOG_ENABLED`).
+    """
+    r = JobResult(job="publish")
+    if not settings.blog_enabled:
+        return r
+    if not publish.due(db):
+        return r
+
+    out = publish.publish_once(db)
+    if not out.did_work:
+        # **기록을 남기지 않습니다.** 올릴 것이 없거나 세션이 만료된 경우인데,
+        # 여기서 실행 기록을 만들면 1분마다 한 줄씩 쌓여 화면이 덮입니다 —
+        # 자막 잡이 같은 이유로 같은 일을 합니다.
+        if out.error:
+            logger.warning("[publish] %s", out.error)
+        return r
+
+    run = _start(db, "publish", "scheduled", "블로그")
+    r.did_work = True
+    r.label = f"블로그 — {out.label}"
+    r.stats = {"published": 1 if out.ok else 0}
+    if out.error:
+        r.notes.append(out.error)
+    _finish(db, run, r)
+    return r
+
+
 # ── "지금 실행" ──────────────────────────────────────────────
 
 
@@ -369,9 +407,11 @@ def recover_stale_runs(db: Session, job: str) -> int:
 
 __all__ = [
     "DISCOVER_LOCK",
+    "PUBLISH_LOCK",
     "REVIEW_LOCK",
     "TRANSCRIPT_LOCK",
     "discover_job",
+    "publish_job",
     "recover_stale_runs",
     "review_due",
     "review_job",

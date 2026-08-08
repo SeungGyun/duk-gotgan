@@ -8,7 +8,7 @@ from datetime import timedelta
 
 import pytest
 
-from app.collector.rules import evaluate
+from app.collector.rules import WINDOW_MAX_DAYS, evaluate, window_label, window_start
 from app.collector.youtube import Candidate, duration_bucket, parse_duration
 from app.db.models import Keyword
 from config.settings import settings
@@ -22,7 +22,9 @@ def make_candidate(**over) -> Candidate:
         description="",
         channel_id="ch1",
         channel_title="인프라 노트",
-        published_at=now_kst() - timedelta(days=100),
+        # 기본 창(90일) 안입니다. 예전 전역 기준이 180일이라 100일로 두었는데,
+        # 상한이 석 달로 내려오면서 이 값 자체가 "오래됨" 이 됐습니다.
+        published_at=now_kst() - timedelta(days=30),
         duration_sec=4360,
         view_count=12_000,
         like_count=300,
@@ -137,6 +139,68 @@ def test_조회수_기준을_켜면_다시_걸린다(monkeypatch):
     monkeypatch.setattr(settings, "rule_min_view_count", 300)
     v = evaluate(make_candidate(view_count=120), make_keyword())
     assert not v.ok and "조회수 미달" in v.reason
+
+
+# ── 검색 기간 ────────────────────────────────────────────────
+
+
+def test_기간은_키워드마다_다르다():
+    """`경제` 는 하루, `면역력` 은 석 달. 같은 영상이 한쪽에서는 통과하고
+    한쪽에서는 떨어져야 이 기능이 있는 뜻이 있습니다."""
+    week_old = make_candidate(published_at=now_kst() - timedelta(days=7))
+    assert not evaluate(week_old, make_keyword(search_window_days=1)).ok
+    assert evaluate(week_old, make_keyword(search_window_days=90)).ok
+
+
+def test_기간_사유에_기준이_적힌다():
+    v = evaluate(
+        make_candidate(published_at=now_kst() - timedelta(days=10)),
+        make_keyword(search_window_days=1),
+    )
+    assert not v.ok
+    assert "오래됨" in v.reason and "1일" in v.reason
+
+
+@pytest.mark.parametrize(
+    "days,label", [(1, "1일"), (3, "3일"), (7, "1주"), (14, "2주"), (30, "1개월"), (90, "3개월")]
+)
+def test_기간_이름(days, label):
+    assert window_label(days) == label
+
+
+def test_상한은_석_달():
+    """값이 어떻게 들어와도 석 달을 넘겨 긁지 않습니다. 그 위로 열면
+    "새로 올라온 것을 모은다" 가 아니라 과거를 긁는 일이 되고, 요약
+    비용이 통째로 그쪽으로 갑니다."""
+    kw = make_keyword(search_window_days=3650)
+    span = now_kst() - window_start(kw)
+    assert span <= timedelta(days=WINDOW_MAX_DAYS, seconds=5)
+
+
+def test_아직_저장_전이면_기본값():
+    """컬럼 default 는 INSERT 때 붙습니다 — 새로 만든 객체는 None 이라,
+    그대로 빼면 TypeError 로 죽습니다."""
+    kw = make_keyword()
+    kw.search_window_days = None
+    assert evaluate(make_candidate(), kw).ok
+
+
+def test_못_돈_날만큼_더_거슬러_본다():
+    """창이 1일인데 쿼터 대기로 하루를 거르면, 어제 것은 다음 실행에서
+    이미 창 밖입니다 — 영영 못 봅니다. 마지막 실행 이후는 무슨 일이
+    있어도 훑어야 합니다."""
+    kw = make_keyword(search_window_days=1, last_run_at=now_kst() - timedelta(days=5))
+    assert window_start(kw) <= now_kst() - timedelta(days=5)
+    # 그렇다고 상한을 넘지는 않습니다
+    old = make_keyword(search_window_days=1, last_run_at=now_kst() - timedelta(days=400))
+    assert now_kst() - window_start(old) <= timedelta(days=WINDOW_MAX_DAYS, seconds=5)
+
+
+def test_최근에_돌았으면_창_그대로():
+    """평소에는 늘어나지 않아야 합니다 — 밀린 날을 메우는 장치이지
+    창을 넓히는 장치가 아닙니다."""
+    kw = make_keyword(search_window_days=1, last_run_at=now_kst() - timedelta(hours=6))
+    assert window_start(kw) >= now_kst() - timedelta(days=1, seconds=5)
 
 
 def test_언어_무관이면_영어도_통과한다():

@@ -71,6 +71,59 @@ def test_회사가_안_받으면_그_자리에서_접는다():
     assert src.index("_provider_down(run.error)") < src.index("if streak[1] >= STOP_AFTER")
 
 
+def test_우리말로_쓴_사유는_글자로_맞힐_수_없다():
+    """**세 번째로 같은 실수를 했습니다.** 이번엔 우리가 쓴 사유였습니다.
+
+    `_TRANSIENT` 시그니처는 전부 영어인데 `agy.py` 가 쓰는 시한 초과 사유는
+    우리말입니다. 그래서 `agy 가 900초 안에 끝나지 않았습니다.` 가 판정을
+    통과하지 못하고 15편이 영구 탈락으로 쌓였습니다.
+
+    자막 크기가 1,295~20,086 토큰으로 고르게 퍼져 있어 분량 문제도
+    아니었습니다 — 가장 작은 것도 걸렸습니다.
+    """
+    말로만 = "agy 가 900초 안에 끝나지 않았습니다."
+    assert not any(sig in 말로만.lower() for sig in ("timeout", "timed out")), (
+        "이 문장에는 영어 시그니처가 없습니다 — 그래서 적어 두어야 합니다"
+    )
+    assert _is_transient(말로만, True)
+
+
+def test_적어_둔_판정이_글자_맞히기를_이긴다():
+    """남이 준 메시지에만 글자를 맞힙니다. 우리 사유는 우리가 정합니다."""
+    # 적어 두면 영어 시그니처가 없어도 일시적입니다
+    assert _is_transient("무슨 일인지 우리말로만 적힌 사유", True)
+    # 반대로, 영어 시그니처가 들어 있어도 아니라고 적었으면 아닙니다
+    assert not _is_transient("timeout 이라는 낱말이 들어간 진짜 탈락 사유", False)
+    # 안 적었으면 예전대로 글자를 봅니다
+    assert _is_transient("Control request timeout: initialize")
+    assert not _is_transient("형식 오류 3회 — sections 가 문자열입니다")
+
+
+def test_되돌리기에도_상한이_있다():
+    """되살리려다 큐를 맴도는 영상을 만들면 뒤의 멀쩡한 것들이 밀립니다.
+    자막 쪽(`MAX_TRANSCRIPT_RETRY`)과 같은 이유로 같은 값입니다."""
+    import inspect
+
+    from app.llm import runner
+
+    assert runner.MAX_REVIEW_RETRY == 5
+    src = inspect.getsource(runner.review_pending)
+    assert "_retries(db, video.id)" in src
+    assert "MAX_REVIEW_RETRY" in src
+
+
+def test_되돌린_횟수는_이력에서_센다():
+    """컬럼을 더할 만한 값이 아닙니다. `REVIEWING → TRANSCRIBED` 이벤트만
+    세면 됩니다 — 되돌릴 때만 남는 이벤트라서요."""
+    import inspect
+
+    from app.llm import runner
+
+    src = inspect.getsource(runner._retries)
+    assert '"review"' in src
+    assert '"REVIEWING"' in src and '"TRANSCRIBED"' in src
+
+
 def test_agy_의_catch_all_은_탈락이_아니다():
     """`Agent execution terminated due to error.` 안에는 서버가 준
     `INVALID_ARGUMENT (code 400)` 이 들어 있습니다. **자막 크기와 상관이

@@ -10,7 +10,6 @@ video id 라서 중복 처리가 구조적으로 막힙니다 — 자막 수집�
 
 import logging
 from dataclasses import dataclass, field
-from datetime import timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -60,6 +59,11 @@ def discover_keyword(db: Session, kw: Keyword, run: CrawlRun) -> DiscoverResult:
     """키워드 하나를 검색해 후보를 적재합니다."""
     result = DiscoverResult(keyword_term=kw.term)
 
+    # **한 번만 계산합니다.** 검색에 넘기는 값과 룰 필터의 기준이 같아야
+    # 합니다 — 따로 재면 그 사이 몇 초 때문에 경계에 걸친 영상을 100유닛
+    # 써서 받아 놓고 "오래됨" 으로 떨어뜨립니다.
+    cutoff = rules.window_start(kw)
+
     # 쿼터를 먼저 확인하고 차감합니다. 호출하고 나서 재면 이미 늦습니다.
     if kw.source_type == "channel":
         # 업로드 목록은 1유닛 — 검색(100유닛)의 1/100 입니다.
@@ -70,24 +74,10 @@ def discover_keyword(db: Session, kw: Keyword, run: CrawlRun) -> DiscoverResult:
         ids = playlist_video_ids(kw.uploads_playlist_id, limit=SEARCH_PAGE_SIZE)
     else:
         _spend(db, run, quota.UNITS_SEARCH)
-        published_after = now_kst() - timedelta(days=settings.rule_max_age_days)
-        if kw.published_after:
-            published_after = max(
-                published_after,
-                now_kst().replace(
-                    year=kw.published_after.year,
-                    month=kw.published_after.month,
-                    day=kw.published_after.day,
-                    hour=0,
-                    minute=0,
-                    second=0,
-                    microsecond=0,
-                ),
-            )
         ids = search_ids(
             kw.term,
             language=kw.language,
-            published_after=published_after,
+            published_after=cutoff,
             limit=SEARCH_PAGE_SIZE,
             min_duration_sec=kw.min_duration_sec,
         )
@@ -128,7 +118,7 @@ def discover_keyword(db: Session, kw: Keyword, run: CrawlRun) -> DiscoverResult:
                 result.rule_passed += 1
             continue
 
-        verdict = rules.evaluate(c, kw, blocked)
+        verdict = rules.evaluate(c, kw, blocked, cutoff=cutoff)
         if not verdict.ok:
             state, reason = "REJECTED_RULE", verdict.reason
             result.rejected.append((c.title, verdict.reason))

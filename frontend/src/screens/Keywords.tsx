@@ -12,7 +12,7 @@ import { Screen } from "../components/Screen";
 import { Button, Chip, ErrorState, Loading, Meter, Panel } from "../components/ui";
 import { useAsync } from "../hooks/useAsync";
 import { useMe } from "../me";
-import { languageLabel, num, scheduleLabel, when } from "../lib/format";
+import { languageLabel, num, scheduleLabel, when, windowLabel } from "../lib/format";
 import s from "./Keywords.module.css";
 
 /** 최소 길이 기본값 — 두 방식 모두 5분.
@@ -28,6 +28,13 @@ import s from "./Keywords.module.css";
  *  5~10분 0건, 10분 이상 15건). */
 const MIN_DURATION: Record<SourceType, number> = { search: 300, channel: 300 };
 
+/** 검색 기간의 상한 — **석 달**. 서버도 같은 값으로 막습니다
+ *  (backend/app/collector/rules.py 의 `WINDOW_MAX_DAYS`).
+ *
+ *  더 넓히는 것은 "새로 올라온 것을 모은다" 가 아니라 과거를 긁는
+ *  일이고, 한 번 긁으면 요약 비용이 통째로 그쪽으로 갑니다. */
+const WINDOW_MAX_DAYS = 90;
+
 const DEFAULT_DRAFT: KeywordDraft = {
   term: "",
   sourceType: "search",
@@ -36,6 +43,7 @@ const DEFAULT_DRAFT: KeywordDraft = {
   minDurationSec: MIN_DURATION.search,
   minExpertScore: 45,
   maxPerRun: 10,
+  searchWindowDays: WINDOW_MAX_DAYS,
 };
 
 const statusChip: Record<KeywordStatus, { tone: "pass" | "warn" | "accent" | "neutral"; label: string }> =
@@ -279,6 +287,22 @@ export function Keywords({ list }: { list: ListState }) {
               <em>편</em>
             </span>
           </label>
+          {/* 며칠 치를 볼 것인가. 주제마다 "새 것"의 뜻이 다릅니다 —
+              시황은 어제 것도 헌 이야기이고, 면역력은 석 달 전 강의가
+              그대로 쓸모 있습니다. */}
+          <label className={`${s.fld} ${s.sm}`}>
+            <span className={s.label}>기간</span>
+            <span className={s.unit}>
+              <input
+                type="number"
+                min={1}
+                max={WINDOW_MAX_DAYS}
+                value={draft.searchWindowDays}
+                onChange={(e) => set("searchWindowDays", Number(e.target.value))}
+              />
+              <em>일</em>
+            </span>
+          </label>
           <p className={s.hint}>
             홍보물과 주제 무관은 <strong>점수와 상관없이</strong> 빠집니다. 나머지는 기준
             점수만 넘으면 담기므로, <strong>45점</strong>이면 개론·실무 영상까지 들어오고
@@ -286,13 +310,16 @@ export function Keywords({ list }: { list: ListState }) {
             {isChannel ? (
               <>
                 직접 고른 채널이라 <strong>조회수는 보지 않습니다</strong>. 최근{" "}
-                <strong>6개월</strong> 안에 올라온 영상만 봅니다.
+                <strong>{windowLabel(draft.searchWindowDays)}</strong> 안에 올라온 영상만
+                봅니다.
               </>
             ) : (
               <>
-                최근 <strong>6개월</strong> 안에 올라온 영상만 봅니다. 최소 길이가{" "}
-                <strong>0이면 쇼츠도</strong> 들어오고, 20분 이상으로 올리면 유튜브 검색
-                단계에서부터 긴 영상만 받아 후보가 알차집니다.
+                최근 <strong>{windowLabel(draft.searchWindowDays)}</strong> 안에 올라온 영상만
+                봅니다 — <strong>경제·주식</strong>처럼 하루만 지나도 헌 이야기가 되는 주제는
+                1일로 좁히고, <strong>과학·면역력</strong>처럼 잘 안 변하는 주제는 90일(석 달,
+                최대)로 둡니다. 최소 길이가 <strong>0이면 쇼츠도</strong> 들어오고, 20분
+                이상으로 올리면 유튜브 검색 단계에서부터 긴 영상만 받아 후보가 알차집니다.
               </>
             )}
           </p>
@@ -354,9 +381,13 @@ export function Keywords({ list }: { list: ListState }) {
                             {k.channelTitle || k.term}
                           </div>
                           <div className={s.sub}>
+                            {/* 기간은 칸을 새로 내지 않고 여기 붙입니다 —
+                                표가 이미 여덟 칸이고, 폰에서는 카드로 접히면서
+                                줄이 하나씩 늘어납니다. 언어·1회 최대와 같은
+                                종류(수집 설정)라 자리도 맞습니다. */}
                             {k.sourceType === "channel"
-                              ? `${k.term} · 1회 최대 ${k.maxPerRun}편`
-                              : `${k.language} · 1회 최대 ${k.maxPerRun}편`}
+                              ? `${k.term} · 최근 ${windowLabel(k.searchWindowDays)} · 1회 최대 ${k.maxPerRun}편`
+                              : `${k.language} · 최근 ${windowLabel(k.searchWindowDays)} · 1회 최대 ${k.maxPerRun}편`}
                             {/* 수집 설정은 키워드에 붙어 있어서, 고치면
                                 같이 보는 사람 **모두에게** 적용됩니다.
                                 모르고 바꾸면 남의 것을 건드린 셈이 되므로
@@ -628,6 +659,7 @@ function EditForm({
     minDurationSec: keyword.minDurationSec,
     minExpertScore: keyword.minExpertScore,
     maxPerRun: keyword.maxPerRun,
+    searchWindowDays: keyword.searchWindowDays,
   });
   const [saving, setSaving] = useState(false);
   // 종류는 등록 후에 바꾸지 않습니다 — 검색어를 채널로 바꾸면 지금까지
@@ -720,6 +752,19 @@ function EditForm({
               onChange={(e) => set("maxPerRun", Number(e.target.value))}
             />
             <em>편</em>
+          </span>
+        </label>
+        <label className={`${s.fld} ${s.sm}`} title="최대 90일(석 달)">
+          <span className={s.label}>기간</span>
+          <span className={s.unit}>
+            <input
+              type="number"
+              min={1}
+              max={WINDOW_MAX_DAYS}
+              value={d.searchWindowDays}
+              onChange={(e) => set("searchWindowDays", Number(e.target.value))}
+            />
+            <em>일</em>
           </span>
         </label>
         <div className={s.editActions}>

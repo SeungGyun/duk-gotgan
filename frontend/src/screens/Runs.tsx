@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { api } from "../api";
-import type { Pipeline, Run, RunEvent, RunStats, Track } from "../api";
+import type { BlogStatus, Pipeline, Run, RunEvent, RunStats, Track } from "../api";
 import { Screen } from "../components/Screen";
 import { Chip, Empty, ErrorState, Loading, Panel } from "../components/ui";
 import { useAsync } from "../hooks/useAsync";
@@ -36,6 +36,10 @@ const JOB_STATS: Record<string, { key: keyof RunStats; label: string }[]> = {
     { key: "reviewed", label: "요약" },
     { key: "published", label: "공개" },
   ],
+  // 발행은 이 목록에 오지 않습니다(`/runs` 가 거릅니다). 그래도 남겨
+  // 둡니다 — 없으면 `cycle` 로 떨어져서, 한 편 올린 기록에 "발견 0 ·
+  // 자막 0 · 요약 0" 세 칸이 붙습니다. 안 한 일을 0 으로 적는 셈입니다.
+  publish: [{ key: "published", label: "발행" }],
 };
 
 /** **`interrupted` 는 실패가 아닙니다.** 워커가 사이클 도중에 멈춘 것이고
@@ -57,6 +61,7 @@ const jobLabel: Record<string, string> = {
   transcript: "자막",
   review: "요약",
   cycle: "통합",
+  publish: "블로그",
 };
 
 /** 파이프라인 단계 이름. **"검토"라고 쓰지 않습니다** — AI 가 더 이상
@@ -120,6 +125,7 @@ export function Runs() {
       subtitle="지금 어디까지 왔는지, 기다리면 되는지"
     >
       {pipe.data && <Now p={pipe.data} />}
+      {pipe.data?.blog?.enabled && <BlogPanel b={pipe.data.blog} />}
 
       <Panel title="지나간 실행" bodyless>
         {rows.length === 0 ? (
@@ -158,6 +164,10 @@ function Now({ p }: { p: Pipeline }) {
         {p.tracks.map((t) => (
           <TrackRow key={t.key} t={t} />
         ))}
+        {/* 블로그도 한 줄을 줍니다. 트랙 셋만 있던 때는 5분에 한 편씩
+            글이 나가는 중에도 이 패널이 아무 말을 하지 않아서, 발행이
+            도는지 멎었는지 화면으로는 알 길이 없었습니다. */}
+        {p.blog?.enabled && <BlogRow b={p.blog} />}
       </ul>
 
       {/* 냉각은 실패가 아니라 기다리면 풀리는 상태입니다. 이 한 줄이
@@ -208,6 +218,89 @@ function TrackRow({ t }: { t: Track }) {
         )}
       </span>
     </li>
+  );
+}
+
+/** 블로그의 "지금". **다른 트랙과 생김새를 맞춥니다** — 같은 줄에 서는데
+    혼자 다르게 생기면 읽는 사람이 두 번 봅니다.
+
+    점은 늘 쉬는 중입니다. 발행은 한 편을 몇 초에 올리고 끝나서, 화면을
+    볼 때 걸려 있을 일이 사실상 없습니다 — 도는 척 깜빡이게 두면 없는
+    일을 있다고 하는 셈입니다. */
+function BlogRow({ b }: { b: BlogStatus }) {
+  const last = b.recent[0];
+  // 하루 상한에 닿으면 "쉬는 중"의 뜻이 달라집니다 — 간격이 돌아온 것이
+  // 아니라 오늘은 끝난 것입니다. 이걸 안 적었을 때, 왜 안 올라가는지의
+  // 답이 워커 로그 안에만 있었습니다.
+  const full = b.dailyCap > 0 && b.postedToday >= b.dailyCap;
+  return (
+    <li className={s.track}>
+      <span className={s.dotIdle} aria-hidden="true" />
+      <span className={s.trackName}>블로그</span>
+      <span className={s.trackWait}>대기 {num(b.waiting)}</span>
+      <span className={s.trackWhat}>
+        {/* 세션이 먼저입니다. 죽어 있으면 다음 차례가 언제든 아무것도
+            안 나가므로, "쉬는 중" 이라고 적으면 거짓말이 됩니다. */}
+        <span className={b.sessionBadSince ? s.trackStuck : s.trackTitle}>
+          {b.sessionBadSince
+            ? `로그인 필요 · ${ago(b.sessionBadSince)}부터 — 터미널에서 tistory login`
+            : full
+              ? "오늘 몫 다 씀 · 내일 이어감"
+              : b.nextAt
+                ? `쉬는 중 · 다음 차례 ${clock(b.nextAt)}`
+                : "쉬는 중"}
+        </span>
+        {b.dailyCap > 0 && (
+          <em className={s.trackSince}>
+            · 오늘 {b.postedToday}/{b.dailyCap}
+          </em>
+        )}
+        {!full && last && <em className={s.trackSince}>· 마지막 {ago(last.at)}</em>}
+      </span>
+    </li>
+  );
+}
+
+/** 올라간 글 — **최근 몇 편만 묶어서.**
+
+    예전에는 한 편에 실행 기록이 하나씩 남아 "지나간 실행"에 섞여 나왔습니다.
+    5~20분에 한 편이 나가므로 반나절이면 목록이 통째로 블로그 줄이 되고,
+    검색·자막·요약이 무엇을 했는지는 스크롤 아래로 밀려 안 보였습니다.
+    게다가 그 줄들은 펼쳐도 "옮긴 영상이 없습니다" 뿐이었습니다 — 발행 잡은
+    파이프라인 이벤트를 남기지 않으니까요. 자리만 먹고 읽을 것이 없던 것.
+
+    전부를 여기 옮기지도 않습니다. 그러면 덮는 자리만 바뀝니다. 이 화면이
+    답해야 하는 것은 "돌고 있나"이고, 발행 이력 전체는 블로그에 있습니다. */
+function BlogPanel({ b }: { b: BlogStatus }) {
+  return (
+    <Panel title={`블로그 — 지금까지 ${num(b.posted)}편`}>
+      {b.recent.length === 0 ? (
+        <Empty>아직 올라간 글이 없습니다.</Empty>
+      ) : (
+        <ul className={s.blogList}>
+          {b.recent.map((p) => (
+            <li key={p.postId ?? p.at}>
+              <span className={s.blogWhen}>{clock(p.at)}</span>
+              <span className={s.blogTitle}>
+                {p.url ? (
+                  <a href={p.url} target="_blank" rel="noreferrer">
+                    {p.title}
+                  </a>
+                ) : (
+                  p.title
+                )}
+              </span>
+              <span className={s.blogWhere}>
+                {p.category}
+                {p.postId && ` #${p.postId}`}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {/* 세 번 해 보고 접은 글. 저절로 풀리지 않으므로 0 이 아니면 말합니다. */}
+      {b.failed > 0 && <p className={s.stuck}>세 번 해 보고 접은 글 {num(b.failed)}편</p>}
+    </Panel>
   );
 }
 

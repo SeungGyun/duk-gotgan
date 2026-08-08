@@ -557,3 +557,46 @@ def test_상한은_주인만_바꾼다(client, db):
         ).status_code
         == 403
     )
+
+
+# ── 검색 기간 ──────────────────────────────────────────────────
+
+
+def test_기간은_키워드마다_따로_저장된다(client, db):
+    """`경제` 는 1일, `면역력` 은 90일. 한 키워드를 고쳐도 다른 키워드는
+    그대로여야 합니다 — 전역값 하나였을 때는 이게 불가능했습니다."""
+    주인 = a_user(db, "관리자", owner=True)
+    login(client, 주인)
+
+    빠름 = client.post(f"{API}/keywords", json={"term": "주식", "searchWindowDays": 1})
+    느림 = client.post(f"{API}/keywords", json={"term": "면역력", "searchWindowDays": 90})
+    assert 빠름.json()["searchWindowDays"] == 1
+    assert 느림.json()["searchWindowDays"] == 90
+
+    r = client.patch(f"{API}/keywords/{빠름.json()['id']}", json={"searchWindowDays": 3})
+    assert r.status_code == 200 and r.json()["searchWindowDays"] == 3
+
+    쪽 = {k["term"]: k["searchWindowDays"] for k in client.get(f"{API}/keywords").json()}
+    assert 쪽 == {"주식": 3, "면역력": 90}
+
+
+def test_기간_기본은_석_달(client, db):
+    """안 정하고 만들면 예전과 같은 폭입니다 — 새 손잡이가 생겼다고
+    기존 등록 습관이 조용히 좁아지면 안 됩니다."""
+    주인 = a_user(db, "관리자", owner=True)
+    login(client, 주인)
+    r = client.post(f"{API}/keywords", json={"term": "과학"})
+    assert r.json()["searchWindowDays"] == 90
+
+
+@pytest.mark.parametrize("days", [0, 91, 365])
+def test_기간은_석_달을_넘길_수_없다(client, db, days):
+    """상한을 화면에서만 막으면 API 로는 열려 있습니다. 넓히는 것은 새
+    것을 모으는 일이 아니라 과거를 긁는 일이고, 요약 비용이 통째로
+    그쪽으로 갑니다."""
+    주인 = a_user(db, "관리자", owner=True)
+    login(client, 주인)
+
+    assert client.post(f"{API}/keywords", json={"term": "경제", "searchWindowDays": days}).status_code == 400
+    kw = client.post(f"{API}/keywords", json={"term": "경제"}).json()
+    assert client.patch(f"{API}/keywords/{kw['id']}", json={"searchWindowDays": days}).status_code == 400

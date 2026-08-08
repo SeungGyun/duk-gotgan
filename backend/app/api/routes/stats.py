@@ -15,10 +15,12 @@ from app.api.auth import current_user, require_owner
 from app.api.errors import ApiError
 from app.api.routes.lectures import Filters, _filtered
 from app.api.serializers import run_out
+from app.blog import publish
 from app.collector import transcript
 from app.collector.schedule import next_due_at
 from app.llm import usage as usage_guard
 from app.db.models import (
+    BlogPost,
     CrawlRun,
     Keyword,
     Lecture,
@@ -170,7 +172,21 @@ def usage(db: Session = Depends(get_db), _: User = Depends(current_user)):
 
 @router.get("/runs")
 def list_runs(db: Session = Depends(get_db), _: User = Depends(current_user)):
-    rows = db.scalars(select(CrawlRun).order_by(CrawlRun.started_at.desc()).limit(50)).all()
+    """**블로그 발행은 뺍니다.** 한 편에 실행 기록이 하나씩 남는데 30~60분마다
+    한 편이 나가서, 반나절이면 이 목록이 통째로 블로그 줄로 덮였습니다 —
+    검색·자막·요약이 무엇을 했는지 보러 오는 화면인데 그게 안 보입니다.
+
+    게다가 발행 잡은 `pipeline_events` 를 남기지 않아서, 펼쳐 봐야
+    "옮긴 영상이 없습니다" 한 줄뿐입니다. 자리만 먹고 읽을 것이 없었습니다.
+    기록 자체는 그대로 쌓아 둡니다(토큰 집계가 봅니다). 발행 이력은
+    `/stats/pipeline` 의 `blog` 에 최근 것만 묶어서 나갑니다.
+    """
+    rows = db.scalars(
+        select(CrawlRun)
+        .where(CrawlRun.job != "publish")
+        .order_by(CrawlRun.started_at.desc())
+        .limit(50)
+    ).all()
     return [run_out(r) for r in rows]
 
 
@@ -194,6 +210,57 @@ _STUCK = [
 
 # 트랙마다 "지금 붙들고 있는 영상"이 어느 상태로 나타나는지.
 _WORKING = {"transcript": "TRANSCRIBING", "review": "REVIEWING"}
+
+# 블로그는 최근 몇 편만 보냅니다. 전부 보내면 실행 목록을 덮던 문제를
+# 자리만 옮기는 셈입니다 — 여기서 알고 싶은 것은 "돌고 있나"이지
+# 발행 이력 전부가 아닙니다. 전체는 블로그에 가서 봅니다.
+_BLOG_RECENT = 5
+
+
+def _blog(db: Session) -> dict:
+    """블로그 발행의 지금 상태.
+
+    **트랙으로 만들지 않았습니다.** 트랙은 "지금 붙들고 있는 영상"이 있는
+    일인데, 발행은 한 편을 올리고 끝나 붙들고 있는 것이 없습니다. 알고
+    싶은 것은 다음 차례가 언제고 그동안 몇 편이 나갔나입니다.
+    """
+    posted = db.scalars(
+        select(BlogPost)
+        .where(BlogPost.state == "POSTED")
+        .order_by(BlogPost.posted_at.desc())
+        .limit(_BLOG_RECENT)
+    ).all()
+
+    def count(st: str) -> int:
+        return db.scalar(select(func.count()).select_from(BlogPost).where(BlogPost.state == st)) or 0
+
+    return {
+        # 꺼져 있으면 화면에서 통째로 감춥니다. 기본이 꺼짐이라, 안 켠
+        # 사람에게 "대기 0 · 0편"을 보이면 고장으로 읽힙니다.
+        "enabled": settings.blog_enabled,
+        "nextAt": to_utc_iso(publish.next_at(db)),
+        "waiting": publish.remaining(db),
+        "posted": count("POSTED"),
+        # 오늘 몇 편 / 하루 몇 편까지. **화면이 이걸 보여야 합니다** —
+        # 없을 때는 "왜 안 올라가지" 의 답이 워커 로그 안에만 있었습니다.
+        "postedToday": publish.posted_today(db),
+        "dailyCap": settings.blog_daily_cap,
+        # 세션이 죽으면 **사람이 카카오 로그인을 해야** 풀립니다. 우리가
+        # 대신 할 수 없으니, 알아채는 길이 화면에 있어야 합니다.
+        "sessionBadSince": to_utc_iso(publish.session_bad_since(db)),
+        # 세 번 해 보고 접은 것. 사람이 손대야 풀리는 종류라 세어 둡니다.
+        "failed": count("FAILED"),
+        "recent": [
+            {
+                "at": to_utc_iso(b.posted_at),
+                "title": b.title,
+                "category": b.category,
+                "postId": b.post_id,
+                "url": b.url,
+            }
+            for b in posted
+        ],
+    }
 
 
 def _now_working(db: Session, state: str) -> dict | None:
@@ -311,6 +378,7 @@ def pipeline(db: Session = Depends(get_db), _: User = Depends(current_user)):
             {"key": k, "label": label, "count": take(states)} for k, label, states in _FUNNEL
         ],
         "tracks": tracks,
+        "blog": _blog(db),
         "stuck": [
             {"key": k, "label": label, "count": take(states)} for k, label, states in _STUCK
         ],

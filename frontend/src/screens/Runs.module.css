@@ -124,6 +124,62 @@
   color: var(--fail);
 }
 
+/* ── 블로그 ──────────────────────────────────────────────
+   실행 상세(.eventList)와 칸을 나눠 둡니다. 저쪽 둘째 칸은 "발견·자막·요약"
+   에 맞춘 40px 고정인데, 여기 들어오는 것은 "LLM 서빙 최적화" 같은
+   카테고리 이름이라 그 폭에서는 통째로 잘립니다. */
+.blogList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.blogList li {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: baseline;
+  padding: 6px 0;
+  font-size: 12.5px;
+}
+.blogList li + li {
+  border-top: 1px solid var(--border);
+}
+.blogWhen {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.blogTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 글로 가는 링크입니다. 파랗게 튀우지 않습니다 — 다섯 줄이 전부 링크라
+   색을 주면 목록이 아니라 링크 무더기로 읽힙니다. */
+.blogTitle a {
+  color: inherit;
+  text-decoration: none;
+}
+.blogTitle a:hover {
+  text-decoration: underline;
+}
+/* 카테고리와 글 번호. 폰에서는 제목 자리를 지키려고 접습니다 — 어디에
+   올라갔는지보다 무엇이 올라갔는지가 먼저입니다. */
+.blogWhere {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+@media (max-width: 420px) {
+  .blogList li {
+    grid-template-columns: 46px minmax(0, 1fr);
+  }
+  .blogWhere {
+    display: none;
+  }
+}
+
 /* ── 실행 상세 ───────────────────────────────────────────── */
 .runWrap {
   border-bottom: 1px solid var(--border);
@@ -279,6 +335,15 @@
   font-style: normal;
   color: var(--muted);
   flex: none;
+}
+/* 사람이 손대야 풀리는 줄. 기다리면 되는 것과 색으로 가릅니다 —
+   "쉬는 중" 과 같은 회색으로 두면 한 줄 차이라 그냥 지나칩니다. */
+.trackStuck {
+  color: var(--fail);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 잡별 지표. 막대 대신 숫자만 둡니다 — 한 실행이 한 가지만 하므로

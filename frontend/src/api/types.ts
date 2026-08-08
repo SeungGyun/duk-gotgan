@@ -75,6 +75,15 @@ export interface Keyword {
   minExpertScore: number;
   /** 1회 실행당 요약 상한 — 초기 백로그가 예산을 태우는 것을 막는다 */
   maxPerRun: number;
+  /**
+   * 며칠 안에 올라온 것까지 볼 것인가 (1~90).
+   *
+   * **키워드마다 다릅니다.** `경제`·`주식` 은 하루만 지나도 헌 이야기라
+   * 1일이고, `면역력`·`과학` 은 석 달 전 강의가 그대로 쓸모 있어 90일입니다.
+   * 위쪽은 석 달로 막혀 있습니다 — 그보다 넓히는 것은 새 것을 모으는
+   * 일이 아니라 과거를 긁는 일입니다.
+   */
+  searchWindowDays: number;
   /** 이 키워드로 공개된 강의 수 */
   lectureCount: number;
   lastRunAt: string | null;
@@ -106,6 +115,7 @@ export interface KeywordDraft {
   minDurationSec: number;
   minExpertScore: number;
   maxPerRun: number;
+  searchWindowDays: number;
 }
 
 // ── 강의 ──────────────────────────────────────────────────
@@ -251,10 +261,45 @@ export interface Track {
   nextAt: string | null;
 }
 
+/** 블로그에 올라간 글 하나. */
+export interface BlogEntry {
+  at: string;
+  title: string;
+  category: string;
+  /** 티스토리 글 번호. 발행 전에는 비어 있습니다. */
+  postId: string | null;
+  url: string | null;
+}
+
+/** 블로그 발행의 지금 상태. **트랙이 아닙니다** — 한 편을 올리고 끝나는
+ *  일이라 "붙들고 있는 것"이 없고, 알고 싶은 것은 다음 차례와 그동안
+ *  나간 글입니다. */
+export interface BlogStatus {
+  /** 꺼져 있으면 화면에서 통째로 감춥니다. 기본이 꺼짐입니다. */
+  enabled: boolean;
+  nextAt: string | null;
+  waiting: number;
+  posted: number;
+  /** 오늘 올린 편수. 상한에 닿으면 날이 바뀔 때까지 쉽니다. */
+  postedToday: number;
+  /** **티스토리가 정한 하루 상한(30편)** — 우리가 고른 값이 아닙니다.
+   *  간격을 좁혀도 나가는 편수는 안 늘고, 새벽에 몰려 나간 뒤 하루의
+   *  나머지를 통째로 쉬게 될 뿐입니다. */
+  dailyCap: number;
+  /** 세션이 죽은 시각. **사람이 카카오 로그인을 해야** 풀립니다 —
+   *  우리가 대신 할 수 없으니 화면이 알려야 합니다. 살아 있으면 null. */
+  sessionBadSince: string | null;
+  /** 세 번 해 보고 접은 글. 사람이 손대야 풀립니다. */
+  failed: number;
+  /** 최근 몇 편만. 실행마다 한 줄씩 쌓으면 목록이 통째로 덮입니다. */
+  recent: BlogEntry[];
+}
+
 /** 파이프라인의 지금 상태. "기다리면 되는가, 손대야 하는가"의 근거. */
 export interface Pipeline {
   funnel: { key: string; label: string; count: number }[];
   tracks: Track[];
+  blog: BlogStatus;
   stuck: { key: string; label: string; count: number }[];
   transcriptCoolingUntil: string | null;
 }
@@ -280,8 +325,14 @@ export interface RunStats {
   published: number;
 }
 
-/** 어느 잡이 만든 기록인가. 셋을 따로 돌리므로 구분이 필요합니다. */
-export type RunJob = "discover" | "transcript" | "review" | "cycle";
+/** 어느 잡이 만든 기록인가. 셋을 따로 돌리므로 구분이 필요합니다.
+ *
+ *  `publish` 도 기록을 남기지만 **실행 목록에는 오지 않습니다** — 글 한 편에
+ *  하나씩 쌓여 목록을 덮어서, `/runs` 가 걸러 냅니다. 발행은 `Pipeline.blog`
+ *  에서 묶어서 봅니다. 그래도 이름을 여기 남겨 둡니다 — DB 에는 있는 값이라,
+ *  빼 두면 나중에 목록에 다시 넣을 때 화면이 조용히 원문("publish")을
+ *  그대로 뱉습니다. */
+export type RunJob = "discover" | "transcript" | "review" | "cycle" | "publish";
 
 export interface Run {
   job: RunJob;

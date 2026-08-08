@@ -25,7 +25,14 @@
                     └─ 요약   1분마다 ─┘  5편 모이거나 1시간 지나면 AI 를 부릅니다
                               │
                               └─────────> 곳간 (읽는 화면)
+                                              │
+                                              └─ 발행  30~60분마다 ─> 티스토리
 ```
+
+**발행은 기본으로 꺼져 있습니다.** 곳간은 집 안에서만 열려서 밖에서 읽으려면
+블로그로 나가야 하는데, 공개 발행은 되돌리기 번거롭습니다 — 워커를
+재시작했다는 이유만으로 글이 나가서는 안 되므로 `BLOG_ENABLED=true` 를
+사람이 한 번 넣어야 돕니다. 자세한 것은 [.spec/tistory.md](.spec/tistory.md).
 
 각 잡이 **끝낼 때 다음 상태를 세워 둡니다.** 서로를 기다리지 않고, 하나가
 죽어도 나머지는 그대로 돕니다.
@@ -149,6 +156,7 @@ ops/rebuild-ui.sh         화면을 고친 뒤 반영
 | [docs/API.md](docs/API.md) | REST 계약 |
 | [docs/AI-PIPELINE.md](docs/AI-PIPELINE.md) | AI 호출 구조 · 프롬프트 · 비용 · 보안 |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | 무엇을 왜 그렇게 정했는지 |
+| [.spec/tistory.md](.spec/tistory.md) | 곳간 → 티스토리 발행 |
 
 > 설계 단계에 쓴 문서라 코드와 어긋나는 데가 있습니다. **어긋나면 코드가
 > 맞습니다** — 특히 SPEC 은 PostgreSQL·Celery·Redis 를 전제로 쓰였는데

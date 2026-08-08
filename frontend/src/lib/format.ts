@@ -83,6 +83,19 @@ export const scheduleLabel: Record<string, string> = {
   weekly: "주 1회",
 };
 
+/**
+ * 검색 기간을 사람 말로 — 90 → "3개월", 7 → "1주", 1 → "1일".
+ *
+ * 서버의 `rules.window_label` 과 같은 규칙입니다. 탈락 사유("오래됨 ·
+ * 기준 1일 이내")와 화면이 다른 말을 쓰면, 같은 값인지 한 번 더 세어
+ * 봐야 합니다.
+ */
+export function windowLabel(days: number): string {
+  if (days >= 30 && days % 30 === 0) return `${days / 30}개월`;
+  if (days >= 7 && days % 7 === 0) return `${days / 7}주`;
+  return `${days}일`;
+}
+
 export const languageLabel: Record<string, string> = {
   ko: "한국어",
   en: "영어",

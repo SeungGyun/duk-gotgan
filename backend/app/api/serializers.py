@@ -41,6 +41,8 @@ def keyword_out(k: Keyword, lecture_count: int = 0) -> dict:
         "minDurationSec": k.min_duration_sec,
         "minExpertScore": k.min_expert_score,
         "maxPerRun": k.max_per_run,
+        # 며칠 안에 올라온 것까지 볼 것인가 (1~90)
+        "searchWindowDays": k.search_window_days,
         "lectureCount": lecture_count,
         "lastRunAt": to_utc_iso(k.last_run_at),
         "createdAt": to_utc_iso(k.created_at),

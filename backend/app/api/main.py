@@ -64,8 +64,32 @@ def health():
 
 DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 
+# **캐시 규칙을 적어 보냅니다.**
+#
+# 안 적으면 브라우저가 알아서 정합니다(RFC 9111 §4.2.2 어림 신선도) — 대개
+# `(지금 − Last-Modified) × 10%` 이고, 폰의 사파리가 특히 오래 잡습니다.
+# 그래서 `rebuild-ui.sh` 로 화면을 고쳐도 폰에서는 **옛 화면이 그대로**
+# 남았습니다. 고친 것이 되돌아간 것처럼 보이는데, 실제로는 폰이 옛
+# index.html 을 들고 그것이 가리키는 옛 asset 을 계속 쓰는 것입니다.
+#
+#   index.html   매번 물어봅니다. ETag 가 있어 안 바뀌었으면 304 라 쌉니다.
+#   /assets/*    이름에 내용 해시가 박혀 있습니다(index-BbuZIiXP.js).
+#                내용이 바뀌면 이름이 바뀌므로 영원히 캐시해도 안전합니다.
+NO_CACHE = "no-cache"
+IMMUTABLE = "public, max-age=31536000, immutable"
+
+
+class HashedAssets(StaticFiles):
+    """내용 해시가 이름에 박힌 파일들. 영원히 캐시해도 됩니다."""
+
+    def file_response(self, *args, **kwargs):
+        resp = super().file_response(*args, **kwargs)
+        resp.headers["cache-control"] = IMMUTABLE
+        return resp
+
+
 if DIST.is_dir():
-    app.mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets")
+    app.mount("/assets", HashedAssets(directory=DIST / "assets"), name="assets")
 
     @app.get("/{path:path}", include_in_schema=False)
     def spa(path: str):
@@ -78,7 +102,9 @@ if DIST.is_dir():
             raise HTTPException(status_code=404, detail="Not Found")
         target = DIST / path
         if path and target.is_file():
-            return FileResponse(target)
-        return FileResponse(DIST / "index.html")
+            # 해시가 안 붙은 것들(favicon, apple-touch-icon)입니다. 이름이
+            # 고정이라 immutable 로 두면 아이콘을 바꿔도 영영 안 바뀝니다.
+            return FileResponse(target, headers={"cache-control": NO_CACHE})
+        return FileResponse(DIST / "index.html", headers={"cache-control": NO_CACHE})
 else:
     logging.warning("[api] frontend/dist 가 없습니다 — 화면은 vite dev(5173)로만 열립니다.")

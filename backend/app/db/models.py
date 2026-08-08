@@ -186,6 +186,14 @@ class Keyword(Base):
     max_duration_sec: Mapped[int] = mapped_column(Integer, nullable=False, default=14400)
     min_expert_score: Mapped[int] = mapped_column(Integer, nullable=False, default=75)
     max_per_run: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    # 며칠 안에 올라온 것까지 볼 것인가 (1~90). **키워드마다 다릅니다** —
+    # `경제`·`주식` 은 하루만 지나도 헌 이야기이고, `면역력`·`과학` 은 석 달
+    # 전 강의가 그대로 쓸모 있습니다. 검색의 publishedAfter 이자 룰 필터의
+    # "오래됨" 기준이고, 둘을 잇는 계산은 collector/rules.py 의 `window_start`
+    # 한 곳에 있습니다 — 상한 90도 거기 있습니다(WINDOW_MAX_DAYS).
+    search_window_days: Mapped[int] = mapped_column(Integer, nullable=False, default=90)
+    # 이 날짜 이전은 아예 안 봅니다. 창(search_window_days)이 "얼마나
+    # 최근까지" 라면 이쪽은 바닥입니다.
     published_after: Mapped[date | None] = mapped_column(Date, nullable=True)
     # 실행 시각(0~23). 주기(schedule)와 시각을 나눠 둡니다 — 크론 하나로는
     # "이 키워드만 정오에" 같은 요구를 받을 수 없고, 키워드마다 크론을
@@ -509,6 +517,46 @@ class UserChannelBlock(Base):
     __table_args__ = (Index("ix_user_channel_blocks_channel", "channel_id"),)
 
 
+class BlogPost(Base):
+    """곳간의 강의 하나를 블로그에 올린 이력 (.spec/tistory.md).
+
+    **`lectures` 에 컬럼을 붙이지 않습니다.** 블로그는 곳간 바깥의 일이라,
+    발행 이력이 통째로 사라져도 곳간은 그대로 돌아야 합니다.
+
+    **키가 `video_id` 입니다.** 재요약하면 `lectures` 에 새 버전 행이 생기는데,
+    "이 강의는 이미 올렸다"는 영상 단위 개념입니다. `lecture_id` 로 잡으면
+    재요약할 때마다 같은 영상이 블로그에 한 번씩 더 올라갑니다.
+
+    **올리기 전에 행을 만듭니다.** CLI 가 글을 만들었는데 우리가 결과를 못
+    받는 경우(타임아웃·프로세스 사망)가 있어서, 나중에 그 흔적조차 없으면
+    같은 글을 또 올립니다. 먼저 `PENDING` 으로 적어 두면 재시도 때 제목으로
+    블로그를 뒤져 이미 있는 글을 우리 것으로 받아 적을 수 있습니다.
+    """
+
+    __tablename__ = "blog_posts"
+
+    video_id: Mapped[str] = mapped_column(
+        String(20), ForeignKey("videos.id", ondelete="CASCADE"), primary_key=True
+    )
+    # 어느 버전을 올렸는지. 나중에 "요약이 바뀌었으니 글도 고치자"를 할 때 기준입니다.
+    lecture_id: Mapped[str] = mapped_column(String(36), nullable=False, default="")
+    # 티스토리 글 번호. 발행 전에는 비어 있습니다.
+    post_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # **첫 시도 때 정해 적어 둡니다.** 제목은 매번 새로 만들면 조금씩 달라져서,
+    # 재시도 때 "이미 올라간 같은 제목의 글" 을 찾는 확인이 소용없어집니다.
+    title: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    category: Mapped[str] = mapped_column(String(190), nullable=False, default="")
+    # PENDING | POSTED | FAILED
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="PENDING")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=now_kst)
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (Index("ix_blog_posts_state", "state"),)
+
+
 # ── 정식 층 (사용자가 보는 유일한 테이블) ────────────────────
 
 
@@ -601,9 +649,11 @@ ALL_TABLES = [
     Evaluation,
     PipelineEvent,
     Lecture,
+    BlogPost,
 ]
 
 __all__ = [
+    "BlogPost",
     "Base",
     "User",
     "UserSession",

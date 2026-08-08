@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.api.auth import current_user
 from app.api.errors import ApiError
 from app.api.serializers import keyword_out
+from app.collector.rules import WINDOW_DEFAULT_DAYS, WINDOW_MAX_DAYS
 from app.collector.youtube import YouTubeError, resolve_channel
 from app.db.models import Keyword, Lecture, User, UserKeyword, VideoKeyword
 from app.db.session import get_db
@@ -43,6 +44,11 @@ class KeywordDraft(BaseModel):
     minDurationSec: int = Field(default=300, ge=0)
     minExpertScore: int = Field(default=75, ge=0, le=100)
     maxPerRun: int = Field(default=10, ge=1, le=50)
+    # 며칠 안에 올라온 것까지 볼 것인가. 시황 키워드는 1, 잘 안 변하는
+    # 주제는 90. **상한은 석 달입니다** — 그보다 오래된 것을 데려오는 것은
+    # 새로 올라온 것을 모으는 일이 아니라 과거를 긁는 일이고, 요약 비용이
+    # 통째로 그쪽으로 갑니다 (collector/rules.py).
+    searchWindowDays: int = Field(default=WINDOW_DEFAULT_DAYS, ge=1, le=WINDOW_MAX_DAYS)
 
 
 class KeywordPatch(BaseModel):
@@ -53,6 +59,7 @@ class KeywordPatch(BaseModel):
     minDurationSec: int | None = Field(default=None, ge=0)
     minExpertScore: int | None = Field(default=None, ge=0, le=100)
     maxPerRun: int | None = Field(default=None, ge=1, le=50)
+    searchWindowDays: int | None = Field(default=None, ge=1, le=WINDOW_MAX_DAYS)
 
 
 def lecture_counts(db: Session) -> dict[str, int]:
@@ -306,6 +313,7 @@ def create_keyword(
         min_duration_sec=draft.minDurationSec,
         min_expert_score=draft.minExpertScore,
         max_per_run=draft.maxPerRun,
+        search_window_days=draft.searchWindowDays,
     )
     db.add(kw)
     db.flush()
@@ -395,6 +403,7 @@ def update_keyword(
         ("minDurationSec", "min_duration_sec"),
         ("minExpertScore", "min_expert_score"),
         ("maxPerRun", "max_per_run"),
+        ("searchWindowDays", "search_window_days"),
     ):
         value = getattr(patch, field)
         if value is not None:

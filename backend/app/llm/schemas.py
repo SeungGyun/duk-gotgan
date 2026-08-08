@@ -103,9 +103,14 @@ class LectureReview(Coercing):
     red_flags: list[str] = Field(default_factory=list)
     speaker_credentials: str | None = None
 
-    # ── 요약 — 기준 미달이면 null ────────────────────────────
+    # ── 요약 — 자막이 깨졌을 때만 null ──────────────────────
+    #
+    # **점수와 엮지 않습니다.** 여기에 "기준 미달이면 null" 이라고 적혀
+    # 있는 동안 프롬프트는 반대를 말하고 있었습니다("점수가 낮아도, 홍보성으로
+    # 보여도 씁니다"). 모델에 서로 어긋나는 지시가 둘 간 셈입니다.
+    # 낮은 점수는 버리는 기준이 아니라 **고르는 근거**입니다 (llm/policy.py).
     summary: LectureSummary | None = Field(
-        default=None, description="expert_score 가 기준 미달이면 null"
+        default=None, description="자막이 깨져 요약이 불가능할 때만 null. 점수가 낮아도 씁니다"
     )
 
 

@@ -10,12 +10,26 @@
 """
 
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from app.collector.youtube import Candidate
 from app.db.models import Keyword
 from config.settings import settings
 from config.time import now_kst
+
+# ── 검색 기간 ────────────────────────────────────────────────
+# 며칠 안에 올라온 것까지 볼 것인가. **키워드마다 다릅니다.**
+#
+# 예전에는 전역 180일 하나였는데, 그러면 둘 중 한쪽이 반드시 손해를 봅니다.
+# `경제`·`주식` 은 하루만 지나도 헌 이야기인데 반년 치가 같은 줄에 섞여
+# 검색 상위를 차지하고, 거꾸로 전역값을 짧게 잡으면 `면역력`·`과학` 처럼
+# 석 달 전 강의가 그대로 쓸모 있는 주제가 굶습니다.
+#
+# 위쪽은 석 달로 막습니다. 그보다 오래된 것을 데려오는 것은 "새로 올라온
+# 것을 모은다"가 아니라 과거를 긁는 일이고, 한 번 긁으면 요약 비용이
+# 통째로 그리 갑니다.
+WINDOW_MAX_DAYS = 90
+WINDOW_DEFAULT_DAYS = 90
 
 
 @dataclass
@@ -24,11 +38,66 @@ class Verdict:
     reason: str = ""
 
 
-def evaluate(c: Candidate, kw: Keyword, blocked: set[str] | None = None) -> Verdict:
+def window_label(days: int) -> str:
+    """기간을 사람 말로 — 90 → "3개월", 7 → "1주", 1 → "1일".
+
+    탈락 사유와 화면이 같은 말을 쓰게 두려고 여기 둡니다. "90일 이내"로
+    적으면 화면의 "3개월"과 같은 값인지 한 번 더 세어 봐야 합니다.
+    """
+    if days >= 30 and days % 30 == 0:
+        return f"{days // 30}개월"
+    if days >= 7 and days % 7 == 0:
+        return f"{days // 7}주"
+    return f"{days}일"
+
+
+def window_start(kw: Keyword, now: datetime | None = None) -> datetime:
+    """이 키워드가 볼 수 있는 가장 오래된 업로드 시각.
+
+    **검색과 룰 필터가 같은 값을 봐야 합니다.** 유튜브에 넘기는
+    `publishedAfter` 와 여기 통과 기준이 갈리면, 100유닛 써서 받아온 후보를
+    곧바로 "오래됨" 으로 떨어뜨립니다. 그래서 정의는 이 함수 하나뿐이고,
+    발견 단계가 한 번 계산해 `evaluate` 에 그대로 넘깁니다.
+
+    **못 돈 날은 그만큼 더 거슬러 봅니다.** 창이 1일인 키워드가 쿼터
+    대기로 하루를 거르면 다음 실행에서 어제 것은 이미 창 밖입니다 — 영영
+    못 봅니다. 마지막 실행 이후는 무슨 일이 있어도 훑도록 바닥을 낮춥니다.
+    덕분에 주 1회로 도는 키워드에 1일을 넣어도 한 주 치를 다 봅니다.
+    그래도 상한(90일)은 넘지 않습니다.
+    """
+    now = now or now_kst()
+    # `or` 가 필요합니다 — 컬럼의 default 는 INSERT 때 붙는 값이라, 아직
+    # 저장 전인 객체에서는 None 입니다 (blog/publish.py 의 attempts 와 같은 함정).
+    days = min(kw.search_window_days or WINDOW_DEFAULT_DAYS, WINDOW_MAX_DAYS)
+    start = now - timedelta(days=days)
+
+    if kw.last_run_at is not None and kw.last_run_at < start:
+        start = max(kw.last_run_at, now - timedelta(days=WINDOW_MAX_DAYS))
+
+    # 등록할 때 "이 날짜 이후만" 을 못박아 둔 경우. 창보다 이쪽이 세면
+    # 이쪽을 따릅니다 — 창은 "얼마나 최근까지" 이고 이건 바닥입니다.
+    if kw.published_after is not None:
+        # tz 를 붙이지 않습니다 — 이 곳간의 시각은 전부 KST naive 이고
+        # (config/time.py), 하나만 aware 로 만들면 비교에서 TypeError 입니다.
+        floor = datetime(
+            kw.published_after.year, kw.published_after.month, kw.published_after.day
+        )
+        start = max(start, floor)
+
+    return start
+
+
+def evaluate(
+    c: Candidate, kw: Keyword, blocked: set[str] | None = None, *, cutoff: datetime | None = None
+) -> Verdict:
     """후보 1건이 자막 수집 단계로 갈 자격이 있는지.
 
     사유 문구는 화면에 그대로 나갑니다 — 숫자를 같이 적어야 기준을
     조정할 때 판단이 됩니다("15분 미만"이 아니라 "12분 · 기준 15분").
+
+    `cutoff` 는 발견 단계가 검색에 쓴 것과 **같은** 값입니다. 안 주면 여기서
+    다시 계산합니다 — 결과는 같지만 몇 초 어긋나므로, 경계에 걸친 영상이
+    있을 수 있는 실제 수집 경로에서는 넘겨받는 편이 맞습니다.
     """
     title = (c.title or "").lower()
 
@@ -70,11 +139,14 @@ def evaluate(c: Candidate, kw: Keyword, blocked: set[str] | None = None) -> Verd
             False, f"조회수 미달 · {c.view_count:,}회 (기준 {settings.rule_min_view_count:,})"
         )
 
-    # 업로드 시점 — 기술 강의는 오래되면 내용이 틀려집니다
-    cutoff = now_kst() - timedelta(days=settings.rule_max_age_days)
+    # 업로드 시점 — **키워드가 정한 기간**입니다. 시황 키워드는 1일,
+    # 잘 안 변하는 주제는 3개월. 채널 구독은 업로드 목록에 기간 조건을
+    # 걸 수 없어서, 여기가 유일한 관문입니다.
+    if cutoff is None:
+        cutoff = window_start(kw)
     if c.published_at and c.published_at < cutoff:
-        years = settings.rule_max_age_days / 365
-        return Verdict(False, f"오래됨 · {c.published_at:%Y-%m-%d} (기준 {years:.0f}년 이내)")
+        span = window_label(kw.search_window_days or WINDOW_DEFAULT_DAYS)
+        return Verdict(False, f"오래됨 · {c.published_at:%Y-%m-%d} (기준 {span} 이내)")
 
     # 제목 홍보성 패턴
     for word in settings.title_blocklist:

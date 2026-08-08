@@ -20,8 +20,12 @@
 여기는 폴백입니다.
 """
 
+import contextlib
 import logging
+import math
+import os
 import shutil
+import subprocess
 import tempfile
 import time
 from dataclasses import dataclass
@@ -124,7 +128,7 @@ def transcribe(video_id: str, duration_sec: int, language: str = "ko") -> AsrRes
     workdir = tempfile.mkdtemp(prefix=f"gotgan-asr-{video_id}-")
     try:
         path = _download_audio(video_id, workdir)
-        return _run_whisper(path, language)
+        return _transcribe_file(path, language, duration_sec, workdir)
     finally:
         # 통째로 지웁니다. 파일 하나만 지우면 yt-dlp 가 남긴 조각(.part,
         # 원본 컨테이너)이 그대로 남습니다.
@@ -147,7 +151,6 @@ def _download_audio(video_id: str, workdir: str) -> str:
         "outtmpl": f"{workdir}/%(id)s.%(ext)s",
         "socket_timeout": 30,
     }
-    import os
 
     try:
         with yt_dlp.YoutubeDL(opts) as y:
@@ -216,6 +219,91 @@ def _whisper_language(language: str) -> str | None:
         return language
     logger.warning("[asr] '%s' 는 위스퍼가 모르는 언어입니다 — 자동 감지로 넘깁니다", language)
     return None
+
+
+def _transcribe_file(path: str, language: str, duration_sec: int, workdir: str) -> AsrResult:
+    """짧으면 통째로, 길면 **나눠서** 받아씁니다.
+
+    상한을 90분에 묶어 둔 것은 시간이 아니라 **메모리** 때문이었습니다.
+    위스퍼는 오디오를 통째로 16kHz float32 로 올려서, 두 시간이면 그것만
+    460MB 이고 그 순간 요약 프로세스가 뜰 자리가 없어집니다(16GB 기계).
+    그 상한에 95~142분짜리 33편이 걸려 탈락했습니다 — 길수록 값어치 있는
+    강의인데 그게 통째로 빠졌습니다.
+
+    **상한을 올리는 것으로는 못 풉니다.** 그러면 그 OOM 이 그대로 돌아옵니다.
+    대신 나눠서 한 조각씩 올립니다 — 최대 사용량이 영상 길이가 아니라
+    조각 길이로 정해지므로, 세 시간짜리도 20분짜리와 같은 메모리를 씁니다.
+    """
+    if duration_sec <= settings.asr_chunk_sec:
+        return _run_whisper(path, language)
+
+    chunk = settings.asr_chunk_sec
+    n = math.ceil(duration_sec / chunk)
+    logger.info(
+        "[asr] %d분 — %d조각으로 나눠서 받아씁니다 (조각당 %d분)",
+        duration_sec // 60, n, chunk // 60,
+    )
+
+    merged: list[dict] = []
+    elapsed = 0.0
+    detected = ""
+    for i in range(n):
+        offset = i * chunk
+        piece = os.path.join(workdir, f"chunk-{i:03d}.wav")
+        _cut(path, piece, offset, chunk)
+        try:
+            # **앞 조각이 알아낸 언어를 뒤에 물려줍니다.** 조각마다 따로
+            # 감지하면 음악이나 침묵으로 시작하는 조각이 엉뚱한 언어로
+            # 새고, 그 조각만 통째로 헛소리가 됩니다.
+            part = _run_whisper(piece, detected or language)
+        except AsrUnavailable:
+            # 말소리가 없는 조각(음악·침묵)은 건너뜁니다. 한 조각이 비었다고
+            # 두 시간짜리 강의를 통째로 버릴 이유가 없습니다.
+            logger.info("[asr] %d/%d 조각에 말소리가 없습니다 — 건너뜁니다", i + 1, n)
+            continue
+        finally:
+            # **조각은 바로 지웁니다.** 세 시간짜리를 20분씩 자르면 wav 가
+            # 아홉 개 340MB 이고, 대기가 세 자리라 남겨 두면 디스크가 먼저
+            # 찹니다.
+            with contextlib.suppress(OSError):
+                os.remove(piece)
+        elapsed += part.elapsed_sec
+        detected = detected or part.language
+        for s in part.segments:
+            merged.append({**s, "start": s["start"] + offset})
+
+    if not merged:
+        raise AsrUnavailable("받아쓴 내용이 비었습니다 — 말소리가 없는 영상일 수 있습니다.")
+
+    audio_sec = merged[-1]["start"] + merged[-1]["dur"]
+    logger.info(
+        "[asr] 받아쓰기 %.0f초 · 음성 %.1f분 · %.1f배속 · %d세그먼트 (%d조각)",
+        elapsed, audio_sec / 60, audio_sec / max(elapsed, 0.1), len(merged), n,
+    )
+    return AsrResult(
+        language=detected or language or "ko",
+        segments=merged,
+        elapsed_sec=elapsed,
+        audio_sec=audio_sec,
+    )
+
+
+def _cut(src: str, dst: str, start_sec: int, length_sec: int) -> None:
+    """한 조각을 위스퍼가 바로 먹는 형태(16kHz 모노)로 잘라 냅니다.
+
+    **`-ss` 를 `-i` 앞에 둡니다.** 뒤에 두면 매 조각마다 앞부분을 전부
+    디코딩하고 버려서, 뒤로 갈수록 느려집니다.
+    """
+    cmd = [
+        "ffmpeg", "-nostdin", "-loglevel", "error", "-y",
+        "-ss", str(start_sec), "-t", str(length_sec), "-i", src,
+        "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", dst,
+    ]
+    # `check=False` — 돌아온 코드를 우리가 봅니다. 여기서 예외가 나면
+    # 조각 하나 때문에 두 시간짜리가 통째로 죽습니다.
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if proc.returncode != 0 or not os.path.exists(dst):
+        raise AsrUnavailable(f"오디오를 자르지 못했습니다 — {proc.stderr.strip()[:200]}")
 
 
 def _run_whisper(path: str, language: str) -> AsrResult:
