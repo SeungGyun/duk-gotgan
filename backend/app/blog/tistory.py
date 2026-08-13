@@ -7,6 +7,7 @@
 CLI 계약(실제 소스에서 확인):
 
   whoami --json   → {"valid": true, ...}          세션 만료면 종료 코드 2
+  login --headless→ {"ok": true, "manual": false} 창을 안 띄웁니다
   post new --json → {"id": "184", "entryUrl": …}  사람이 읽는 로그는 stderr
   post list --json→ {"total": n, "items": [{id, title, …}]}
 
@@ -49,20 +50,73 @@ class PostRef:
     url: str | None
 
 
+# 세션 확인 결과. **"안 된다"를 둘로 가릅니다.**
+#
+# 예전에는 bool 하나였습니다 — `whoami` 가 무슨 이유로 실패하든 "세션 만료"
+# 였습니다. 그래서 네트워크가 한 번 튄 것도 만료로 세고 두 시간을 잤습니다:
+# 8월 9일 00:01 에 만료라고 적었는데, 아무도 로그인하지 않은 02:01 에 발행이
+# 그대로 이어졌습니다. 그 두 시간은 통째로 버린 시간이고, 로그에는 사람더러
+# 로그인하라는 거짓 안내만 남았습니다.
+OK = "ok"
+# 종료 코드 2 — 새 세션을 받아 와야 합니다. CLI 의 `SessionExpiredError` 와
+# `whoami` 의 `valid: false` 가 둘 다 이 코드입니다.
+EXPIRED = "expired"
+# CLI 가 대답을 못 했습니다. **세션 탓이라고 단정하지 않습니다.**
+UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class SessionCheck:
+    state: str
+    # 왜 아닌지. 로그에 그대로 실어 보냅니다 — 예전에는 이걸 버려서, 무엇이
+    # 막혔는지 알 길이 로그를 열어 봐도 없었습니다.
+    detail: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return self.state == OK
+
+
 def available() -> bool:
     return shutil.which(settings.tistory_bin) is not None
 
 
-def session_ok() -> bool:
-    """로그인 세션이 살아 있는가. CLI 가 없으면 False."""
+def check_session() -> SessionCheck:
+    """로그인 세션이 살아 있는가. **왜 아닌지까지 들고 옵니다.**"""
     if not available():
-        return False
+        return SessionCheck(UNKNOWN, f"{settings.tistory_bin} 를 찾을 수 없습니다.")
     try:
         out = _run(["whoami"], check=False)
-    except TistoryError:
-        return False
+    except TistoryError as e:
+        return SessionCheck(UNKNOWN, str(e))
     data = _json(out.stdout)
-    return bool(data and data.get("valid"))
+    if data and data.get("valid"):
+        return SessionCheck(OK)
+    detail = (out.stderr or out.stdout or "").strip()[-400:]
+    if out.returncode == 2:
+        return SessionCheck(EXPIRED, detail)
+    return SessionCheck(UNKNOWN, detail or f"whoami 가 {out.returncode} 로 끝났습니다.")
+
+
+def login() -> bool:
+    """창 없이 세션을 되살려 봅니다. 됐으면 True.
+
+    **대개 됩니다.** 티스토리 세션 쿠키(TSSESSION)는 만료시각이 없는 세션
+    쿠키라 서버가 사나흘이면 끊는데, 같이 저장된 카카오 SSO 쿠키(`_kau`)는
+    1년을 삽니다 — 살아 있는 카카오 세션이 새 티스토리 세션을 그냥 받아
+    옵니다. 비밀번호도, 사람도 필요 없습니다(실측 5.5초).
+
+    캡차·기기인증·2FA 처럼 정말 사람이 해야 하는 단계에서는 `--headless` 가
+    기다리지 않고 곧바로 실패합니다. 창이 없으니 기다릴 이유가 없습니다.
+    """
+    try:
+        out = _run(["login", "--headless"])
+    except TistoryError as e:
+        logger.warning("[blog] 세션을 되살리지 못했습니다 — %s", e)
+        return False
+    data = _json(out.stdout) or {}
+    logger.info("[blog] 세션을 되살렸습니다 (쿠키 %s개).", data.get("cookies", "?"))
+    return True
 
 
 def publish(md_path: str, category: str, visibility: str) -> PostRef:

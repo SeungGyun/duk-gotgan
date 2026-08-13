@@ -37,20 +37,34 @@ NEXT_KEY = "blog.next_at"
 # "쉬는 중 · 다음 차례 04:12" 라고 멀쩡하게 적고 있었으니, 사람이 알아채는
 # 길이 로그를 열어 보는 것뿐이었습니다 — 간격을 30~60분으로 늘리고 하루
 # 상한까지 붙은 지금은 반나절을 그렇게 보낼 수 있습니다.
+#
+# **여기 적히면 사람이 손을 대야 한다는 뜻입니다.** 스스로 되살려 보고도 안
+# 됐을 때만 적습니다 — CLI 가 대답을 못 한 정도로 적어 버리면, 화면이 사람을
+# 부르는데 정작 사람이 할 일은 없는 상태가 됩니다.
 SESSION_BAD_KEY = "blog.session_bad_since"
 
 # 몇 번까지 다시 해 볼 것인가. 한 편이 막혀 뒤가 통째로 밀리면 안 됩니다 —
 # 넘으면 그 강의는 영구 제외하고 다음으로 갑니다.
 MAX_ATTEMPTS = 3
 
-# 세션이 만료됐을 때 쉬는 시간(분). **사람이 브라우저에서 카카오 로그인을
-# 해야** 풀리는 종류라, 1분마다 두드려 봐야 로그만 덮입니다.
+# 세션이 만료됐고 **되살리기도 실패했을 때** 쉬는 시간(분). 여기까지 왔으면
+# 캡차·기기인증처럼 사람이 브라우저에서 해야 풀리는 종류라, 1분마다 두드려
+# 봐야 로그만 덮입니다.
 #
 # **평소 간격보다 길어야 뜻이 있습니다.** 30분이었는데 평소 간격을 2~10분에서
 # 30~60분으로 늘리면서 뒤집혔습니다 — 막혔을 때 오히려 평소보다 자주 두드리는
 # 값이 된 것입니다(시험 둘이 여기서 걸렸습니다). 두 시간이면 눈치챈 사람이
 # 로그인하고 돌아올 만하고, 아무도 없는 새벽에는 로그가 두 시간에 한 줄입니다.
 SESSION_REST_MIN = 120
+
+# CLI 가 대답을 못 했을 때 쉬는 시간(분). **만료와 다른 값이어야 합니다.**
+#
+# 만료는 새 세션을 받아 와야 풀리니 되살리기에 실패하면 두 시간이 맞지만,
+# 이쪽은 네트워크가 한 번 튄 것일 수도 있습니다 — 8월 9일 00:01 이 그랬습니다.
+# 만료라고 적고 두 시간을 잤는데, 아무도 로그인하지 않은 02:01 에 발행이
+# 그대로 이어졌습니다. 평소 간격(30~60분)보다 짧게 잡아, 잠깐 튄 것이면
+# 거의 밀리지 않게 합니다.
+CLI_REST_MIN = 10
 
 # 어느 키워드도 안 붙은 영상이 왔을 때. 실제로는 거의 없지만, 카테고리를
 # 못 정했다고 발행을 멈추는 것보다 한곳에 모아 두는 편이 낫습니다.
@@ -234,20 +248,43 @@ def publish_once(db: Session) -> PublishResult:
         result = PublishResult(
             error=f"{settings.tistory_bin} 를 찾을 수 없습니다.", rest_min=SESSION_REST_MIN
         )
-    elif not tistory.session_ok():
-        _mark_session(db, ok=False)
-        result = PublishResult(
-            error="티스토리 세션이 만료됐습니다 — 터미널에서 `tistory login` 을 한 번 해 주세요.",
-            rest_min=SESSION_REST_MIN,
-        )
     else:
-        _mark_session(db, ok=True)
-        row = _claim(db, lec)
-        try:
-            result = _post(db, lec, row)
-        except Exception as e:  # noqa: BLE001 — 한 편이 죽어도 다음 차례는 와야 합니다
-            logger.exception("[blog] %s 발행 중 예기치 못한 오류", lec.video_id)
-            result = _fail(db, row, str(e))
+        check = tistory.check_session()
+
+        # **죽었으면 먼저 되살려 봅니다.** 예전에는 여기서 곧바로 두 시간을
+        # 잤습니다 — 사람이 로그인해 줄 때까지. 8월 13일이 그렇게 통째로
+        # 날아갔습니다(12번 확인, 0편 발행). 그런데 대개는 사람이 필요
+        # 없습니다: 카카오 SSO 쿠키가 티스토리 세션보다 훨씬 오래 살아서,
+        # 창 없는 `tistory login` 한 번이면 새 세션을 받아 옵니다.
+        #
+        # 되살렸으면 확인을 다시 하지 않습니다. CLI 가 저장 직전에 실제
+        # 요청으로 로그인 상태를 확인하고 저장하므로, 방금 살아 있던 것을
+        # 한 번 더 물어볼 이유가 없습니다. 그 사이 또 끊겼다면 발행이
+        # `e.session` 으로 걸리고 그쪽 길로 갑니다.
+        if check.state == tistory.EXPIRED and tistory.login():
+            check = tistory.SessionCheck(tistory.OK)
+
+        if check.state == tistory.EXPIRED:
+            _mark_session(db, ok=False)
+            result = PublishResult(
+                error="티스토리 세션이 만료됐습니다 — 터미널에서 `tistory login` 을 한 번 해 주세요.",
+                rest_min=SESSION_REST_MIN,
+            )
+        elif check.state == tistory.UNKNOWN:
+            # **세션이 죽었다고 적지 않습니다.** 화면의 그 표시는 "사람이
+            # 로그인해야 한다"는 뜻인데, 여기는 그것을 모르는 자리입니다.
+            result = PublishResult(
+                error=f"티스토리 상태를 확인하지 못했습니다 — {check.detail}",
+                rest_min=CLI_REST_MIN,
+            )
+        else:
+            _mark_session(db, ok=True)
+            row = _claim(db, lec)
+            try:
+                result = _post(db, lec, row)
+            except Exception as e:  # noqa: BLE001 — 한 편이 죽어도 다음 차례는 와야 합니다
+                logger.exception("[blog] %s 발행 중 예기치 못한 오류", lec.video_id)
+                result = _fail(db, row, str(e))
 
     schedule_next(db, result.rest_min)
     return result

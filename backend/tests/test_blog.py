@@ -330,13 +330,28 @@ def cli(monkeypatch):
 
     class Fake:
         available = True
-        session = True
+        # tistory.OK | EXPIRED | UNKNOWN
+        session = tistory.OK
+        # 창 없는 재로그인이 통과하는가. 기본은 안 되는 쪽입니다 — 되는 쪽을
+        # 기본으로 두면 "되살리기에 실패했을 때" 길이 시험에서 안 밟힙니다.
+        login_ok = False
+        logins = 0
         posted: list[tuple] = []
         raises: Exception | None = None
         found: object | None = None
 
+    def _check():
+        return publish.tistory.SessionCheck(Fake.session, "가짜 사유")
+
+    def _login():
+        Fake.logins += 1
+        if Fake.login_ok:
+            Fake.session = tistory.OK
+        return Fake.login_ok
+
     monkeypatch.setattr(publish.tistory, "available", lambda: Fake.available)
-    monkeypatch.setattr(publish.tistory, "session_ok", lambda: Fake.session)
+    monkeypatch.setattr(publish.tistory, "check_session", _check)
+    monkeypatch.setattr(publish.tistory, "login", _login)
     monkeypatch.setattr(publish.tistory, "find_by_title", lambda t: Fake.found)
     monkeypatch.setattr(publish.title_maker, "make", lambda lec: "지어낸 제목")
 
@@ -369,12 +384,59 @@ def test_세션이_만료되면_30분_쉰다(db, cli):
     돌아 나왔더니, `publish_once` 가 평소 간격으로 한 번 더 덮어써서
     5분 뒤에 다시 두드렸습니다."""
     _seed(db, "vid", 90)
-    cli.session = False
+    cli.session = tistory.EXPIRED
     out = publish.publish_once(db)
     assert out.did_work is False
     assert out.error and "login" in out.error
     assert _rest_min(db) > settings.blog_max_interval_min
     assert db.get(BlogPost, "vid") is None  # 시도조차 하지 않았습니다
+
+
+def test_세션이_죽으면_먼저_되살려_본다(db, cli):
+    """**사람을 부르기 전에 스스로 해 봅니다.**
+
+    8월 13일에 이것이 없어서 하루가 통째로 날아갔습니다 — 두 시간마다
+    열두 번 확인하고 열두 번 다 "사람이 로그인해 주세요"만 적었습니다.
+    카카오 SSO 쿠키는 그동안 내내 살아 있었고, 창 없는 로그인 한 번이면
+    5.5초에 풀리는 것이었습니다.
+    """
+    _seed(db, "vid", 90)
+    cli.session = tistory.EXPIRED
+    cli.login_ok = True
+    out = publish.publish_once(db)
+    assert (cli.logins, out.ok) == (1, True)
+    assert db.get(BlogPost, "vid").state == "POSTED"
+    # 되살렸으니 사람을 부르지 않습니다 — 화면에도 안 뜹니다.
+    assert publish.session_bad_since(db) is None
+    assert 0 < _rest_min(db) <= settings.blog_max_interval_min + 1
+
+
+def test_되살리지_못하면_그때_사람을_부른다(db, cli):
+    _seed(db, "vid", 90)
+    cli.session = tistory.EXPIRED
+    cli.login_ok = False
+    publish.publish_once(db)
+    assert cli.logins == 1
+    assert publish.session_bad_since(db) is not None
+    assert _rest_min(db) > settings.blog_max_interval_min
+
+
+def test_CLI_가_대답을_못_하면_만료로_적지_않는다(db, cli):
+    """**8월 9일 00:01 이 이것이었습니다.** 만료라고 적고 두 시간을 잤는데,
+    아무도 로그인하지 않은 02:01 에 발행이 그대로 이어졌습니다 — 네트워크가
+    한 번 튄 것을 사람이 손대야 하는 만료로 센 것입니다.
+    """
+    _seed(db, "vid", 90)
+    cli.session = tistory.UNKNOWN
+    out = publish.publish_once(db)
+    assert out.did_work is False
+    # 세션 탓인지 모르는 자리입니다 — 되살리기도, 화면 표시도 하지 않습니다.
+    assert cli.logins == 0
+    assert publish.session_bad_since(db) is None
+    assert out.error and "가짜 사유" in out.error
+    # 두 시간이 아니라 평소보다 짧게 쉽니다. 잠깐 튄 것이면 거의 안 밀립니다.
+    assert 0 < _rest_min(db) < settings.blog_min_interval_min
+    assert db.get(BlogPost, "vid") is None
 
 
 def test_CLI_가_없어도_1분마다_두드리지_않는다(db, cli):
@@ -559,7 +621,7 @@ def test_세션이_죽으면_화면이_알_수_있게_적어_둔다(db, cli):
     "쉬는 중 · 다음 차례 04:12" 라고 멀쩡하게 적었습니다. 사람이 대신
     로그인해 줘야 풀리는 일이라, 알아채는 길이 화면에 있어야 합니다."""
     _seed(db, "vid", 90)
-    cli.session = False
+    cli.session = tistory.EXPIRED
     publish.publish_once(db)
     assert publish.session_bad_since(db) is not None
 
@@ -568,7 +630,7 @@ def test_처음_죽은_시각을_지킨다(db, cli):
     """볼 때마다 지금 시각으로 덮으면 "방금 만료됨" 만 보이고, 반나절째
     막혀 있다는 것이 안 드러납니다."""
     _seed(db, "vid", 90)
-    cli.session = False
+    cli.session = tistory.EXPIRED
     publish.publish_once(db)
     처음 = publish.session_bad_since(db)
 
@@ -579,11 +641,11 @@ def test_처음_죽은_시각을_지킨다(db, cli):
 
 def test_로그인하고_돌아오면_지운다(db, cli):
     _seed(db, "vid", 90)
-    cli.session = False
+    cli.session = tistory.EXPIRED
     publish.publish_once(db)
     assert publish.session_bad_since(db) is not None
 
-    cli.session = True
+    cli.session = tistory.OK
     publish.state.set_time(db, publish.NEXT_KEY, None)
     publish.publish_once(db)
     assert publish.session_bad_since(db) is None
