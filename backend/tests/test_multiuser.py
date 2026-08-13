@@ -69,8 +69,10 @@ def a_user(db, name, pin=None, owner=False):
     return u
 
 
-def a_keyword(db, term):
-    k = Keyword(term=term, status="active")
+def a_keyword(db, term, by=None):
+    """`by` 가 만든 사람입니다 — **삭제와 제외를 가르는 값**이라, 삭제까지
+    보는 시험은 반드시 넣어야 합니다(라우트로 만들면 자동으로 찍힙니다)."""
+    k = Keyword(term=term, status="active", created_by=by.id if by else None)
     db.add(k)
     db.commit()
     return k
@@ -240,10 +242,10 @@ def test_구독을_끊어도_즐겨찾기_한_것은_남는다(client, db):
     끊었다고 아껴 둔 강의가 통째로 사라지면 안 됩니다."""
     from app.db.models import UserKeyword
 
-    kw = a_keyword(db, "쿠버네티스")
+    주인 = a_user(db, "주인", owner=True)
+    kw = a_keyword(db, "쿠버네티스", by=주인)
     a_lecture(db, "vid_k_000001", kw, "아껴 둔 것")
     a_lecture(db, "vid_k_000002", kw, "그냥 것")
-    주인 = a_user(db, "주인", owner=True)
     db.add(UserKeyword(user_id=주인.id, keyword_id=kw.id))
     db.commit()
 
@@ -256,12 +258,15 @@ def test_구독을_끊어도_즐겨찾기_한_것은_남는다(client, db):
 
 def test_마지막_구독자가_빠지면_수집이_멈춘다(client, db):
     """보는 사람이 0명인데 매일 수집하면 유튜브 유닛도 요약 토큰도
-    아무도 안 읽을 것에 씁니다."""
+    아무도 안 읽을 것에 씁니다.
+
+    빠지는 문이 둘(삭제·제외)이라도 세는 곳은 하나여야 합니다 — 한쪽만
+    세면 그쪽으로 나간 사람은 없는 셈이 됩니다."""
     from app.db.models import UserKeyword
 
-    kw = a_keyword(db, "쿠버네티스")
     주인 = a_user(db, "주인", owner=True)
     아내 = a_user(db, "아내")
+    kw = a_keyword(db, "쿠버네티스", by=주인)
     for u in (주인, 아내):
         db.add(UserKeyword(user_id=u.id, keyword_id=kw.id))
     db.commit()
@@ -270,8 +275,9 @@ def test_마지막_구독자가_빠지면_수집이_멈춘다(client, db):
     client.delete(f"{API}/keywords/{kw.id}")
     assert fresh(db).get(Keyword, kw.id).status == "active", "아내가 아직 보고 있습니다"
 
+    # 아내는 만든 사람이 아니라 제외로 나갑니다. 그래도 마지막 한 명입니다.
     login(client, 아내)
-    client.delete(f"{API}/keywords/{kw.id}")
+    client.post(f"{API}/keywords/{kw.id}/exclude")
     assert fresh(db).get(Keyword, kw.id).status == "archived"
 
 
@@ -279,8 +285,8 @@ def test_끊은_키워드는_내_삭제_영역에_남는다(client, db):
     """행째로 지우면 되살릴 방법이 없어집니다."""
     from app.db.models import UserKeyword
 
-    kw = a_keyword(db, "쿠버네티스")
     주인 = a_user(db, "주인", owner=True)
+    kw = a_keyword(db, "쿠버네티스", by=주인)
     db.add(UserKeyword(user_id=주인.id, keyword_id=kw.id))
     db.commit()
 
@@ -354,8 +360,76 @@ def test_남이_만든_키워드는_구독해도_못_고친다(client, db):
     # **주인도 예외가 아닙니다.** 규칙이 하나라야 화면에서 설명할 것이 없습니다.
     assert fresh(db).get(Keyword, kid).status != "paused"
 
-    # 빼기는 내 구독만 끊는 일이라 그대로 됩니다.
+    # 삭제도 같은 문에서 막힙니다. 내 구독만 끊는 일인데 "삭제" 라고 부르면
+    # 눌린 뒤에 남는 자리가 삭제 영역이라, 지운 적 없는 남의 키워드가 내
+    # 휴지통에 쌓입니다 — 그리고 그건 아직 돌고 있습니다.
+    r = client.delete(f"{API}/keywords/{kid}")
+    assert r.status_code == 403, r.text
+    assert r.json()["error"]["code"] == "NOT_KEYWORD_AUTHOR"
+
+    # 대신 제외 — 내 구독만 끊는 일이라 누구나 됩니다.
+    assert client.post(f"{API}/keywords/{kid}/exclude").status_code == 200
+
+
+def test_남이_만든_키워드는_제외해도_수집이_돈다(client, db):
+    """담아 봤다가 무르는 일이 삭제여선 안 됩니다.
+
+    삭제 영역은 **수집이 멎은 것**을 두는 자리입니다. 만든 사람이 아직 보고
+    있으면 그 키워드는 그대로 도는데, 그것까지 거기 넣으면 한쪽은 "지웠다",
+    한쪽은 "돌고 있다" 고 말하게 됩니다. 다시 담을 자리도 흐려집니다.
+    """
+    아내 = a_user(db, "아내")
+    주인 = a_user(db, "주인", owner=True)
+
+    login(client, 아내)
+    kid = client.post(f"{API}/keywords", json={"term": "쿠버네티스"}).json()["id"]
+
+    login(client, 주인)
+    assert client.post(f"{API}/keywords/{kid}/subscribe").status_code == 201
+    r = client.post(f"{API}/keywords/{kid}/exclude")
+    assert r.status_code == 200, r.text
+    assert r.json()["isMine"] is False
+
+    assert fresh(db).get(Keyword, kid).status != "archived", "아내가 아직 보고 있습니다"
+    assert client.get(f"{API}/keywords").json() == [], "내 목록에서는 빠집니다"
+    assert client.get(f"{API}/keywords?archived=true").json() == [], "삭제 영역에는 안 갑니다"
+
+    # 다시 담는 자리는 한 곳 — "다른 사람도 보는 키워드" 입니다.
+    others = client.get(f"{API}/keywords?mine=false").json()
+    assert [k["term"] for k in others] == ["쿠버네티스"]
+    assert client.post(f"{API}/keywords/{kid}/subscribe").status_code == 201
+    assert [k["term"] for k in client.get(f"{API}/keywords").json()] == ["쿠버네티스"]
+
+
+def test_마지막_사람이_제외하면_수집이_멎고_삭제_영역에_남는다(client, db):
+    """제외라도 보는 사람이 0명이 되면 멈춥니다.
+
+    아무도 안 읽을 것을 매일 수집하면 유튜브 유닛도 자막도 요약 토큰도 그냥
+    나갑니다. 대신 되살릴 자리를 남겨야 하므로, 그때는 삭제 영역에 둡니다 —
+    "다른 사람도 보는 키워드" 에는 보관된 것이 안 나오기 때문입니다.
+    """
+    아내 = a_user(db, "아내")
+    주인 = a_user(db, "주인", owner=True)
+
+    login(client, 아내)
+    kid = client.post(f"{API}/keywords", json={"term": "쿠버네티스"}).json()["id"]
+
+    login(client, 주인)
+    client.post(f"{API}/keywords/{kid}/subscribe")
+
+    # 만든 사람이 먼저 빠집니다. 주인이 아직 보고 있으니 수집은 계속됩니다.
+    login(client, 아내)
     assert client.delete(f"{API}/keywords/{kid}").status_code == 204
+    assert fresh(db).get(Keyword, kid).status != "archived"
+
+    login(client, 주인)
+    r = client.post(f"{API}/keywords/{kid}/exclude")
+    assert r.status_code == 200 and r.json()["status"] == "archived"
+    assert fresh(db).get(Keyword, kid).status == "archived"
+
+    gone = client.get(f"{API}/keywords?archived=true").json()
+    assert [k["term"] for k in gone] == ["쿠버네티스"], "되살릴 자리가 있어야 합니다"
+    assert client.post(f"{API}/keywords/{kid}/restore").status_code == 200
 
 
 def test_만든_사람은_고칠_수_있다(client, db):

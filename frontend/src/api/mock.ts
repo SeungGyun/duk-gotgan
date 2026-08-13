@@ -839,7 +839,11 @@ export const mockApi: Api = {
 
   async listKeywords() {
     await delay();
-    return keywords.filter((k) => k.status !== "archived").map((k) => ({ ...k }));
+    // 내 목록은 **구독한 것만**입니다 — 제외한 것이 여기 남아 있으면
+    // 뺐는데 그대로 있는 화면이 됩니다.
+    return keywords
+      .filter((k) => k.isMine && k.status !== "archived")
+      .map((k) => ({ ...k }));
   },
 
   async listArchivedKeywords() {
@@ -924,7 +928,36 @@ export const mockApi: Api = {
     const i = keywords.findIndex((k) => k.id === id);
     const found = keywords[i];
     if (!found) throw new ApiError("키워드를 찾을 수 없습니다.", 404, "NOT_FOUND");
+    // 서버와 같은 자리에서 막습니다 — 남의 것을 지우면 지운 적 없는 사람의
+    // 곳간이 마릅니다. 그쪽 길은 제외입니다.
+    if (!found.canEdit)
+      throw new ApiError(
+        `${found.createdByName ?? "다른 사람"} 님이 만든 키워드라 삭제할 수 없습니다. ` +
+          "제외하면 내 목록에서만 빠집니다.",
+        403,
+        "NOT_KEYWORD_AUTHOR",
+      );
     keywords[i] = { ...found, status: "archived", archivedAt: iso(new Date()) };
+  },
+
+  async excludeKeyword(id) {
+    await delay();
+    const i = keywords.findIndex((k) => k.id === id);
+    const found = keywords[i];
+    if (!found) throw new ApiError("키워드를 찾을 수 없습니다.", 404, "NOT_FOUND");
+    // 내 구독만 끊습니다. 보는 사람이 남아 있으면 **수집은 그대로 돌고**,
+    // 삭제 영역에도 가지 않습니다 — "다른 사람도 보는 키워드" 로 내려갑니다.
+    const left = Math.max(0, found.subscriberCount - 1);
+    const excluded: Keyword = {
+      ...found,
+      isMine: false,
+      subscriberCount: left,
+      // 나 하나였다면 아무도 안 읽는 것을 매일 수집하게 되므로 멈춥니다.
+      status: left === 0 ? "archived" : found.status,
+      archivedAt: left === 0 ? iso(new Date()) : found.archivedAt,
+    };
+    keywords[i] = excluded;
+    return { ...excluded };
   },
 
   async restoreKeyword(id) {
@@ -932,12 +965,17 @@ export const mockApi: Api = {
     const i = keywords.findIndex((k) => k.id === id);
     const found = keywords[i];
     if (!found) throw new ApiError("키워드를 찾을 수 없습니다.", 404, "NOT_FOUND");
-    if (found.status !== "archived") {
+    // 제외한 것도 이 길로 되돌립니다 — 아직 돌고 있으니 상태는 그대로 두고
+    // 구독만 다시 붙입니다. 여기서 막으면 "되돌리기" 가 실패합니다.
+    if (found.status !== "archived" && found.isMine) {
       throw new ApiError("삭제된 키워드가 아닙니다.", 409, "NOT_ARCHIVED");
     }
+    const revived = found.status === "archived";
     const restored: Keyword = {
       ...found,
-      status: found.lastRunAt === null ? "pending" : "active",
+      isMine: true,
+      subscriberCount: found.isMine ? found.subscriberCount : found.subscriberCount + 1,
+      status: revived ? (found.lastRunAt === null ? "pending" : "active") : found.status,
       archivedAt: null,
     };
     keywords[i] = restored;

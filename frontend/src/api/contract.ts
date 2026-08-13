@@ -54,8 +54,16 @@ export interface Api {
   createKeyword(draft: KeywordDraft): Promise<Keyword>;
   updateKeyword(id: string, patch: Partial<KeywordDraft>): Promise<Keyword>;
   setKeywordStatus(id: string, status: "active" | "paused"): Promise<Keyword>;
-  /** 지우지 않고 삭제 영역으로 옮깁니다. 모은 강의와 연결은 그대로 남습니다. */
+  /** **내가 만든 것만.** 지우지 않고 삭제 영역으로 옮깁니다. 모은 강의와
+   *  연결은 그대로 남습니다. 남이 만든 것이면 403 `NOT_KEYWORD_AUTHOR`. */
   deleteKeyword(id: string): Promise<void>;
+  /** 남이 만든 키워드를 **내 목록에서만** 뺍니다. 만든 사람이 아직 보고
+   *  있으므로 **수집은 그대로 돌고**, 삭제 영역에도 가지 않습니다 — 다시
+   *  담는 자리는 "다른 사람도 보는 키워드" 입니다.
+   *
+   *  나 혼자 보던 것이었다면 서버가 수집을 멈추고 삭제 영역에 남깁니다.
+   *  어느 쪽이었는지는 돌려받은 `status` 로 압니다. */
+  excludeKeyword(id: string): Promise<Keyword>;
   /** 삭제 영역에서 되살립니다. 돌아갈 상태는 서버가 정합니다. */
   restoreKeyword(id: string): Promise<Keyword>;
 

@@ -114,14 +114,30 @@ def _pending(db: Session):
     settled = select(BlogPost.video_id).where(
         or_(BlogPost.state == "POSTED", BlogPost.attempts >= MAX_ATTEMPTS)
     )
+
+    where = [
+        Lecture.is_hidden.is_(False),
+        Lecture.verdict.in_(settings.blog_verdict_list),
+        Lecture.video_id.not_in(owner_excluded),
+        Lecture.video_id.not_in(settled),
+    ]
+
+    # **채널 구독으로 들어온 것은 안 올립니다** (settings.blog_skip_channel).
+    #
+    # 검색 키워드가 붙어 있어도 뺍니다. 한 영상에 둘이 같이 붙는 일은 지금
+    # 0건이지만, 생긴다면 "채널에서 온 것" 이 맞고 안 올리는 쪽이 되돌리기
+    # 쉽습니다 — 올라간 공개 글은 사람이 하나씩 내려야 합니다.
+    if settings.blog_skip_channel:
+        from_channel = (
+            select(VideoKeyword.video_id)
+            .join(Keyword, Keyword.id == VideoKeyword.keyword_id)
+            .where(Keyword.source_type == "channel")
+        )
+        where.append(Lecture.video_id.not_in(from_channel))
+
     return (
         select(Lecture)
-        .where(
-            Lecture.is_hidden.is_(False),
-            Lecture.verdict.in_(settings.blog_verdict_list),
-            Lecture.video_id.not_in(owner_excluded),
-            Lecture.video_id.not_in(settled),
-        )
+        .where(*where)
         .order_by(Lecture.expert_score.desc(), Lecture.published_at.desc())
     )
 

@@ -217,6 +217,17 @@ def _seed(db, video_id: str, score: int, verdict: str = "expert") -> Lecture:
     return lec
 
 
+def _seed_from_channel(db, video_id: str, score: int) -> Lecture:
+    """채널 구독이 데려온 강의. 곳간에는 쌓이되 블로그에는 안 나갑니다."""
+    lec = _seed(db, video_id, score)
+    kw = Keyword(term="@somechannel", source_type="channel", channel_title="어느 채널")
+    db.add(kw)
+    db.flush()
+    db.add(VideoKeyword(video_id=video_id, keyword_id=kw.id))
+    db.commit()
+    return lec
+
+
 def test_점수가_높은_것부터_나간다(db):
     _seed(db, "low", 70)
     _seed(db, "high", 95)
@@ -576,3 +587,22 @@ def test_로그인하고_돌아오면_지운다(db, cli):
     publish.state.set_time(db, publish.NEXT_KEY, None)
     publish.publish_once(db)
     assert publish.session_bad_since(db) is None
+
+
+def test_채널_구독물은_안_올린다(db, cli):
+    """검색 키워드는 주제를 정해 모은 것이라 글로 묶을 결이 있는데, 채널
+    구독은 그 채널의 새 영상을 통째로 가져오는 것이라 결이 없습니다 —
+    카테고리부터 주제가 아니라 채널 이름이 됩니다."""
+    검색 = _seed(db, "s1", 90)
+    _seed_from_channel(db, "c1", 95)  # 점수가 더 높아도
+
+    assert publish.candidate(db).video_id == "s1"
+    assert publish.remaining(db) == 1
+
+
+def test_채널을_안_막을_수도_있다(db, cli, monkeypatch):
+    monkeypatch.setattr(settings, "blog_skip_channel", False)
+    _seed(db, "s1", 90)
+    _seed_from_channel(db, "c1", 95)
+    assert publish.candidate(db).video_id == "c1"
+    assert publish.remaining(db) == 2

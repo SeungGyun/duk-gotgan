@@ -8,6 +8,16 @@
 그래서 "삭제"의 뜻이 바뀝니다 — **내 구독을 끊는 것**이고, 마지막 구독자가
 빠졌을 때만 키워드가 보관됩니다. 안 그러면 보는 사람이 0명인 키워드를 매일
 수집하게 됩니다.
+
+빼는 길이 둘인 것도 같은 이유입니다.
+
+  - **삭제**(`DELETE`)는 내가 만든 것만. 마지막 구독자면 수집이 멎으므로
+    삭제 영역에 남겨 되살릴 수 있게 합니다.
+  - **제외**(`POST /{id}/exclude`)는 남이 만든 것을 내 목록에서만 빼는
+    일입니다. 만든 사람이 아직 보고 있으니 **수집은 그대로 돕니다** — 그래서
+    삭제 영역에 넣지 않습니다. 거기 넣으면 "지웠다"고 적어 두고는 계속
+    수집하는 셈이라, 다시 담고 싶을 때 어디를 봐야 하는지도 흐려집니다.
+    다시 담는 자리는 "다른 사람도 보는 키워드" 한 곳입니다.
 """
 
 from fastapi import APIRouter, Depends, Query
@@ -168,12 +178,52 @@ def _mark_author(d: dict, k: Keyword, user_id: str, names: dict[str, str]) -> di
     화면이 버튼을 감추는 근거이자 라우트가 막는 근거를 **한 값으로** 둡니다.
     둘이 갈리면 눌리는 버튼이 403 을 뱉습니다.
 
+    수정·일시정지·삭제가 모두 이 값 하나를 봅니다 — 화면은 이걸로 "삭제"와
+    "제외" 중 어느 버튼을 낼지도 고릅니다.
+
     이름까지 같이 내는 것은, 버튼이 그냥 없으면 "왜 나만 안 되지" 가 되기
     때문입니다 — 누가 만든 것인지 보이면 물어볼 데가 생깁니다.
     """
     d["canEdit"] = k.created_by is not None and k.created_by == user_id
     d["createdByName"] = names.get(k.created_by) if k.created_by else None
     return d
+
+
+def _require_author(db: Session, kw: Keyword, user_id: str, verb: str, hint: str) -> None:
+    """만든 사람만 지나는 문. 응답의 `canEdit` 과 같은 값을 봅니다.
+
+    막는 근거가 여기 하나뿐이라야 화면이 감춘 버튼과 서버가 막는 동작이
+    갈리지 않습니다. `verb` 는 "고칠"·"삭제할" 처럼 들어가고, `hint` 는
+    그럼 무엇을 할 수 있는지를 말합니다 — 막기만 하면 다음 수가 없습니다.
+    """
+    if kw.created_by is not None and kw.created_by == user_id:
+        return
+    owner = _user_names(db).get(kw.created_by) if kw.created_by else None
+    raise ApiError(
+        403,
+        "NOT_KEYWORD_AUTHOR",
+        f"{owner} 님이 만든 키워드라 {verb} 수 없습니다. {hint}"
+        if owner
+        else f"만든 사람만 {verb} 수 있는 키워드입니다. {hint}",
+    )
+
+
+def _unsubscribe(db: Session, user_id: str, kw: Keyword) -> None:
+    """내 구독만 끊습니다 — 삭제와 제외가 함께 지나는 길.
+
+    행을 지우지 않고 시각만 찍습니다 — 지우면 내 삭제 영역에서도 사라져
+    되살릴 방법이 없어집니다.
+
+    모아 둔 강의와 연결(`video_keywords`)은 건드리지 않습니다. 되살렸을 때
+    "몇 편 모았는지" 가 이어져야 복구가 복구다워집니다.
+    """
+    mine = _sub(db, user_id, kw.id)
+    if mine is None or mine.archived_at is not None:
+        raise ApiError(404, "NOT_SUBSCRIBED", "구독하지 않은 키워드입니다.")
+    mine.archived_at = now_kst()
+    db.flush()
+    _retire_if_empty(db, kw)
+    db.commit()
 
 
 def _out(db: Session, k: Keyword, user_id: str) -> dict:
@@ -228,6 +278,12 @@ def list_keywords(
         for s in gone:
             k = db.get(Keyword, s.keyword_id)
             if k is None:
+                continue
+            # **남이 만들었고 아직 돌고 있는 것은 여기 두지 않습니다.**
+            # 그건 지운 게 아니라 제외한 것이고, "다른 사람도 보는 키워드"
+            # 에서 한 번에 다시 담을 수 있습니다. 두 곳에 같이 두면 한쪽은
+            # "지웠다", 한쪽은 "돌고 있다" 라고 말하게 됩니다.
+            if k.created_by != user.id and k.status != "archived":
                 continue
             d = keyword_out(k, counts.get(k.id, 0))
             d["isMine"] = False
@@ -359,10 +415,10 @@ def update_keyword(
     적용됩니다. 예전에는 구독자면 누구나 고칠 수 있었는데, 그러면 남이
     정해 둔 값을 모르고 바꾸게 됩니다 — 되돌릴 방법도 알림도 없이.
 
-    구독은 그대로 누구나 합니다. 빼는 것(DELETE)도 내 구독만 끊는 일이라
-    누구나 합니다. **막는 것은 모두에게 퍼지는 변경뿐입니다** — 일시정지도
-    여기를 지나므로 같이 막힙니다. 남의 키워드를 멈추면 그 사람 수집이
-    통째로 멎기 때문에, 설정을 바꾸는 것보다 오히려 셉니다.
+    구독은 그대로 누구나 합니다. 내 목록에서 빼는 것(제외)도 내 구독만
+    끊는 일이라 누구나 합니다. **막는 것은 모두에게 퍼지는 변경뿐입니다**
+    — 일시정지도 여기를 지나므로 같이 막힙니다. 남의 키워드를 멈추면 그
+    사람 수집이 통째로 멎기 때문에, 설정을 바꾸는 것보다 오히려 셉니다.
 
     상태를 `status` 로 바꾸는 것도 같은 통로입니다. 화면은 `canEdit` 으로
     버튼을 감추고, 막는 근거는 여기 하나뿐입니다.
@@ -373,15 +429,7 @@ def update_keyword(
     mine = _sub(db, user.id, keyword_id)
     if mine is None or mine.archived_at is not None:
         raise ApiError(403, "NOT_SUBSCRIBED", "구독한 키워드만 고칠 수 있습니다.")
-    if kw.created_by != user.id:
-        owner = _user_names(db).get(kw.created_by) if kw.created_by else None
-        raise ApiError(
-            403,
-            "NOT_KEYWORD_AUTHOR",
-            f"{owner} 님이 만든 키워드라 고칠 수 없습니다. 빼는 것은 됩니다."
-            if owner
-            else "만든 사람만 고칠 수 있는 키워드입니다. 빼는 것은 됩니다.",
-        )
+    _require_author(db, kw, user.id, "고칠", "제외는 됩니다.")
 
     _validate(patch.status, STATUSES, "status")
     _validate(patch.language, LANGUAGES, "language")
@@ -419,7 +467,7 @@ def delete_keyword(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):
-    """내 구독을 끊습니다.
+    """**내가 만든 것만.** 내 구독을 끊고 삭제 영역으로 옮깁니다.
 
     **마지막 구독자일 때만 키워드가 보관됩니다.** 아니면 남은 사람이 계속
     보고 있는데 수집이 멈춥니다.
@@ -428,22 +476,43 @@ def delete_keyword(
     키워드를 매일 수집합니다** — 유튜브 유닛도 자막도 요약 토큰도 아무도
     안 읽을 것에 씁니다.
 
-    모아 둔 강의와 연결(`video_keywords`)은 건드리지 않습니다. 되살렸을 때
-    "몇 편 모았는지" 가 이어져야 복구가 복구다워집니다.
+    남이 만든 것은 여기로 오지 않습니다(403). 내 구독만 끊는 일인데도
+    "삭제" 라고 부르면, 눌린 뒤에 남는 자리가 삭제 영역이라 **지운 적 없는
+    남의 키워드가 내 휴지통에 쌓입니다** — 그리고 그건 아직 돌고 있습니다.
+    그쪽은 제외(`POST /{id}/exclude`)입니다.
     """
     kw = db.get(Keyword, keyword_id)
     if kw is None:
         raise ApiError(404, "KEYWORD_NOT_FOUND", "해당 키워드를 찾을 수 없습니다.")
 
-    mine = _sub(db, user.id, keyword_id)
-    if mine is None or mine.archived_at is not None:
-        raise ApiError(404, "NOT_SUBSCRIBED", "구독하지 않은 키워드입니다.")
-    # 행을 지우지 않고 시각만 찍습니다 — 지우면 내 삭제 영역에서도 사라져
-    # 되살릴 방법이 없어집니다.
-    mine.archived_at = now_kst()
-    db.flush()
-    _retire_if_empty(db, kw)
-    db.commit()
+    _require_author(db, kw, user.id, "삭제할", "제외하면 내 목록에서만 빠집니다.")
+    _unsubscribe(db, user.id, kw)
+
+
+@router.post("/{keyword_id}/exclude")
+def exclude_keyword(
+    keyword_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """남이 만든 키워드를 **내 목록에서만** 뺍니다.
+
+    삭제와 갈리는 곳은 하나입니다 — **수집이 그대로 돕니다.** 만든 사람이
+    아직 보고 있으니 멈출 이유가 없고, 멈추면 지운 적 없는 사람의 곳간이
+    말라붙습니다. 그래서 삭제 영역에도 넣지 않습니다. 다시 담고 싶으면
+    "다른 사람도 보는 키워드" 에서 누르면 되고, 그 자리에 그대로 있습니다.
+
+    보는 사람이 나 하나였다면 얘기가 다릅니다. 내가 빠지면 아무도 안 읽는
+    것을 매일 수집하게 되므로 그때는 수집을 멈추고(`_retire_if_empty`)
+    삭제 영역에 남깁니다 — 되살릴 곳이 있어야 하니까요. 어느 쪽이었는지는
+    응답의 `status` 로 압니다. 화면은 그 값으로 문구를 고릅니다.
+    """
+    kw = db.get(Keyword, keyword_id)
+    if kw is None:
+        raise ApiError(404, "KEYWORD_NOT_FOUND", "해당 키워드를 찾을 수 없습니다.")
+
+    _unsubscribe(db, user.id, kw)
+    return _out(db, kw, user.id)
 
 
 @router.post("/{keyword_id}/restore")

@@ -130,6 +130,8 @@ export const httpApi: Api = {
 
   deleteKeyword: (id) => req<void>(`/keywords/${id}`, { method: "DELETE" }),
 
+  excludeKeyword: (id) => req<Keyword>(`/keywords/${id}/exclude`, { method: "POST" }),
+
   restoreKeyword: (id) => req<Keyword>(`/keywords/${id}/restore`, { method: "POST" }),
 
   listLectures: (query) => req(`/lectures${qs(query)}`),

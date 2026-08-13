@@ -72,8 +72,9 @@ export function Keywords({ list }: { list: ListState }) {
   // 수정 중인 행. 표를 인풋으로 바꾸면 칸이 좁아 값이 잘리므로,
   // 행 아래에 추가 폼과 같은 배치의 편집 줄을 펼칩니다.
   const [editing, setEditing] = useState<string | null>(null);
-  // 방금 지운 것 — 되돌리기를 그 자리에서 한 번 더 보여줍니다
-  const [justDeleted, setJustDeleted] = useState<Keyword | null>(null);
+  // 방금 뺀 것 — 되돌리기를 그 자리에서 한 번 더 보여줍니다. 삭제와 제외는
+  // 남는 자리가 달라서(삭제 영역 / 다른 사람도 보는 키워드) 문구도 다릅니다.
+  const [justOut, setJustOut] = useState<{ k: Keyword; note: string } | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
   const [binOpen, setBinOpen] = useState(false);
   const [blocksOpen, setBlocksOpen] = useState(false);
@@ -86,11 +87,16 @@ export function Keywords({ list }: { list: ListState }) {
   );
   const bin = useAsync(() => api.listArchivedKeywords(), []);
   const blocks = useAsync(() => api.listChannelBlocks(), []);
+  // 남이 보는 것까지. **여기 두는 것은 제외한 키워드가 내려앉는 자리라서**
+  // 입니다 — 패널이 제 목록을 따로 들고 있으면 방금 뺀 것이 안 보이고,
+  // "아래에 있습니다" 라고 안내해 놓고는 없는 화면이 됩니다.
+  const others = useAsync(() => api.listAllKeywords(), []);
 
   const reloadAll = () => {
     list.reload();
     bin.reload();
     blocks.reload();
+    others.reload();
   };
 
   /** 행 단위 동작의 공통 처리 — 실패 문구를 표 위에 한 줄로 띄웁니다. */
@@ -106,14 +112,45 @@ export function Keywords({ list }: { list: ListState }) {
 
   /** 되돌리기 줄은 잠깐만 띄웁니다. 계속 남겨두면 이미 되살린 키워드를
    *  다시 되돌리라고 권하게 됩니다(그리고 그 요청은 실패합니다). */
-  const noteDeleted = (k: Keyword) => {
-    setJustDeleted(k);
-    window.setTimeout(() => setJustDeleted((cur) => (cur?.id === k.id ? null : cur)), 8000);
+  const noteOut = (k: Keyword, note: string) => {
+    setJustOut({ k, note });
+    window.setTimeout(() => setJustOut((cur) => (cur?.k.id === k.id ? null : cur)), 8000);
   };
 
   const restore = (k: Keyword) => {
-    setJustDeleted((cur) => (cur?.id === k.id ? null : cur));
+    setJustOut((cur) => (cur?.k.id === k.id ? null : cur));
     void rowAction(() => api.restoreKeyword(k.id));
+  };
+
+  /** 목록에서 빼기 — **내가 만든 것은 삭제, 남이 만든 것은 제외**입니다.
+   *
+   *  가르는 것은 수집이 멎느냐입니다. 남이 만든 것은 그 사람이 아직 보고
+   *  있으니 내가 빠져도 그대로 돌고, 그래서 삭제 영역이 아니라 "다른 사람도
+   *  보는 키워드" 로 내려갑니다 — 거기서 한 번에 다시 담습니다.
+   *
+   *  제외했는데 보는 사람이 없어졌다면 서버가 수집을 멈추고 삭제 영역에
+   *  남깁니다. 그건 돌려받은 `status` 로 알 수 있으니, 어디로 갔는지를
+   *  실제 결과대로 말합니다 — 여기서 미리 정해 두면 틀린 안내가 됩니다. */
+  const remove = async (k: Keyword) => {
+    setEditing(null);
+    setRowError(null);
+    try {
+      if (k.canEdit) {
+        await api.deleteKeyword(k.id);
+        noteOut(k, "삭제 영역으로 옮겼습니다.");
+      } else {
+        const after = await api.excludeKeyword(k.id);
+        noteOut(
+          k,
+          after.status === "archived"
+            ? "내 목록에서 뺐습니다. 보는 사람이 없어져 수집도 멈췄습니다 — 삭제 영역에 있습니다."
+            : "내 목록에서 뺐습니다. 수집은 그대로 돕니다 — 아래 “다른 사람도 보는 키워드”에 있습니다.",
+        );
+      }
+      reloadAll();
+    } catch (e) {
+      setRowError(e instanceof Error ? e.message : "요청이 실패했습니다.");
+    }
   };
 
   const isChannel = draft.sourceType === "channel";
@@ -337,12 +374,12 @@ export function Keywords({ list }: { list: ListState }) {
         </p>
       )}
 
-      {justDeleted && (
+      {justOut && (
         <div className={s.undo} role="status">
           <span>
-            <strong>{justDeleted.term}</strong> 을(를) 삭제 영역으로 옮겼습니다.
+            <strong>{justOut.k.term}</strong> 을(를) {justOut.note}
           </span>
-          <Button size="small" onClick={() => restore(justDeleted)}>
+          <Button size="small" onClick={() => restore(justOut.k)}>
             되돌리기
           </Button>
         </div>
@@ -427,10 +464,11 @@ export function Keywords({ list }: { list: ListState }) {
                         </td>
                         <td>
                           <div className={s.actions}>
-                            {/* **수정·일시정지는 만든 사람만.** 설정이 구독자
-                                모두에게 퍼지므로, 남이 정해 둔 값을 모르고
-                                바꾸는 일이 없게 막습니다. 빼기는 내 구독만
-                                끊는 일이라 누구나 됩니다. */}
+                            {/* **수정·일시정지·삭제는 만든 사람만.** 설정이
+                                구독자 모두에게 퍼지므로, 남이 정해 둔 값을
+                                모르고 바꾸는 일이 없게 막습니다. 남의 것을
+                                뺄 때는 제외 — 내 구독만 끊는 일이라 누구나
+                                되고, 수집은 그대로 돕니다. */}
                             {k.canEdit ? (
                               <>
                                 <Button
@@ -464,17 +502,21 @@ export function Keywords({ list }: { list: ListState }) {
                               </span>
                             )}
                             {/* 되돌릴 수 있는 동작이라 확인 창을 띄우지 않습니다.
-                                대신 바로 위에 되돌리기를 한 번 더 내줍니다. */}
+                                대신 바로 위에 되돌리기를 한 번 더 내줍니다.
+                                제외는 남의 수집을 건드리지 않으므로 위험한
+                                색을 쓰지 않습니다 — 무게가 같으면 삭제도
+                                가볍게 눌립니다. */}
                             <Button
                               size="small"
-                              className={s.danger}
-                              onClick={() => {
-                                setEditing(null);
-                                noteDeleted(k);
-                                void rowAction(() => api.deleteKeyword(k.id));
-                              }}
+                              className={k.canEdit ? s.danger : undefined}
+                              title={
+                                k.canEdit
+                                  ? "삭제 영역으로 옮깁니다. 되살릴 수 있습니다."
+                                  : "내 목록에서만 뺍니다. 수집은 그대로 돕니다."
+                              }
+                              onClick={() => void remove(k)}
                             >
-                              삭제
+                              {k.canEdit ? "삭제" : "제외"}
                             </Button>
                           </div>
                         </td>
@@ -502,7 +544,7 @@ export function Keywords({ list }: { list: ListState }) {
         </Panel>
       )}
 
-      <Others mine={rows} onSubscribed={list.reload} />
+      <Others all={others} mine={rows} onSubscribed={reloadAll} />
 
       {/* 삭제 영역 — 비어 있으면 자리를 차지하지 않습니다 */}
       {(bin.data?.length ?? 0) > 0 && (
@@ -787,10 +829,20 @@ function EditForm({
  *  `UNIQUE(term)` 이 그걸 보장합니다. 같은 말을 새로 등록하는 것보다
  *  언제나 이쪽이 낫습니다.
  *
+ *  **제외한 키워드가 돌아오는 자리이기도 합니다.** 남이 만든 것을 빼면
+ *  삭제 영역이 아니라 여기로 내려앉습니다 — 아직 돌고 있으니까요.
+ *
  *  아무도 안 쓰는 것이 없으면 패널 자체가 안 나옵니다 — 혼자 쓰는 동안
  *  빈 상자가 자리를 차지할 이유가 없습니다. */
-function Others({ mine, onSubscribed }: { mine: Keyword[]; onSubscribed: () => void }) {
-  const all = useAsync(() => api.listAllKeywords(), []);
+function Others({
+  all,
+  mine,
+  onSubscribed,
+}: {
+  all: ListState;
+  mine: Keyword[];
+  onSubscribed: () => void;
+}) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -802,7 +854,6 @@ function Others({ mine, onSubscribed }: { mine: Keyword[]; onSubscribed: () => v
     setError(null);
     try {
       await api.subscribeKeyword(k.id);
-      all.reload();
       onSubscribed();
     } catch (e) {
       setError(e instanceof Error ? e.message : "구독하지 못했습니다.");
