@@ -236,3 +236,34 @@ def test_이력을_실행_기록보다_먼저_지운다():
 
     src = inspect.getsource(__import__("app.collector.cleanup", fromlist=["sweep"]).sweep)
     assert src.index("PipelineEvent") < src.index("CrawlRun")
+
+
+def test_스왑이_없는_것과_꽉_찬_것을_가른다(monkeypatch):
+    """**여유 0이라고 다 같은 0이 아닙니다.**
+
+    맥은 스왑 파일을 필요할 때 만듭니다. 메모리가 넉넉하면
+    `total = 0.00M  free = 0.00M` 이 나오는데, 여유만 보면 "꽉 찼다"로
+    읽힙니다 — 실제로는 스왑을 쓸 일이 없었다는 뜻입니다.
+
+    이걸 못 갈라서 요약이 통째로 멎었습니다. 자막 26건이 쌓이는 동안
+    1분마다 "메모리가 빡빡해 건너뜁니다" 만 찍혔고, 그때 램 16GB 에
+    스왑 사용량은 0이었습니다.
+    """
+    from app.collector import resources
+
+    def 스왑(total, free):
+        monkeypatch.setattr(resources, "_swap_mb", lambda: (total, free))
+
+    스왑(0.0, 0.0)
+    assert resources.memory_tight() is False, "스왑을 안 만든 것은 여유롭다는 뜻입니다"
+
+    # 가드가 원래 지켜야 했던 상황 — 5,120M 중 4,800M 사용.
+    스왑(5120.0, 320.0)
+    assert resources.memory_tight() is True
+
+    스왑(5120.0, 2000.0)
+    assert resources.memory_tight() is False
+
+    # 못 재면 막지 않습니다 — 측정이 깨진 날 파이프라인이 서면 안 됩니다.
+    monkeypatch.setattr(resources, "_swap_mb", lambda: None)
+    assert resources.memory_tight() is False
