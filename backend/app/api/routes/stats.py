@@ -16,7 +16,7 @@ from app.api.errors import ApiError
 from app.api.routes.lectures import Filters, _filtered
 from app.api.serializers import run_out
 from app.blog import publish
-from app.collector import cadence, quota, resources, transcript, upkeep
+from app.collector import cadence, cookies, quota, resources, transcript, upkeep
 from app.collector.schedule import next_due_at
 from app.llm import pace
 from app.llm import usage as usage_guard
@@ -371,6 +371,40 @@ def _discover_hold(db: Session, now) -> dict | None:
     )
 
 
+def _audio_fix(db: Session) -> str | None:
+    """오디오가 막혔을 때 **사람이 해 볼 만한 다음 수**.
+
+    2026-08-20 에 이걸 IP 문제로 보고 VPN 을 바꿔 가며 세 시간을 썼는데,
+    원인은 6주 낡은 yt-dlp 였습니다. 화면은 "차단됐습니다" 까지만 말했고,
+    "낡은 게 아닌지 보라" 는 코드 주석에만 있었습니다.
+
+    그래서 **원인을 좁혀 줍니다.** 갈래는 셋뿐입니다.
+
+      낡음      → 스스로 올립니다(하루 한 번). 급하면 손으로.
+      최신인데 막힘 → 그게 진짜 IP 문제입니다. 회선을 바꾸거나 쿠키를.
+      모름      → 아무 말도 하지 않습니다.
+
+    **모를 때 짐작하지 않습니다.** 확인한 적 없는 것을 "최신입니다" 라고
+    적으면, 그 말을 믿고 엉뚱한 데를 뒤지게 됩니다 — 이번에 제가 그랬습니다.
+    """
+    if cookies.enabled():
+        return None  # 이미 붙여 뒀으면 더 권할 것이 없습니다
+
+    old = upkeep.stale(db)
+    if old is True:
+        return (
+            f"yt-dlp 가 낡았습니다 ({upkeep.installed()}) — 하루 한 번 스스로 올립니다. "
+            "급하면 터미널에서 `uv pip install -U yt-dlp` 후 워커를 다시 띄우세요."
+        )
+    if old is False:
+        return (
+            "yt-dlp 는 최신입니다 — 회선을 바꿔도 그대로면 로그인 쿠키를 붙여 보세요 "
+            "(.env 의 YOUTUBE_COOKIES_FILE). ⚠️ 이 수집이 그 계정에 붙으니 "
+            "전용 계정을 쓰세요."
+        )
+    return None
+
+
 def _transcript_hold(db: Session, now) -> dict | None:
     """자막이 멈추는 이유는 **문이 둘**이라 셋으로 갈립니다.
 
@@ -391,6 +425,7 @@ def _transcript_hold(db: Session, now) -> dict | None:
             "회선을 바꿨다면(VPN·재접속) 기다릴 이유가 없으니 지금 시작하세요.",
             tone="stop",
             until=max(caps, audio),
+            fix=_audio_fix(db),
             forcible=True,
         )
     if audio:
@@ -401,6 +436,7 @@ def _transcript_hold(db: Session, now) -> dict | None:
             "있는 영상만 처리하고, 자막이 없는 영상은 줄에서 그대로 기다립니다. "
             "회선을 바꿨다면 지금 시작해도 됩니다.",
             until=audio,
+            fix=_audio_fix(db),
             forcible=True,
         )
     if caps:

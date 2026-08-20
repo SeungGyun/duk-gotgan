@@ -44,6 +44,10 @@ PACKAGE = "yt-dlp"
 CHECKED_KEY = "upkeep.ytdlp.checked_at"
 # 마지막 결과. 화면이 읽어서 "언제 무엇을 했는지" 를 보여 줍니다.
 RESULT_KEY = "upkeep.ytdlp.note"
+# PyPI 가 말한 최신 버전. **화면이 이걸 봅니다** — 자막이 막혔을 때
+# "낡아서인가, 정말 차단인가" 를 가르는 값인데, 화면이 5초마다 PyPI 를
+# 두드릴 수는 없습니다. 하루 한 번 확인할 때 적어 둡니다.
+LATEST_KEY = "upkeep.ytdlp.latest"
 
 CHECK_EVERY_HOURS = 24
 
@@ -184,6 +188,10 @@ def refresh(db: Session) -> str | None:
     state.set_time(db, CHECKED_KEY, now_kst())
 
     have, want = installed(), latest()
+    if want:
+        # 같든 다르든 적어 둡니다. 화면이 "낡았는가" 를 물을 때 쓰는 값이라,
+        # 올릴 일이 없는 날에도 최신이 무엇인지는 알고 있어야 합니다.
+        state.set_str(db, LATEST_KEY, want)
     if have is None or want is None or _same(have, want):
         return None
 
@@ -206,6 +214,21 @@ def refresh(db: Session) -> str | None:
     note = f"{PACKAGE} {want} 가 오디오를 못 받아 {have} 로 되돌렸습니다 — {why}"
     state.set_str(db, RESULT_KEY, f"{now_kst():%m-%d %H:%M} · {note}")
     return note
+
+
+def stale(db: Session) -> bool | None:
+    """yt-dlp 가 낡았는가. **모르면 None** — 아직 한 번도 확인 못 했다는 뜻입니다.
+
+    화면이 자막 차단의 원인을 좁힐 때 씁니다. 낡았으면 그게 먼저이고,
+    최신인데도 막히면 그때가 진짜 IP 문제라 쿠키를 볼 자리입니다.
+
+    **모를 때 "최신입니다" 라고 하지 않습니다.** 확인한 적 없는 것을
+    확인했다고 말하면, 그 말을 믿고 엉뚱한 데를 뒤지게 됩니다.
+    """
+    have, want = installed(), state.get_str(db, LATEST_KEY)
+    if have is None or not want:
+        return None
+    return not _same(have, want)
 
 
 def last_note(db: Session) -> str | None:

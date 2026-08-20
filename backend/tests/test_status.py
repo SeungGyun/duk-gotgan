@@ -86,6 +86,10 @@ def test_자막이_멈춘_이유를_문_두_개로_갈라_말한다(monkeypatch)
     later = now + timedelta(minutes=30)
     much_later = now + timedelta(hours=4)
 
+    # 이 시험이 보는 것은 **문 두 개를 어떻게 가르는가** 이지 그 아래
+    # 붙는 조언이 아닙니다. 조언은 자기 시험이 따로 있습니다(test_upkeep).
+    monkeypatch.setattr(stats, "_audio_fix", lambda db: None)
+
     def 문(caps, audio):
         monkeypatch.setattr(transcript, "blocked_until", lambda db: caps)
         monkeypatch.setattr(transcript, "audio_blocked_until", lambda db: audio)
@@ -235,6 +239,7 @@ def test_사람이_바꿀_수_있는_멈춤은_눌러서_앞당긴다(monkeypatc
 
     now = now_kst()
     later = now + timedelta(hours=4)
+    monkeypatch.setattr(stats, "_audio_fix", lambda db: None)
     monkeypatch.setattr(transcript, "blocked_until", lambda db: later)
     monkeypatch.setattr(transcript, "audio_blocked_until", lambda db: later)
 
