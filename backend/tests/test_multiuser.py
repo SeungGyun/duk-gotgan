@@ -541,6 +541,34 @@ def test_상단바_숫자와_목록이_같은_것을_센다(client, db):
     assert client.get(f"{API}/stats/overview").json()["totalLectures"] == len(titles(client))
 
 
+def test_메뉴_숫자는_안_본_것만_센다(client, db):
+    """전체를 세면 아무리 읽어도 숫자가 그대로라 얼마나 밀렸는지 못 읽습니다.
+    읽음은 사람마다 다르므로, 한쪽이 읽어도 다른 쪽 숫자는 그대로여야 합니다."""
+    from app.db.models import UserKeyword
+
+    쿠버 = a_keyword(db, "쿠버네티스")
+    a_lecture(db, "vid_k_000001", 쿠버, "CNI 플러그인")
+    a_lecture(db, "vid_k_000002", 쿠버, "인그레스")
+    아내 = a_user(db, "아내")
+    주인 = a_user(db, "주인", owner=True)
+    db.add(UserKeyword(user_id=아내.id, keyword_id=쿠버.id))
+    db.add(UserKeyword(user_id=주인.id, keyword_id=쿠버.id))
+    db.commit()
+
+    def unread():
+        return client.get(f"{API}/stats/overview").json()["unreadLectures"]
+
+    login(client, 아내)
+    assert unread() == 2
+    client.patch(f"{API}/lectures/vid_k_000001", json={"isRead": True})
+    assert unread() == 1
+    # 전체 편수는 그대로입니다 — 대시보드가 보는 숫자는 다른 질문입니다.
+    assert client.get(f"{API}/stats/overview").json()["totalLectures"] == 2
+
+    login(client, 주인)
+    assert unread() == 2
+
+
 # ── 회사별 토큰 상한 ───────────────────────────────────────────
 
 

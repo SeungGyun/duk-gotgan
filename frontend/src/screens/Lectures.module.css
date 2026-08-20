@@ -372,6 +372,11 @@
 .tail {
   height: 1px;
 }
+/* 위쪽 감시선. 자리를 차지하면 안 됩니다 — 앞 편이 붙을 때마다 높이가
+   바뀌면 붙잡아 둔 줄이 그만큼 어긋납니다. */
+.head {
+  height: 1px;
+}
 .feedEnd {
   margin: 64px 0 0;
   padding-top: 22px;

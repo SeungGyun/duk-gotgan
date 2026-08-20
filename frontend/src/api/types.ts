@@ -418,6 +418,9 @@ export interface KeywordContribution {
 export interface Overview {
   newToday: number;
   totalLectures: number;
+  /** 아직 안 본 편수. 상단바 메뉴에 붙는 숫자입니다 — 전체를 붙이면
+   *  아무리 읽어도 그대로라 얼마나 밀렸는지 읽히지 않습니다. */
+  unreadLectures: number;
   weekAdded: number;
   avgScore: number;
   queued: { transcript: number; review: number };

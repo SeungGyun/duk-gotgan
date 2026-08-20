@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { api, apiMode } from "./api";
 import type { Me } from "./api";
@@ -46,6 +47,18 @@ function Shell({ me, onMeChanged }: { me: Me; onMeChanged: () => void }) {
   // 실행 기록은 관리자만 봅니다 — 식구에게는 세어 봐야 쓸 데가 없습니다.
   const runs = useAsync(() => (isOwner ? api.listRuns() : Promise.resolve([])), [isOwner]);
 
+  // 메뉴의 덕질 숫자는 **안 본 편수**입니다. 읽는 동안 줄어야 하는데,
+  // 개요를 다시 부르면 목록 정렬이 발밑에서 바뀌므로 화면이 알려 주는
+  // 만큼 여기서 빼기만 합니다.
+  const [unread, setUnread] = useState<number | null>(null);
+  useEffect(() => {
+    if (overview.data) setUnread(overview.data.unreadLectures);
+  }, [overview.data]);
+  const noteRead = useCallback(
+    () => setUnread((n) => (n == null ? n : Math.max(0, n - 1))),
+    [],
+  );
+
   return (
     <MeProvider value={me}>
       {apiMode === "mock" && (
@@ -81,7 +94,7 @@ function Shell({ me, onMeChanged }: { me: Me; onMeChanged: () => void }) {
 
       <TopBar
         usage={usage.data}
-        lectureCount={overview.data?.totalLectures ?? null}
+        lectureCount={unread}
         keywordCount={keywords.data?.length ?? null}
         runCount={runs.data?.length ?? null}
         me={me}
@@ -95,8 +108,8 @@ function Shell({ me, onMeChanged }: { me: Me; onMeChanged: () => void }) {
               관리자가 필요할 때 찾아가는 화면이라 주소를 따로 줍니다. */}
           <Route path="/" element={<Navigate to="/lectures" replace />} />
 
-          <Route path="/lectures" element={<Lectures />} />
-          <Route path="/lectures/:videoId" element={<Lectures />} />
+          <Route path="/lectures" element={<Lectures onRead={noteRead} />} />
+          <Route path="/lectures/:videoId" element={<Lectures onRead={noteRead} />} />
           <Route path="/keywords" element={<Keywords list={keywords} />} />
           <Route path="/excluded" element={<Excluded />} />
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import type { LectureDetail, LectureQuery, LectureSort, LectureSummary } from "../api";
@@ -147,13 +147,15 @@ const SORTS: { value: LectureSort; label: string }[] = [
   { value: "duration", label: "긴 순" },
 ];
 
-/** 이만큼 머물러야 "읽었다"로 봅니다. 스크롤로 스쳐 간 것까지 읽음으로
-    만들면, 안 본 것 먼저 정렬이 첫 스크롤 한 번에 무의미해집니다.
+/** 이만큼 머물러야 "읽었다"로 봅니다.
 
     **머문 시간만으로는 부족합니다.** 화면을 열어 두기만 해도 맨 위 강의가
     잠깐 뒤 읽음이 되어, 다음에 왔을 때 읽지도 않은 것이 뒤로 가 있었습니다.
-    그래서 손을 댄 뒤(스크롤·클릭·키)부터 셉니다. */
-const READ_DWELL_MS = 2000;
+    그래서 손을 댄 뒤(스크롤·클릭·키)부터 셉니다.
+
+    다음 편으로 넘어가면 시간과 무관하게 읽은 것으로 칩니다(아래) — 그래서
+    이 값이 짧아도 스쳐 간 것까지 읽음이 되지는 않습니다. */
+const READ_DWELL_MS = 1000;
 
 /** 새로 들어온 것이 있는지 확인하는 간격. 워커 사이클이 분 단위라 자주 볼
     이유가 없습니다. */
@@ -163,7 +165,7 @@ const NEW_POLL_MS = 60_000;
     첫 화면에서부터 다음 편을 당겨오지는 않을 만큼의 거리. */
 const PREFETCH_PX = 400;
 
-export function Lectures() {
+export function Lectures({ onRead }: { onRead?: () => void }) {
   const { videoId } = useParams<{ videoId: string }>();
   const navigate = useNavigate();
 
@@ -261,8 +263,12 @@ export function Lectures() {
   // 읽던 강의가 끝나면 다음 강의를 아래에 이어 붙이고, 스크롤 위치에 따라
   // 주소와 목록 강조를 따라 옮깁니다. 화면 전환 없이 계속 읽게 하는 게 목적.
   const [stack, setStack] = useState<string[]>([]);
+  const stackRef = useRef<string[]>(stack);
+  stackRef.current = stack;
   const feedRef = useRef<HTMLDivElement | null>(null);
   const tailRef = useRef<HTMLDivElement | null>(null);
+  // 이어보기의 위쪽 끝. 여기가 화면에 들어오면 앞 편을 위에 붙입니다.
+  const headRef = useRef<HTMLDivElement | null>(null);
   // 목록 판과 그 바닥의 감시선 — 굴려서 다음 쪽을 받는 데 씁니다.
   const listPaneRef = useRef<HTMLDivElement | null>(null);
   const listTailRef = useRef<HTMLDivElement | null>(null);
@@ -295,6 +301,30 @@ export function Lectures() {
   const activeRef = useRef<string | undefined>(currentId);
   activeRef.current = currentId;
 
+  /** 읽는 줄이 시작되는 높이 — 화면 꼭대기가 아니라 **떠 있는 것들 아래**입니다.
+   *
+   *  상단바, 좁은 화면에서는 필터 줄과 목록 판까지가 본문 위에 떠 있습니다.
+   *  고른 글을 여기에 놓아야 제목부터 보이고, "지금 보고 있는 줄"도 여기를
+   *  기준으로 재야 맞습니다.
+   *
+   *  **위치가 아니라 높이로 잽니다.** 읽는 중에는 이것들이 접혀 화면 위로
+   *  밀려나 있어서 위치로 재면 0 에 가깝게 잡히는데, 옮기고 나면 다시 내려와
+   *  첫 줄을 덮습니다. */
+  const readingTop = useCallback(() => {
+    const h = (el: HTMLElement | null, floating: string[]) =>
+      el && floating.includes(getComputedStyle(el).position)
+        ? el.getBoundingClientRect().height
+        : 0;
+    return (
+      h(document.querySelector<HTMLElement>("header"), ["sticky", "fixed"]) +
+      h(filtersRef.current, ["sticky", "fixed"]) +
+      // 넓은 화면의 목록 판은 본문 옆 칸이라 덮지 않습니다(sticky). 한 칸으로
+      // 접히면 본문 위에 뜨므로(fixed) 그때만 셉니다.
+      h(listPaneRef.current, ["fixed"]) +
+      14
+    );
+  }, []);
+
   // 필터가 바뀌면 처음부터, 목록에서 다른 강의를 고르면 그 강의부터 다시 쌓습니다.
   // 스크롤로 주소만 바뀐 경우(이미 스택에 있는 id)는 그대로 둡니다.
   useEffect(() => {
@@ -314,19 +344,39 @@ export function Lectures() {
     const i = rows.findIndex((r) => r.videoId === lastId);
     return i >= 0 ? rows[i + 1]?.videoId : undefined;
   }, [rows, lastId]);
+  // 위로도 같은 방식입니다 — 목록에서 중간을 골라 들어와도 그 앞의 것들이
+  // 위에 이어 붙어야, 올려서 되짚어 볼 수 있습니다.
+  const headId = stack[0];
+  const prevId = useMemo(() => {
+    if (!headId) return undefined;
+    const i = rows.findIndex((r) => r.videoId === headId);
+    return i > 0 ? rows[i - 1]?.videoId : undefined;
+  }, [rows, headId]);
   // 받아 둔 쪽의 끝까지 읽었을 뿐인데 "마지막 덕질입니다" 라고 하면 안 됩니다.
   const atRealEnd = !nextId && !list.hasMore;
 
   // 바닥이 가까워지면 다음 강의를 붙인다.
   // 마지막 강의가 다 그려진 뒤에만 관측합니다 — 로딩 자리표시자는 짧아서,
   // 그대로 두면 감시선이 계속 화면 안에 남아 목록 전체가 한 번에 딸려옵니다.
-  const [readyId, setReadyId] = useState<string | null>(null);
-  const markReady = useCallback((id: string) => setReadyId(id), []);
+  //
+  // **하나가 아니라 집합입니다.** 위로도 붙이게 되면서 "마지막으로 다 그려진
+  // 것"이 머리 쪽 글일 수 있게 됐습니다 — 그걸로 꼬리를 재면 아래로 잇는
+  // 것이 그대로 멈춰 섭니다.
+  const [readyIds, setReadyIds] = useState<Set<string>>(() => new Set());
+  const markReady = useCallback((id: string, ready: boolean) => {
+    setReadyIds((prev) => {
+      if (prev.has(id) === ready) return prev;
+      const next = new Set(prev);
+      if (ready) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
 
   const loadMore = list.loadMore;
   useEffect(() => {
     const el = tailRef.current;
-    if (!el || atRealEnd || readyId !== lastId) return;
+    if (!el || atRealEnd || !lastId || !readyIds.has(lastId)) return;
     const obs = new IntersectionObserver(
       (entries) => {
         if (!entries.some((e) => e.isIntersecting)) return;
@@ -339,7 +389,145 @@ export function Lectures() {
     );
     obs.observe(el);
     return () => obs.disconnect();
-  }, [nextId, readyId, lastId, atRealEnd, loadMore]);
+  }, [nextId, readyIds, lastId, atRealEnd, loadMore]);
+
+  // ── 위로 이어 붙이기 ─────────────────────────────────────
+  //
+  // 목록 아래쪽에서 하나 골라 들어오면 그 글이 통째로 첫 편이 되어, 올려 봐도
+  // 위에 아무것도 없었습니다. 아래로 잇는 것과 같은 방식으로 위로도 잇습니다.
+  //
+  // **위에 무언가가 끼어들면 보던 줄이 그만큼 아래로 밀립니다.** 크롬·파이어
+  // 폭스는 스스로 되돌리지만 사파리는 안 합니다. 그래서 화면 위쪽에 걸려
+  // 있던 글과 그 위치를 적어 두었다가, 어긋난 만큼만 되돌립니다. 이미 브라우저
+  // 가 맞춰 놓았으면 어긋난 값이 0 이라 아무 일도 하지 않습니다.
+  const anchorRef = useRef<{ id: string; top: number } | null>(null);
+
+  /** 지금 읽는 줄에 걸려 있는 글과 그 위치.
+   *
+   *  **화면 꼭대기(0)로 재면 안 됩니다.** 방금 위에 붙인 자리표시자가 그 위를
+   *  덮고 있어서, 정작 읽고 있는 글 대신 자리표시자를 붙잡습니다. 그러면
+   *  자리표시자가 본문으로 바뀌며 자란 만큼 읽던 글이 통째로 아래로 밀립니다
+   *  (실측 564px). 반대로 올려서 앞 편으로 넘어간 뒤라면 그 앞 편이 이 줄을
+   *  덮고 있으므로, 같은 기준으로 재도 올바로 앞 편을 붙잡습니다. */
+  const readAnchor = useCallback(() => {
+    const line = readingTop() + 1;
+    for (const id of stackRef.current) {
+      const el = itemRefs.current.get(id);
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (r.bottom > line) return { id, top: r.top };
+    }
+    return null;
+  }, [readingTop]);
+
+  /** 적어 둔 글을 그 자리로 되돌립니다.
+   *
+   *  **붙잡는 글은 바뀌지 않습니다.** 되돌린 뒤 다시 고르게 두었더니, 문서가
+   *  짧아 다 못 되돌린 경우(더 내려갈 자리가 없으면 브라우저가 잘라 냅니다)
+   *  기준선이 그새 위쪽 자리표시자 안으로 들어가 버려서, 다음 번엔 자리표시자를
+   *  붙잡고 읽던 글을 그대로 흘려보냈습니다. 못 되돌린 만큼은 그 자리를 새
+   *  기준으로 적어 둡니다 — 자란 만큼 또 밀리지는 않게. */
+  const restoreAnchor = useCallback(() => {
+    const a = anchorRef.current;
+    if (!a) return;
+    const el = itemRefs.current.get(a.id);
+    if (!el) return;
+    const delta = el.getBoundingClientRect().top - a.top;
+    if (Math.abs(delta) > 0.5) window.scrollBy({ top: delta });
+    a.top = el.getBoundingClientRect().top;
+  }, []);
+
+  // 붙였지만 아직 다 그려지지 않은 글. 자리표시자(70vh)가 본문(수천 px)으로
+  // 바뀌는 동안에도 붙잡고 있어야 합니다.
+  const [growing, setGrowing] = useState<string | null>(null);
+
+  const prevIdRef = useRef(prevId);
+  prevIdRef.current = prevId;
+
+  const prepend = useCallback(() => {
+    const id = prevIdRef.current;
+    if (!id || stackRef.current.includes(id)) return;
+    anchorRef.current = readAnchor();
+    setGrowing(id);
+    setStack((cur) => (cur.includes(id) ? cur : [id, ...cur]));
+  }, [readAnchor]);
+
+  useEffect(() => {
+    const el = headRef.current;
+    // 하나 붙이는 중에는 멈춥니다 — 자리표시자가 짧아 감시선이 화면에 남아
+    // 있으면 앞쪽 전체가 한꺼번에 딸려옵니다(꼬리와 같은 이유).
+    if (!el || !prevId || growing) return;
+    const obs = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) prepend();
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [prevId, growing, prepend]);
+
+  // 붙자마자 한 번 — 그리기가 끝나고 화면에 나가기 전에 되돌립니다.
+  // **방금 위에 붙인 경우에만입니다.** 목록에서 다른 글을 골라 통째로 다시
+  // 쌓은 것이라면 되돌릴 자리 자체가 없어진 것이라, 옛 좌표로 맞추면 엉뚱한
+  // 데로 끌려갑니다.
+  useLayoutEffect(() => {
+    if (!growing || stack[0] !== growing) return;
+    restoreAnchor();
+  }, [stack, growing, restoreAnchor]);
+
+  // 붙이던 글이 스택에서 빠지면(다시 쌓기·제외) 붙잡기를 놓습니다 —
+  // 안 그러면 위로 잇는 것이 그대로 잠깁니다.
+  useEffect(() => {
+    if (!growing || stack.includes(growing)) return;
+    anchorRef.current = null;
+    setGrowing(null);
+  }, [stack, growing]);
+
+  // 그 뒤 키가 자라는 동안. 그사이 사용자가 굴리면 적어 둔 자리도 따라
+  // 옮겨야 합니다 — 안 그러면 다 그려진 순간 읽던 자리에서 화면을 끌어당깁니다.
+  useEffect(() => {
+    if (!growing) return;
+    const el = feedRef.current;
+    if (!el) return;
+    let lastY = window.scrollY;
+    let queued = false;
+    const track = () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        const y = window.scrollY;
+        // 위로 붙이는 보정은 언제나 아래로 미는 쪽이라, 올라간 것은 사용자가
+        // 올린 것뿐입니다. **올렸으면 놓아 줍니다** — 앞 편을 보러 간 것인데
+        // 뒤 글을 붙잡고 있으면, 자리표시자가 본문으로 바뀌는 순간 보던
+        // 자리가 통째로 위로 밀립니다.
+        const up = y < lastY - 1;
+        lastY = y;
+        const a = anchorRef.current;
+        if (!a) return;
+        if (up) {
+          anchorRef.current = null;
+          return;
+        }
+        const cur = itemRefs.current.get(a.id);
+        if (cur) a.top = cur.getBoundingClientRect().top;
+      });
+    };
+    const ro = new ResizeObserver(() => restoreAnchor());
+    ro.observe(el);
+    window.addEventListener("scroll", track, { passive: true });
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("scroll", track);
+    };
+  }, [growing, restoreAnchor]);
+
+  // 다 그려졌으면 붙잡기를 놓습니다. 계속 잡고 있으면 아래에서 접힌 것을
+  // 펼칠 때마다 화면이 따라 움직입니다.
+  useEffect(() => {
+    if (!growing || !readyIds.has(growing)) return;
+    restoreAnchor();
+    anchorRef.current = null;
+    setGrowing(null);
+  }, [growing, readyIds, restoreAnchor]);
 
   // 목록 판을 바닥까지 굴리면 다음 쪽. 판이 화면보다 짧아 스크롤이 아예
   // 없을 때도(넓은 화면) 감시선이 바로 보이므로 그때는 그 자리에서 채웁니다.
@@ -391,6 +579,24 @@ export function Lectures() {
   // 서버와 화면에만 반영하고, 순서는 다음에 목록을 열 때 맞춰집니다.
   const readSent = useRef(new Set<string>());
 
+  // 읽음 표시는 여기 한 곳으로 모읍니다 — 재는 방법이 둘(머문 시간, 다음
+  // 편으로 넘어감)이라, 각자 보내면 같은 것을 두 번 보내고 상단바 숫자도
+  // 두 번 깎입니다.
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const markRead = useCallback(
+    (id: string) => {
+      if (readSent.current.has(id)) return;
+      readSent.current.add(id);
+      // **원래 안 본 것이었을 때만** 메뉴 숫자에서 뺍니다. 이미 읽은 것을
+      // 다시 지나가는 일이 흔한데, 그때마다 깎으면 숫자가 0 으로 흘러내립니다.
+      if (!rowsRef.current.find((r) => r.videoId === id)?.isRead) onRead?.();
+      void api.markRead(id).catch(() => readSent.current.delete(id));
+      setReadIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+    },
+    [onRead],
+  );
+
   // 손을 댄 적이 있는지. 열어만 둔 화면은 아무것도 읽지 않은 것입니다.
   const [engaged, setEngaged] = useState(false);
   useEffect(() => {
@@ -413,13 +619,24 @@ export function Lectures() {
     if (!engaged) return;
     if (!currentId || readSent.current.has(currentId)) return;
     const id = currentId;
-    const timer = window.setTimeout(() => {
-      readSent.current.add(id);
-      void api.markRead(id).catch(() => readSent.current.delete(id));
-      setReadIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
-    }, READ_DWELL_MS);
+    const timer = window.setTimeout(() => markRead(id), READ_DWELL_MS);
     return () => window.clearTimeout(timer);
-  }, [currentId, engaged]);
+  }, [currentId, engaged, markRead]);
+
+  // **다음 편으로 넘어갔으면 앞 편은 읽은 것입니다.** 끝까지 내려서 다음으로
+  // 넘어갔다는 것이 머문 시간보다 확실한 신호입니다.
+  //
+  // 위로 올라간 경우는 아닙니다 — 그건 아직 안 읽은 앞 편을 붙인 것이라,
+  // 스택 안에서 **뒤로 간 경우에만** 셉니다.
+  const wasViewing = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const before = wasViewing.current;
+    wasViewing.current = currentId;
+    if (!engaged || !before || !currentId || before === currentId) return;
+    const from = stack.indexOf(before);
+    const to = stack.indexOf(currentId);
+    if (from >= 0 && to > from) markRead(before);
+  }, [currentId, stack, engaged, markRead]);
 
   // ── 새로 온 것 알림 ──────────────────────────────────────
   //
@@ -470,13 +687,39 @@ export function Lectures() {
     el?.scrollIntoView({ block: "nearest" });
   }, [currentId]);
 
-  // 목록에서 다른 강의를 고르면 읽던 위치가 아니라 그 강의의 머리로 보냅니다
-  const scrollToFeed = useCallback(() => {
-    const el = feedRef.current;
-    if (!el) return;
-    const top = el.getBoundingClientRect().top + window.scrollY - 72;
-    if (window.scrollY > top + 8) window.scrollTo({ top, behavior: "smooth" });
-  }, []);
+  /** 그 글의 머리로 데려갑니다. 아직 안 붙은 글이면 false. */
+  const scrollToLecture = useCallback(
+    (id: string) => {
+      const el = itemRefs.current.get(id);
+      if (!el) return false;
+      const top = el.getBoundingClientRect().top + window.scrollY - readingTop();
+      // 부드럽게 움직이지 않습니다. 수천 px 을 흘려 보내면 어디로 가는지
+      // 읽히지도 않을뿐더러, 그 사이에 앞 편이 위에 붙으면 자리 보정과 서로를
+      // 밀어내며 엉뚱한 데서 멈춥니다.
+      window.scrollTo({ top: Math.max(0, top) });
+      return true;
+    },
+    [readingTop],
+  );
+
+  // 아직 안 붙은 글을 골랐을 때. 새로 쌓인 다음에 데려갑니다.
+  const pendingJump = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const id = pendingJump.current;
+    if (!id) return;
+    pendingJump.current = null;
+    scrollToLecture(id);
+  }, [stack, scrollToLecture]);
+
+  // 목록에서 고르면: **이미 붙어 있는 글이면 그 자리로 옮기기만 합니다.**
+  // 예전에는 무조건 다시 쌓아서, 이어 읽으려고 붙여 둔 앞뒤가 통째로 날아가고
+  // 고른 글이 다시 첫 편이 됐습니다.
+  const pickLecture = useCallback(
+    (id: string) => {
+      if (!scrollToLecture(id)) pendingJump.current = id;
+    },
+    [scrollToLecture],
+  );
 
   const toggleKeyword = (id: string) =>
     setSelectedKeywords((prev) =>
@@ -634,7 +877,7 @@ export function Lectures() {
                   .filter(Boolean)
                   .join(" ")}
                 aria-current={l.videoId === currentId ? "true" : undefined}
-                onClick={scrollToFeed}
+                onClick={() => pickLecture(l.videoId)}
                 title={`${l.title}\n${l.channelTitle} · ${duration(l.durationSec)} · 전문성 ${l.expertScore}`}
               >
                 {/* 안 본 것에만 점을 찍습니다. 본 것에 표시를 하면 목록
@@ -660,6 +903,9 @@ export function Lectures() {
 
           {stack.length > 0 ? (
             <div className={s.feed} ref={feedRef}>
+              {/* 위쪽 감시선. 여기가 보이면 앞 편을 붙입니다 — 목록 중간에서
+                  골라 들어와도 올려서 되짚어 볼 수 있어야 합니다. */}
+              <div ref={headRef} className={s.head} aria-hidden="true" />
               {stack.map((id, i) => (
                 <div
                   key={id}
@@ -706,15 +952,21 @@ function Reading({
   videoId: string;
   chaptersOpen: boolean;
   onToggleChapters: () => void;
-  onReady?: (videoId: string) => void;
+  onReady?: (videoId: string, ready: boolean) => void;
   onExcluded?: (videoId: string) => void;
 }) {
   const detail = useAsync(() => api.getLecture(videoId), [videoId]);
 
-  const loaded = Boolean(detail.data);
+  // **오류도 다 그려진 것으로 칩니다.** 안 그러면 한 편이 안 열렸다는 이유로
+  // 이어보기가 위아래 양쪽 다 그 자리에 멈춰 섭니다.
+  const settled = Boolean(detail.data) || Boolean(detail.error);
   useEffect(() => {
-    if (loaded) onReady?.(videoId);
-  }, [loaded, videoId, onReady]);
+    if (!settled) return;
+    onReady?.(videoId, true);
+    // 빠지면 지웁니다 — 남겨 두면 다시 붙었을 때 자리표시자를 두고 "다
+    // 그려졌다"고 재서, 감시선이 화면에 남은 채 앞뒤가 한꺼번에 딸려옵니다.
+    return () => onReady?.(videoId, false);
+  }, [settled, videoId, onReady]);
 
   // 제외는 되돌릴 수 있으므로 확인창 없이 바로 보냅니다 — 제외함에서
   // 되돌릴 수 있다는 것을 안내로 알립니다. 매번 묻는 쪽이 더 성가십니다.

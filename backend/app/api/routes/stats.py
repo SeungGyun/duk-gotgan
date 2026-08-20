@@ -59,6 +59,20 @@ def overview(db: Session = Depends(get_db), user: User = Depends(current_user)):
     new_today = _count(Lecture.published_at >= day_start)
     week_added = _count(Lecture.published_at >= week_start)
     mine, _ul = _filtered(Filters(user.id))
+
+    # 상단바 메뉴에 붙는 숫자입니다. **안 본 것만 셉니다** — 전체를 세면
+    # 아무리 읽어도 숫자가 그대로라 "얼마나 밀렸나"를 읽을 수가 없습니다.
+    # 조건은 조인된 별칭에 걸리므로 `_count` 를 못 씁니다(호출마다 별칭이
+    # 새로 생깁니다).
+    unread_stmt, unread_ul = _filtered(Filters(user.id))
+    unread = int(
+        db.scalar(
+            unread_stmt.where(unread_ul.read_at.is_(None))
+            .with_only_columns(func.count())
+            .order_by(None)
+        )
+        or 0
+    )
     avg_score = db.scalar(
         mine.with_only_columns(func.avg(Lecture.expert_score)).order_by(None)
     )
@@ -109,6 +123,7 @@ def overview(db: Session = Depends(get_db), user: User = Depends(current_user)):
     return {
         "newToday": new_today or 0,
         "totalLectures": published or 0,
+        "unreadLectures": unread,
         "weekAdded": week_added or 0,
         "avgScore": round(float(avg_score)) if avg_score is not None else 0,
         "queued": {

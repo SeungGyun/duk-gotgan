@@ -1122,6 +1122,8 @@ export const mockApi: Api = {
     return {
       newToday: 5,
       totalLectures: 142,
+      // 목에서도 실제로 세야 읽음 표시가 숫자에 반영되는지 눈으로 봅니다
+      unreadLectures: lectures.filter((l) => !l.isRead && !l.isExcluded).length,
       weekAdded: 23,
       avgScore: 81,
       queued: { transcript: 6, review: 3 },

@@ -312,6 +312,7 @@
 {
   "newToday": 5,
   "totalLectures": 142,
+  "unreadLectures": 37,   // 상단바 메뉴에 붙는 숫자 — 안 본 것만
   "weekAdded": 23,
   "avgScore": 81,
   "queued": { "transcript": 6, "review": 3 },
