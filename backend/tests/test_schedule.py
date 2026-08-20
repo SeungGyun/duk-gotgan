@@ -267,3 +267,62 @@ def test_스왑이_없는_것과_꽉_찬_것을_가른다(monkeypatch):
     # 못 재면 막지 않습니다 — 측정이 깨진 날 파이프라인이 서면 안 됩니다.
     monkeypatch.setattr(resources, "_swap_mb", lambda: None)
     assert resources.memory_tight() is False
+
+
+def test_기다리는_사이_기간이_지나면_줄에서_뺀다():
+    """수집할 때는 창 안이었습니다. 그런데 자막·요약 줄이 밀리는 동안
+    날짜가 지나갑니다 — 실측에서 대기 108편 중 **48편**이 그랬습니다
+    (창 1일짜리 키워드가 사흘 된 영상을 붙들고 있었습니다).
+
+    그대로 요약하면 "하루만 지나도 헌 이야기" 라고 사용자가 정해 둔
+    기준을 어기면서 편당 8만 토큰을 씁니다.
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.collector.jobs import drop_stale
+    from app.db.models import Base, Keyword, Video, VideoKeyword
+    from config.settings import settings
+    from config.time import now_kst
+
+    engine = create_engine(settings.database_url.replace("/dukgotgan?", "/dukgotgan_test?"))
+    Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine)()
+    try:
+        now = now_kst()
+        시황 = Keyword(term="주식", status="active", search_window_days=1, last_run_at=now)
+        과학 = Keyword(term="과학", status="active", search_window_days=90, last_run_at=now)
+        db.add_all([시황, 과학])
+        db.flush()
+
+        def 영상(vid, days_old, kws):
+            db.add(Video(id=vid, title=vid, state="TRANSCRIPT_PENDING", duration_sec=600,
+                         published_at=now - timedelta(days=days_old), channel_title="채널"))
+            db.flush()
+            for k in kws:
+                db.add(VideoKeyword(video_id=vid, keyword_id=k.id))
+
+        영상("fresh0001", 0, [시황])      # 창 안
+        영상("stale0001", 3, [시황])      # 창 1일인데 사흘 전 — 빠져야 합니다
+        영상("shared001", 3, [시황, 과학])  # 과학(90일)은 아직 원합니다 — 남아야 합니다
+        db.commit()
+
+        assert drop_stale(db) == 1, "창 지난 것만 빠져야 합니다"
+
+        db.expire_all()
+        assert db.get(Video, "stale0001").state == "SKIPPED"
+        assert "3일 전" in (db.get(Video, "stale0001").state_reason or "")
+        assert db.get(Video, "fresh0001").state == "TRANSCRIPT_PENDING"
+        assert db.get(Video, "shared001").state == "TRANSCRIPT_PENDING", (
+            "한 키워드라도 아직 원하면 남겨야 합니다 — 넓은 창 쪽 사람의 곳간에서 "
+            "지운 적 없는 것이 사라지면 안 됩니다"
+        )
+
+        # 두 번 돌려도 같은 것을 또 빼지 않습니다.
+        assert drop_stale(db) == 0
+    finally:
+        db.close()
+        engine.dispose()

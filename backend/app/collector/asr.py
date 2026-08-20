@@ -21,9 +21,12 @@
 """
 
 import contextlib
+import importlib.util
 import logging
 import math
+import multiprocessing
 import os
+import queue as queuelib
 import shutil
 import subprocess
 import tempfile
@@ -99,19 +102,61 @@ def available() -> str | None:
         return "설정에서 꺼져 있습니다 (ASR_ENABLED=false)."
     if shutil.which("ffmpeg") is None:
         return "ffmpeg 가 없습니다. `brew install ffmpeg` 로 설치해 주세요."
-    try:
-        import mlx_whisper  # noqa: F401
-    except ImportError:
+    # **있는지만 봅니다 — 불러오지는 않습니다.** 실제 받아쓰기는 자식
+    # 프로세스에서 도는데, 여기서 import 해 버리면 워커 프로세스가 쓰지도
+    # 않을 MLX 를 통째로 메모리에 올린 채 살게 됩니다.
+    if importlib.util.find_spec("mlx_whisper") is None:
         return "mlx-whisper 가 없습니다. `uv pip install mlx-whisper` 로 설치해 주세요."
     return None
 
 
-def transcribe(video_id: str, duration_sec: int, language: str = "ko") -> AsrResult:
-    """소리를 받아 받아씁니다.
+# ── 지켜보며 돌리기 ──────────────────────────────────────────
+#
+# **받아쓰기는 별도 프로세스에서 돕니다.** 2026-08-14, 87분짜리 한 편의
+# 두 번째 조각에서 `mlx_whisper.transcribe()` 가 돌아오지 않았습니다. 멎은
+# 것이 아니라 **헛돈** 것입니다 — 36시간 뒤에 스택을 떠 보니 그때도 GPU 에서
+# 같은 조각을 갈고 있었습니다(위스퍼 디코더가 같은 토큰을 되풀이하며 앞으로
+# 못 나가는, 알려진 실패입니다).
+#
+# 그동안 자막 잡은 한 바퀴도 못 돌았고, 대기가 76건 쌓였고, 로그에는 한 줄도
+# 안 남았습니다. `asr_budget_sec`(사이클당 20분)은 **영상과 영상 사이**에서만
+# 재기 때문에 한 편 안에서 늘어지는 것을 막지 못합니다.
+#
+# 스레드로는 못 끊습니다. 파이썬은 C++ 안에서 도는 스레드를 깨울 수단이
+# 없습니다 — 프로세스여야 죽일 수 있습니다. 덤으로 위스퍼 1.6GB 가 그
+# 프로세스와 함께 사라져서, 놀 때 모델을 내려놓던 장치가 통째로 필요 없어
+# 졌습니다.
 
-    **오디오는 반드시 지웁니다.** 36분짜리 한 편이 18MB 이고 대기가 세 자리
-    단위라, 남겨 두면 디스크가 먼저 찹니다. 받아쓰기가 실패해도 지웁니다 —
-    그래서 `finally` 입니다.
+# 자식이 살아 있는지 이 간격으로 들여다봅니다.
+_POLL_SEC = 5.0
+
+_ERRORS = {c.__name__: c for c in (AsrUnavailable, AudioUnavailable, AudioTemporary)}
+
+
+def _noop() -> None:
+    pass
+
+
+def _stall_sec(duration_sec: int) -> int:
+    """이만큼 아무 소식이 없으면 고장으로 봅니다.
+
+    가장 긴 침묵 구간은 **조각 하나**입니다(짧은 영상이면 영상 전체). 실측이
+    5~18배속이므로 **1배속**을 바닥으로 잡습니다 — 그보다 느리면 잘 돌고 있는
+    것이 아니라 헛돌고 있는 것입니다. 여기에 모델을 올리고 조각을 잘라 내는
+    준비 시간을 더합니다.
+
+    영상 길이가 아니라 조각 길이로 재는 것이 요점입니다. 세 시간짜리라고
+    세 시간을 기다려 주면, 고장 한 번에 자막 줄이 세 시간 멈춥니다.
+    """
+    piece = min(settings.asr_chunk_sec, max(duration_sec, 60))
+    return int(piece + settings.asr_stall_grace_sec)
+
+
+def transcribe(video_id: str, duration_sec: int, language: str = "ko") -> AsrResult:
+    """받아쓰기 — **자식 프로세스에 맡기고 지켜봅니다.**
+
+    값싼 확인은 여기서 먼저 합니다. 프로세스를 띄우는 데 1~2초가 드는데,
+    어차피 안 될 것에 그 값을 치를 이유가 없습니다.
     """
     why = available()
     if why:
@@ -125,10 +170,132 @@ def transcribe(video_id: str, duration_sec: int, language: str = "ko") -> AsrRes
             f"받아쓰기 상한 {settings.asr_max_duration_sec // 60}분."
         )
 
+    # **작업 폴더는 부모가 만듭니다.** 자식을 죽이면 그쪽 `finally` 는 돌지
+    # 않습니다 — 실제로 예전에 끊긴 자리마다 임시 폴더가 남아 있었습니다.
     workdir = tempfile.mkdtemp(prefix=f"gotgan-asr-{video_id}-")
+    ctx = multiprocessing.get_context("spawn")
+    box = ctx.Queue()
+    child = ctx.Process(
+        target=_child, args=(box, video_id, duration_sec, language, workdir), daemon=True
+    )
+    child.start()
+    try:
+        return _await(box, child, video_id, _stall_sec(duration_sec))
+    finally:
+        _stop(child)
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+def _await(box, child, video_id: str, stall: int) -> AsrResult:
+    """자식의 소식을 기다립니다. 조용하면 끊고, 죽었으면 그렇다고 말합니다."""
+    quiet_since = time.monotonic()
+    while True:
+        try:
+            kind, payload = box.get(timeout=_POLL_SEC)
+        except queuelib.Empty:
+            if not child.is_alive():
+                # 죽으면서 남긴 말이 아직 파이프에 있을 수 있습니다 —
+                # 한 번 더 들여다보고 나서 죽었다고 적습니다.
+                try:
+                    kind, payload = box.get(timeout=2.0)
+                except queuelib.Empty:
+                    raise AudioTemporary(
+                        f"받아쓰기 프로세스가 예고 없이 끝났습니다 (코드 {child.exitcode})"
+                    ) from None
+            elif time.monotonic() - quiet_since > stall:
+                spell = f"{stall // 60}분" if stall >= 60 else f"{stall}초"
+                logger.warning("[asr] %s — %s째 한 발짝도 못 나가 끊습니다", video_id, spell)
+                raise AudioTemporary(
+                    f"받아쓰기가 {spell}째 진전이 없어 끊었습니다 — 다음에 다시 봅니다."
+                )
+            else:
+                continue
+        if kind == "beat":
+            quiet_since = time.monotonic()
+            continue
+        if kind == "ok":
+            return AsrResult(**payload)
+        name, msg = payload
+        # 모르는 예외는 **일시적인 것으로 봅니다.** 예전에는 그대로 위로
+        # 올라가 사이클을 죽였습니다 — 한 편의 사고가 나머지를 데려가면 안
+        # 됩니다. 줄 뒤로 미뤄 두면 다섯 번 만에 탈락으로 정리됩니다.
+        raise _ERRORS.get(name, AudioTemporary)(msg)
+
+
+def _stop(child) -> None:
+    """끝났으면 거두고, 아직 돌고 있으면 끊습니다.
+
+    TERM 을 먼저 보냅니다 — 자식이 임시 파일을 정리할 틈은 줍니다. GPU 커널
+    한복판이면 그것도 안 먹으므로, 잠깐 기다렸다가 KILL 로 확실히 끊습니다.
+    """
+    if child.is_alive():
+        child.terminate()
+        child.join(timeout=10)
+    if child.is_alive():
+        child.kill()
+        child.join(timeout=10)
+    with contextlib.suppress(Exception):
+        child.close()
+
+
+def _child(box, video_id: str, duration_sec: int, language: str, workdir: str) -> None:
+    """실제로 받아쓰는 쪽. **다른 프로세스입니다.**
+
+    로그 설정을 여기서 다시 합니다 — spawn 으로 뜬 프로세스는 워커의
+    `main()` 을 거치지 않아 `basicConfig` 가 돌지 않습니다. 표준 출력은
+    물려받으므로 줄은 같은 로그 파일에 쌓입니다.
+    """
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    try:
+        r = _transcribe(
+            video_id, duration_sec, language, workdir, beat=lambda: box.put(("beat", None))
+        )
+    except Exception as e:  # noqa: BLE001 — 무엇이 나든 부모에게 넘겨야 합니다
+        # 예외 객체를 그대로 보내지 않습니다. 절일 수 없는 예외가 하나라도
+        # 섞이면 그 순간 자식이 조용히 죽어, 진짜 사유 대신 "예고 없이
+        # 끝났습니다"만 남습니다.
+        box.put(("err", (type(e).__name__, " ".join(str(e).split())[:300])))
+    else:
+        box.put(
+            (
+                "ok",
+                {
+                    "language": r.language,
+                    "segments": r.segments,
+                    "elapsed_sec": r.elapsed_sec,
+                    "audio_sec": r.audio_sec,
+                },
+            )
+        )
+
+
+def _transcribe(
+    video_id: str,
+    duration_sec: int,
+    language: str = "ko",
+    workdir: str | None = None,
+    beat=_noop,
+) -> AsrResult:
+    """소리를 받아 받아씁니다.
+
+    **오디오는 반드시 지웁니다.** 36분짜리 한 편이 18MB 이고 대기가 세 자리
+    단위라, 남겨 두면 디스크가 먼저 찹니다. 받아쓰기가 실패해도 지웁니다 —
+    그래서 `finally` 입니다.
+    """
+    why = available()
+    if why:
+        raise AsrUnavailable(why)
+    if duration_sec > settings.asr_max_duration_sec:
+        raise AudioUnavailable(
+            f"영상이 너무 깁니다 ({duration_sec // 60}분) — "
+            f"받아쓰기 상한 {settings.asr_max_duration_sec // 60}분."
+        )
+
+    workdir = workdir or tempfile.mkdtemp(prefix=f"gotgan-asr-{video_id}-")
     try:
         path = _download_audio(video_id, workdir)
-        return _transcribe_file(path, language, duration_sec, workdir)
+        beat()
+        return _transcribe_file(path, language, duration_sec, workdir, beat)
     finally:
         # 통째로 지웁니다. 파일 하나만 지우면 yt-dlp 가 남긴 조각(.part,
         # 원본 컨테이너)이 그대로 남습니다.
@@ -140,6 +307,8 @@ def _download_audio(video_id: str, workdir: str) -> str:
     다시 읽어서, mp3 로 옮기는 건 순수한 낭비입니다."""
     import yt_dlp
 
+    from app.collector import cookies
+
     t0 = time.time()
     opts = {
         "quiet": True,
@@ -150,6 +319,10 @@ def _download_audio(video_id: str, workdir: str) -> str:
         "format": "bestaudio",
         "outtmpl": f"{workdir}/%(id)s.%(ext)s",
         "socket_timeout": 30,
+        # 로그인 쿠키가 있으면 얹습니다. **여기가 가장 아쉬운 자리입니다** —
+        # 오디오는 1MB 쯤에서 403 이 나는데, 그게 로그인 없는 요청에 걸리는
+        # 상한입니다 (collector/cookies.py).
+        **cookies.ytdlp_opts(),
     }
 
     try:
@@ -171,32 +344,13 @@ def _download_audio(video_id: str, workdir: str) -> str:
     return path
 
 
-def release_model() -> None:
-    """모델과 버퍼를 메모리에서 내립니다.
-
-    **한 번 부르고 나면 계속 남아 있습니다** (실측):
-
-      3분 오디오 처리 후   MLX 활성 1,618MB · 캐시 778MB · 최대 2,152MB
-
-    캐시 778MB 는 다음 파일에서 어차피 다시 잡으므로 매번 비웁니다 —
-    공짜입니다. 모델 1,618MB 는 다시 올리는 데 몇 초 걸리므로, 할 일이
-    없을 때만 내립니다.
-
-    16GB 기계에서 요약 프로세스(368MB)가 뜰 자리를 못 찾아 60건이 죽은
-    적이 있습니다. 놀면서 1.6GB 를 쥐고 있을 이유가 없습니다.
-    """
-    try:
-        import mlx.core as mx
-        from mlx_whisper.transcribe import ModelHolder
-
-        if ModelHolder.model is None:
-            return  # 이미 내려가 있습니다 — 30초마다 같은 줄을 찍지 않습니다
-        ModelHolder.model = None
-        ModelHolder.model_path = None
-        mx.clear_cache()
-        logger.info("[asr] 모델을 내렸습니다 — 다음 작업에서 다시 올립니다")
-    except Exception as e:  # noqa: BLE001
-        logger.warning("[asr] 모델 해제 실패 (%s) — 그냥 둡니다", type(e).__name__)
+# **모델을 내려놓는 장치는 없앴습니다.**
+#
+# 예전에는 워커 프로세스가 위스퍼 1.6GB 를 쥐고 살아서, 놀 때나 메모리가
+# 빡빡할 때 손으로 내려놓아야 했습니다(16GB 기계에서 요약 프로세스가 뜰
+# 자리를 못 찾아 60건이 죽은 적이 있습니다). 이제 모델은 자식 프로세스
+# 안에서만 살고 한 편이 끝나면 프로세스와 함께 사라집니다 — 내려놓을 것이
+# 애초에 남지 않습니다.
 
 
 def _whisper_language(language: str) -> str | None:
@@ -221,7 +375,9 @@ def _whisper_language(language: str) -> str | None:
     return None
 
 
-def _transcribe_file(path: str, language: str, duration_sec: int, workdir: str) -> AsrResult:
+def _transcribe_file(
+    path: str, language: str, duration_sec: int, workdir: str, beat=_noop
+) -> AsrResult:
     """짧으면 통째로, 길면 **나눠서** 받아씁니다.
 
     상한을 90분에 묶어 둔 것은 시간이 아니라 **메모리** 때문이었습니다.
@@ -248,6 +404,10 @@ def _transcribe_file(path: str, language: str, duration_sec: int, workdir: str) 
     elapsed = 0.0
     detected = ""
     for i in range(n):
+        # **조각마다 살아 있다고 알립니다.** 부모는 이 신호로만 진전을
+        # 압니다 — 한 조각이 헛돌기 시작하면 여기서 소식이 끊기고, 그것이
+        # 끊어 낼 근거가 됩니다.
+        beat()
         offset = i * chunk
         piece = os.path.join(workdir, f"chunk-{i:03d}.wav")
         _cut(path, piece, offset, chunk)

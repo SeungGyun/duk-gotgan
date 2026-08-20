@@ -9,6 +9,7 @@
      3분입니다. 순서가 뒤집히면 조용히 스무 배 비싸집니다.
 """
 
+
 import tempfile
 from pathlib import Path
 
@@ -55,7 +56,7 @@ def test_받아쓰기가_끝나면_오디오를_지운다(monkeypatch):
         lambda p, lang: asr.AsrResult("ko", [{"start": 0.0, "dur": 1.0, "text": "안녕"}], 1.0, 1.0),
     )
 
-    asr.transcribe("vid123", 600)
+    asr._transcribe("vid123", 600)
     assert not Path(seen["path"]).exists()
 
 
@@ -72,7 +73,7 @@ def test_받아쓰기가_실패해도_오디오를_지운다(monkeypatch):
     monkeypatch.setattr(asr, "_run_whisper", lambda p, lang: (_ for _ in ()).throw(RuntimeError("펑")))
 
     with pytest.raises(RuntimeError):
-        asr.transcribe("vid123", 600)
+        asr._transcribe("vid123", 600)
     assert not Path(seen["path"]).exists()
 
 
@@ -156,18 +157,107 @@ def test_너무_긴_영상은_차단이_아니라_그_영상만의_문제다(mon
         transcript.fetch_via_asr(V())
 
 
-def test_모델_해제는_한_번만_로그를_남긴다(monkeypatch, caplog):
-    """자막 잡이 30초마다 도는데 놀 때마다 같은 줄을 찍으면 로그가 덮입니다."""
-    import logging
+# ── 헛도는 한 편이 줄 전체를 세우지 못하게 ──────────────────
+#
+# 2026-08-14, 87분짜리 한 편의 두 번째 조각에서 위스퍼가 돌아오지 않았습니다.
+# 멎은 것이 아니라 헛돈 것이라(디코더가 같은 토큰을 되풀이하며 못 나감),
+# 36시간 뒤에도 GPU 는 같은 조각을 갈고 있었습니다. 그동안 자막 잡은 한
+# 바퀴도 못 돌았고 대기가 76건 쌓였습니다.
 
-    from mlx_whisper.transcribe import ModelHolder
+
+class _FakeChild:
+    """살아는 있는데 아무 말이 없는 자식."""
+
+    def __init__(self):
+        self.stopped = False
+        self.exitcode: int | None = None
+
+    def is_alive(self):
+        return not self.stopped
+
+    def terminate(self):
+        self.stopped = True
+
+    def kill(self):
+        self.stopped = True
+
+    def join(self, timeout=None):
+        pass
+
+    def close(self):
+        pass
+
+
+def test_소식이_끊기면_끊어_낸다(monkeypatch):
+    """스레드로는 못 끊습니다 — C++ 안에서 도는 것을 파이썬이 깨울 수단이
+    없습니다. 프로세스여야 죽일 수 있습니다."""
+    import queue as queuelib
+
+    child = _FakeChild()
+    empty = type("Box", (), {"get": staticmethod(lambda timeout=None: (_ for _ in ()).throw(queuelib.Empty()))})()
+    monkeypatch.setattr(asr, "_POLL_SEC", 0.01)
+
+    with pytest.raises(asr.AudioTemporary, match="진전이 없어"):
+        asr._await(empty, child, "vid123", stall=0)
+
+
+def test_기다리는_시간은_영상이_아니라_조각_길이로_잰다():
+    """세 시간짜리라고 세 시간을 기다려 주면, 고장 한 번에 자막 줄이 세
+    시간 멈춥니다."""
+    from config.settings import settings as s
+
+    긴것 = asr._stall_sec(3 * 3600)
+    assert 긴것 == s.asr_chunk_sec + s.asr_stall_grace_sec
+    # 짧은 영상은 그만큼만 기다립니다 — 5분짜리에 23분을 줄 이유가 없습니다.
+    assert asr._stall_sec(5 * 60) < 긴것
+
+
+def test_조각마다_살아_있다고_알린다(monkeypatch):
+    """부모는 이 신호로만 진전을 압니다. 없으면 긴 영상과 헛도는 영상을
+    구분할 방법이 없습니다."""
+    _fake_chunks(monkeypatch, [_res("첫"), _res("둘"), _res("셋")])
+    monkeypatch.setattr(asr.settings, "asr_chunk_sec", 600)
+
+    beats = []
+    asr._transcribe_file("a.webm", "ko", 1800, "/tmp", beat=lambda: beats.append(1))
+    assert len(beats) == 3
+
+
+def test_자식이_말없이_죽으면_그렇다고_적는다(monkeypatch):
+    """"진전이 없어 끊었습니다" 로 뭉뚱그리면, 메모리 부족으로 죽은 것과
+    헛돌아 끊은 것이 로그에서 구분되지 않습니다."""
+    import queue as queuelib
+
+    child = _FakeChild()
+    child.stopped = True
+    child.exitcode = -9
+    empty = type("Box", (), {"get": staticmethod(lambda timeout=None: (_ for _ in ()).throw(queuelib.Empty()))})()
+    monkeypatch.setattr(asr, "_POLL_SEC", 0.01)
+
+    with pytest.raises(asr.AudioTemporary, match="예고 없이 끝났습니다"):
+        asr._await(empty, child, "vid123", stall=999)
+
+
+def test_끊긴_한_편은_줄_뒤로_갈_뿐_탈락이_아니다(monkeypatch):
+    """탈락으로 적으면 다시는 안 봅니다. 기계가 바빠서 늦은 것일 수도
+    있는데, 한 번 느렸다고 영영 버릴 이유가 없습니다."""
+    monkeypatch.setattr(asr, "transcribe", lambda *a, **k: (_ for _ in ()).throw(
+        asr.AudioTemporary("받아쓰기가 23분째 진전이 없어 끊었습니다")))
+    with pytest.raises(transcript.TranscriptRetry, match="진전이 없어"):
+        transcript.fetch_via_asr(FakeVideo())
+
+
+def test_모델은_워커_프로세스에_남지_않는다():
+    """놀면서 1.6GB 를 쥐고 있으면 요약 프로세스가 뜰 자리가 없어집니다 —
+    실제로 그래서 60건이 죽었습니다. 손으로 내려놓는 대신, 모델이 자식
+    프로세스와 함께 사라지게 했습니다."""
+    import inspect
 
     from app.collector import asr as A
 
-    ModelHolder.model = None
-    with caplog.at_level(logging.INFO):
-        A.release_model()
-    assert "모델을 내렸습니다" not in caplog.text
+    assert not hasattr(A, "release_model")
+    # 있는지만 봅니다 — 불러오면 워커가 쓰지도 않을 MLX 를 들고 살게 됩니다.
+    assert "find_spec" in inspect.getsource(A.available)
 
 
 def test_받아쓰기_뒤에는_버퍼_캐시를_비운다():
@@ -181,17 +271,25 @@ def test_받아쓰기_뒤에는_버퍼_캐시를_비운다():
     assert "mx.clear_cache()" in inspect.getsource(A._run_whisper)
 
 
-def test_메모리가_빡빡하면_묶음_끝에_모델을_내린다():
-    """발견분 보충을 넣으면서 자막 잡이 쉬지 않고 돌게 됐습니다. 그러면
-    위스퍼 1.6GB 를 계속 쥐고 있어 요약 잡이 뜰 자리를 영영 못 찾습니다 —
-    메모리 가드가 매번 미루기만 하니까요."""
-    import inspect
+def test_붙들린_잡을_감시자가_알아챈다():
+    """자막 잡이 36시간을 헛돌았는데 로그에 한 줄도 안 남았습니다. 다른
+    잡은 멀쩡히 돌아서 "워커가 죽었나" 로도 안 보였습니다."""
+    import time
 
-    from app.collector import jobs
+    from scripts import worker
 
-    src = inspect.getsource(jobs.transcript_job)
-    assert "resources.memory_tight()" in src
-    assert "asr.release_model()" in src
+    worker._ticked.clear()
+    worker._warned.clear()
+    worker._ticked["transcript"] = time.monotonic() - 2 * 3600  # 두 시간째 소식 없음
+    worker._ticked["discover"] = time.monotonic()  # 멀쩡히 도는 중
+
+    이름들 = ["transcript", "discover"]
+    # 셋째 칸은 붙들린 자리에서 하던 일입니다. 여기서는 한 걸음도 못
+    # 뗀 채로 멈춘 경우라 비어 있습니다 (collector/beat.py).
+    assert worker.stalled(이름들) == [("transcript", 120, "")]
+    # **같은 경고로 로그를 덮지 않습니다.** 한 번 붙들리면 풀릴 때까지
+    # 조용할 텐데, 1분마다 같은 줄을 찍으면 그게 로그를 먹습니다.
+    assert worker.stalled(이름들) == []
 
 
 # ── 나눠서 받아쓰기 ──────────────────────────────────────────

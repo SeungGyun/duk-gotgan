@@ -20,7 +20,7 @@ from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.collector import queue
+from app.collector import beat, queue
 from app.db.models import Keyword, PipelineEvent, Transcript, Video, VideoKeyword
 from app.llm import agy, pace, usage, workspace
 from app.llm.guard import make_path_guard, make_pretool_hook
@@ -450,6 +450,10 @@ async def review_pending(
         # 있습니다. 방금 세운 상태를 코드가 그대로 읽어야 합니다.
         db.refresh(video)
         taken += 1
+        # 워치독에게 "여기까지 왔다"고 알립니다. 한 호출이 스무 편까지
+        # 붙잡고 도는데 돌아올 때만 세면, 멀쩡히 담는 중에 붙들렸다는
+        # 경보가 납니다 (collector/beat.py).
+        beat.beat("review", video.title)
 
         run = await review_video(db, video, run_id, owner=owner)
         runs.append(run)

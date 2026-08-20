@@ -27,17 +27,18 @@ from dataclasses import dataclass, field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.collector import asr
+from app.collector import cadence
 from app.collector import cleanup
 from app.collector import discover as D
 from app.collector import resources
 from app.collector import quota
 from app.collector import queue
 from app.blog import publish
+from app.collector.rules import window_start
 from app.collector.schedule import due_keywords
 from app.collector.transcript import blocked_until, transcribe_pending
 from app.collector.youtube import YouTubeError
-from app.db.models import CrawlRun, Evaluation, Keyword, PipelineEvent, Video
+from app.db.models import CrawlRun, Evaluation, Keyword, PipelineEvent, Video, VideoKeyword
 from app.llm import pace, usage
 from app.llm.runner import recover_zombies, review_pending
 from config.settings import settings
@@ -57,20 +58,6 @@ CLEANUP_LOCK = "dukgotgan:cleanup"
 # 워커가 둘 떠 있어도 발행은 한 번에 하나만 돌아야 합니다.
 PUBLISH_LOCK = "dukgotgan:publish"
 
-# 한 번에 받아쓸 편수. 시간 예산 대신 편수로 끊습니다 — 이제 검토가 뒤에서
-# 기다리지 않으므로 "20분 안에 끝내라"는 제약이 필요 없고, 편수로 끊어야
-# 중간에 냉각·제외 같은 상태 변화를 다시 봅니다.
-TRANSCRIBE_BATCH = 5
-
-# 검토를 몰아서 부르는 기준.
-#
-# 프롬프트에 18,700 토큰짜리 고정 오버헤드가 있고 캐시 수명이 1시간입니다.
-# 연달아 부르면 그 부분이 18.6배 싸집니다. 그래서 몇 건 모아서 한 번에
-# 처리하고, 안 모이면 캐시가 만료되기 전에 그냥 돌립니다.
-REVIEW_BATCH = 5
-REVIEW_MAX_WAIT_MIN = 60
-# 한 번에 붙잡고 있을 상한. 너무 크면 종료 신호에 늦게 반응합니다.
-REVIEW_LIMIT = 20
 
 
 @dataclass
@@ -163,6 +150,76 @@ def backfill(db: Session) -> int:
     return len(ids)
 
 
+def drop_stale(db: Session) -> int:
+    """줄에서 기다리다 **창을 벗어난 것**을 뺍니다.
+
+    수집할 때는 창 안이었습니다. 그런데 자막·요약 줄이 밀리는 동안 날짜가
+    지나갑니다 — `경제`·`주식` 처럼 창이 하루인 키워드가 사흘 된 영상을
+    붙들고 있는 식입니다. 실측에서 대기 108편 중 **48편이 그랬습니다.**
+
+    그걸 그대로 요약하면 "하루만 지나도 헌 이야기" 라고 **사용자가 정해 둔
+    기준을 어기면서** 편당 8만 토큰을 씁니다. 창은 화면에서 키워드마다
+    정하는 값이라, 그 뜻을 여기서도 지켜야 합니다.
+
+    **기준은 발견 단계와 같은 함수(`window_start`)입니다.** 따로 계산하면
+    한쪽이 데려오고 다른 쪽이 버리는 일이 생깁니다 — 그 함수는 "못 돈
+    날은 그만큼 더 거슬러 본다" 까지 알고 있어서, 수집이 멎었던 기간의
+    영상을 애먼 이유로 버리지 않습니다.
+
+    **한 키워드라도 아직 원하면 남깁니다.** 영상 하나에 키워드가 여럿
+    붙는데(`과학,사이언스`), 창이 좁은 쪽 기준으로 버리면 넓은 쪽 사람의
+    곳간에서 지운 적 없는 것이 사라집니다.
+
+    지우지 않고 `SKIPPED` 로 세웁니다. 발견 단계가 이 상태를 보고 다시
+    데려오지 않고(discover.py), 대기 목록 화면에서 되돌릴 수도 있습니다.
+    """
+    rows = db.execute(
+        select(Video, Keyword)
+        .join(VideoKeyword, VideoKeyword.video_id == Video.id)
+        .join(Keyword, Keyword.id == VideoKeyword.keyword_id)
+        .where(Video.state.in_(("DISCOVERED", "TRANSCRIPT_PENDING")))
+    ).all()
+
+    wanted: dict[str, bool] = {}
+    videos: dict[str, Video] = {}
+    now = now_kst()
+    for video, kw in rows:
+        videos[video.id] = video
+        if video.published_at is None:
+            # 올린 날짜를 모르면 판단할 근거가 없습니다 — 남깁니다.
+            wanted[video.id] = True
+            continue
+        wanted[video.id] = wanted.get(video.id, False) or (
+            video.published_at >= window_start(kw, now)
+        )
+
+    dropped = 0
+    for vid, keep in wanted.items():
+        if keep:
+            continue
+        v = videos[vid]
+        # **반올림합니다.** `.days` 로 자르면 사흘에서 몇 마이크로초 모자란
+        # 값이 "2일 전" 이 됩니다 — DB 시각이 초 단위라 흔히 이렇게 됩니다.
+        age = max(1, round((now - v.published_at).total_seconds() / 86400))
+        v.state = "SKIPPED"
+        v.state_reason = f"기다리는 사이 기간이 지났습니다 · {age}일 전 영상"
+        db.add(
+            PipelineEvent(
+                video_id=v.id,
+                from_state="TRANSCRIPT_PENDING",
+                to_state="SKIPPED",
+                stage="discover",
+                ok=True,
+                detail={"reason": v.state_reason},
+            )
+        )
+        dropped += 1
+    if dropped:
+        db.commit()
+        logger.info("[transcript] 기간이 지난 %d편을 줄에서 뺐습니다", dropped)
+    return dropped
+
+
 def discover_job(db: Session, keyword_ids: list[str] | None = None, trigger: str = "scheduled"):
     """차례가 된 키워드를 검색합니다. 초 단위로 끝나는 가벼운 일입니다."""
     r = JobResult(job="discover")
@@ -210,19 +267,22 @@ def transcript_job(db: Session) -> JobResult:
     """대기가 있으면 받아씁니다. 검색·검토를 기다리지 않습니다."""
     r = JobResult(job="transcript")
 
+    # **세우기 전에 기간부터 봅니다.** 줄에서 기다리는 동안 창을 벗어난
+    # 것을 그대로 요약하면, 키워드마다 정해 둔 "며칠까지 볼 것인가" 를
+    # 어기면서 편당 8만 토큰을 씁니다.
+    stale = drop_stale(db)
+    if stale:
+        r.stats["skipped"] = stale
+
     cooling = blocked_until(db)
     waiting = db.scalar(
         select(func.count()).select_from(Video).where(Video.state == "TRANSCRIPT_PENDING")
     )
     if not waiting:
-        # 할 일이 없으면 모델을 내립니다. 놀면서 1.6GB 를 쥐고 있으면
-        # 요약 프로세스가 뜰 자리가 없어집니다 — 실제로 그래서 60건이
-        # 죽었습니다. 다시 올리는 데 몇 초면 됩니다.
-        asr.release_model()
         return r
 
     run = _start(db, "transcript", "scheduled", f"자막 — 대기 {waiting}건")
-    t = transcribe_pending(db, limit=TRANSCRIBE_BATCH, run_id=run.id)
+    t = transcribe_pending(db, limit=cadence.TRANSCRIBE_BATCH, run_id=run.id)
     r.did_work = bool(t["ok"] or t["failed"])
 
     # **아무것도 못 했으면 기록을 남기지 않습니다.**
@@ -243,16 +303,12 @@ def transcript_job(db: Session) -> JobResult:
     if cooling:
         r.label += " (자막 경로 냉각 중 — 받아쓰기)"
 
-    # **메모리가 빡빡하면 한 묶음 끝나고 모델을 내려놓습니다.**
+    # **모델을 내려놓는 손질은 이제 없습니다.**
     #
-    # 원래는 자막 줄이 비었을 때만 내려놨습니다. 그런데 발견분 보충을
-    # 넣으면서 줄이 늘 차 있게 되어, 이 잡이 쉬지 않고 돌며 위스퍼
-    # 1.6GB 를 계속 쥐게 됐습니다. 그러면 요약 잡이 뜰 자리를 영영 못
-    # 찾습니다 — 메모리 가드가 매번 미루기만 하니까요.
-    #
-    # 다시 올리는 데 몇 초 걸리지만, 요약이 굶는 것보다 낫습니다.
-    if resources.memory_tight():
-        asr.release_model()
+    # 예전에는 이 잡이 위스퍼 1.6GB 를 쥔 채로 살아서, 놀 때나 메모리가
+    # 빡빡할 때 손으로 내려놔야 했습니다 — 안 그러면 요약 잡이 뜰 자리를
+    # 영영 못 찾았습니다. 받아쓰기를 자식 프로세스로 옮기면서 모델이 한 편
+    # 끝날 때마다 프로세스와 함께 사라집니다 (collector/asr.py).
 
     _finish(db, run, r)
     return r
@@ -288,7 +344,7 @@ def review_due(db: Session) -> tuple[bool, int, str]:
         return False, waiting, "상한을 넘어 멈춤"
     pace.clear_capped(db, settings.review_provider)
 
-    if waiting >= REVIEW_BATCH:
+    if waiting >= cadence.REVIEW_BATCH:
         return True, waiting, f"{waiting}건 모임"
 
     # 몇 건 안 되면 기다립니다 — 다만 캐시가 만료될 때까지만. 한 편이
@@ -297,7 +353,7 @@ def review_due(db: Session) -> tuple[bool, int, str]:
     if last is None:
         return True, waiting, "처음"
     idle_min = (now_kst() - last).total_seconds() / 60
-    if idle_min >= REVIEW_MAX_WAIT_MIN:
+    if idle_min >= cadence.REVIEW_MAX_WAIT_MIN:
         return True, waiting, f"{int(idle_min)}분째 조용함"
     return False, waiting, ""
 
@@ -319,7 +375,7 @@ async def review_job(db: Session) -> JobResult:
         return r
 
     run = _start(db, "review", "scheduled", f"요약 — 대기 {waiting}건 ({why})")
-    runs = await review_pending(db, limit=min(waiting, REVIEW_LIMIT), run_id=run.id)
+    runs = await review_pending(db, limit=min(waiting, cadence.REVIEW_LIMIT), run_id=run.id)
     done = [x for x in runs if x.ok]
     r.did_work = bool(runs)
     r.stats.update({"reviewed": len(done), "published": len([x for x in done if x.published])})

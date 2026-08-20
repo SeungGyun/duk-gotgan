@@ -23,3 +23,6 @@ __pycache__/
 
 # 워커 로그
 backend/worker.log
+
+# 유튜브 로그인 쿠키 — 계정 세션입니다. 절대 커밋하지 않습니다.
+backend/secrets/

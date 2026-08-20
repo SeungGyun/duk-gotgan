@@ -28,6 +28,17 @@ class Settings(BaseSettings):
     # 유튜브 Data API v3 키 (Google Cloud Console 에서 발급, 무료)
     youtube_api_key: str = ""
 
+    # ── 유튜브 로그인 쿠키 ──────────────────────────────────
+    # 비워 두면 지금까지처럼 **쿠키 없이** 돕니다. 붙이면 자막·오디오
+    # 요청이 로그인 세션으로 나가서, IP 단위로 걸리는 상한(429·403)이
+    # 계정 기준으로 올라갑니다 (collector/cookies.py 에 자세히).
+    #
+    # 둘 중 하나만 쓰면 됩니다. 파일 쪽이 확실합니다 — 브라우저를 켜 둘
+    # 필요도, 키체인을 열 필요도 없습니다.
+    youtube_cookies_file: str = ""
+    # "chrome" · "safari" · "chrome:Profile 1"
+    youtube_cookies_browser: str = ""
+
     # ── 사람 ────────────────────────────────────────────────
     # 1인당 활성 키워드 상한. **주인은 예외입니다** — 상한을 넣었다고 이미
     # 쓰고 있는 것을 지우라고 할 수는 없습니다 (routes/keywords.py).
@@ -123,6 +134,10 @@ class Settings(BaseSettings):
     # (collector/asr.py `_transcribe_file`). 그래서 세 시간짜리도 20분짜리와
     # 같은 메모리를 씁니다.
     asr_chunk_sec: int = 20 * 60
+    # 조각 하나가 조용해도 되는 시간에 얹는 여유. 모델을 올리고(몇 초)
+    # 오디오를 잘라 내는(몇 초) 준비 시간입니다 — 조각 길이 자체는
+    # `asr_chunk_sec` 이 정합니다 (collector/asr.py `_stall_sec`).
+    asr_stall_grace_sec: int = 3 * 60
     # 안전장치. 예전에는 이 값이 **메모리** 상한이기도 해서 90분에 묶여
     # 있었고, 95~142분짜리 33편이 여기 걸려 탈락했습니다 — 길수록 값어치
     # 있는 강의인데 그게 통째로 빠졌습니다. 나눠서 받아쓰게 된 지금은

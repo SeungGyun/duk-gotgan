@@ -32,7 +32,7 @@ from youtube_transcript_api._errors import (
     VideoUnavailable,
 )
 
-from app.collector import queue
+from app.collector import beat, cookies, queue
 from app.db import state
 from app.db.models import AppState, PipelineEvent, Transcript, Video
 from config.settings import settings
@@ -71,14 +71,54 @@ MIN_SUMMARY_CHARS = 200
 # 없으면 안 되는 영상 하나가 큐를 맴돌며 뒤의 멀쩡한 것들을 밀어냅니다.
 MAX_TRANSCRIPT_RETRY = 5
 
+# 일시적 실패가 몇 번 연달아 나면 그 사이클을 접는가.
+#
+# **"다섯 번"이 다섯 번의 기회가 되려면 시간이 벌어져 있어야 합니다.**
+# 유튜브가 오디오에 403 을 주기 시작하면 다음 영상도 똑같이 403 인데,
+# 예전에는 줄에 있는 20편을 끝까지 두드렸습니다. 그러면 한 사이클이
+# 3분이라 **다섯 번이 15분 만에 소진되고**, 몇 시간짜리 일시 차단이
+# 영구 탈락으로 적힙니다 — 실제로 이틀 동안 129편이 그렇게 죽었습니다
+# (전부 "HTTP Error 403", 그 뒤 같은 URL 이 멀쩡히 받아졌습니다).
+#
+# 셋에서 접고 냉각에 들어가면, 다섯 번은 최소 몇 시간에 걸쳐 쓰입니다.
+# 그게 "일시적이면 풀린다" 는 이 상한의 원래 뜻입니다.
+CONSECUTIVE_TEMP_MAX = 3
+
 
 # 자막 출처 표시. 화면과 판정 근거에 그대로 남습니다 — 어느 경로로 받은
 # 글인지 모르면 요약이 이상할 때 원인을 좁힐 수 없습니다.
 LOCAL_ASR = "local_asr"
 
 
+class Deferred(Exception):
+    """지금은 손댈 수 없습니다 — **이 영상 탓이 아닙니다.**
+
+    `TranscriptRetry` 와 갈라 둡니다. 그쪽은 "시도했는데 안 됐다" 라서
+    횟수를 깎지만, 이쪽은 아예 **시도하지 않은 것**입니다. 오디오 경로가
+    쉬는 동안 자막 없는 영상을 지나칠 때 쓰는데, 이걸 재시도로 세면
+    가만히 있는 동안 다섯 번이 사라집니다.
+
+    `captions_blocked` 는 **여기까지 오는 동안 자막 문도 429 였는지**입니다.
+    둘 다 막혔으면 이번 사이클에 할 수 있는 일이 없으므로, 부르는 쪽이
+    그걸 보고 자막 문까지 닫습니다.
+    """
+
+    def __init__(self, message: str, *, captions_blocked: bool = False):
+        super().__init__(message)
+        self.captions_blocked = captions_blocked
+
+
 class TranscriptUnavailable(Exception):
     """이 영상에서는 자막을 얻을 수 없습니다. 사유는 사람 말로 씁니다."""
+
+
+class VideoGone(TranscriptUnavailable):
+    """영상 자체를 볼 수 없습니다 (비공개·삭제·지역 차단).
+
+    **자막이 없는 것과 갈라 둡니다.** 자막만 없으면 소리를 받아 받아쓰면
+    되지만, 영상이 없으면 받을 소리도 없습니다. 뭉뚱그리면 지워진 영상마다
+    오디오를 받으러 갔다가 실패하는 데 몇 분씩 씁니다.
+    """
 
 
 class TranscriptRetry(Exception):
@@ -134,7 +174,17 @@ def fetch(video: Video) -> Fetched:
     품질 차이가 커서 **어느 쪽을 받았는지 알아야** 하므로, `list()` 로
     목록을 먼저 받아 직접 고릅니다.
     """
-    api = YouTubeTranscriptApi()
+    # **세 경로가 같은 쿠키를 봅니다.** 하나만 로그인 상태면 어느 경로가
+    # 왜 되는지 설명할 수 없습니다 (collector/cookies.py).
+    jar = cookies.jar()
+    if jar is not None:
+        import requests
+
+        http = requests.Session()
+        http.cookies.update(jar)
+        api = YouTubeTranscriptApi(http_client=http)
+    else:
+        api = YouTubeTranscriptApi()
     langs = _pick_languages(video)
 
     # 차단은 **목록 조회와 본문 다운로드 양쪽에서** 납니다. 한쪽만 감싸면
@@ -146,7 +196,7 @@ def fetch(video: Video) -> Fetched:
         except (TranscriptsDisabled, NoTranscriptFound) as e:
             raise TranscriptUnavailable("자막이 제공되지 않는 영상입니다.") from e
         except VideoUnavailable as e:
-            raise TranscriptUnavailable("영상을 볼 수 없습니다(비공개·삭제).") from e
+            raise VideoGone("영상을 볼 수 없습니다(비공개·삭제).") from e
 
         # 수동 자막 우선. 언어 선호 순서대로.
         for finder, source in (
@@ -225,7 +275,10 @@ def fetch_via_ytdlp(video: Video) -> Fetched:
     import yt_dlp
 
     langs = _pick_languages(video)
-    opts = {"quiet": True, "no_warnings": True, "skip_download": True, "socket_timeout": 20}
+    opts = {
+        "quiet": True, "no_warnings": True, "skip_download": True, "socket_timeout": 20,
+        **cookies.ytdlp_opts(),
+    }
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(
@@ -351,6 +404,14 @@ BLOCK_COOLDOWN_MAX_MIN = 8 * 60
 COOLDOWN_KEY = "transcript.blocked_until"
 STREAK_KEY = "transcript.block_streak"
 
+# **자막 경로와 오디오 경로는 따로 식힙니다.** 하나로 두면 둘 중 하나가
+# 틀립니다 — 자막이 429 일 때는 받아쓰기로 우회하는 것이 맞고(그래서 위
+# 냉각은 받아쓰기를 막지 않습니다), 오디오가 403 일 때는 그 우회로마저
+# 막힌 것이라 손을 떼야 합니다. 예전에는 열쇠가 하나뿐이라, 오디오가
+# 막힌 동안에도 30초마다 같은 문을 두드리며 재시도 횟수만 태웠습니다.
+AUDIO_COOLDOWN_KEY = "transcript.audio_blocked_until"
+AUDIO_STREAK_KEY = "transcript.audio_block_streak"
+
 
 def cooldown_minutes(streak: int) -> int:
     """연속 차단 횟수에 따른 대기 시간 — 60 · 120 · 240 · 480분에서 멈춥니다."""
@@ -362,15 +423,20 @@ def blocked_until(db: Session) -> datetime | None:
     return state.get_time(db, COOLDOWN_KEY)
 
 
-def _streak(db: Session) -> int:
-    row = db.get(AppState, STREAK_KEY)
+def audio_blocked_until(db: Session) -> datetime | None:
+    """오디오(받아쓰기) 경로가 쉬는 중이면 언제까지인지."""
+    return state.get_time(db, AUDIO_COOLDOWN_KEY)
+
+
+def _streak(db: Session, key: str = STREAK_KEY) -> int:
+    row = db.get(AppState, key)
     return int(row.value) if row is not None and row.value.isdigit() else 0
 
 
-def _set_streak(db: Session, n: int) -> None:
-    row = db.get(AppState, STREAK_KEY)
+def _set_streak(db: Session, n: int, key: str = STREAK_KEY) -> None:
+    row = db.get(AppState, key)
     if row is None:
-        row = AppState(key=STREAK_KEY)
+        row = AppState(key=key)
         db.add(row)
     row.value = str(n)
     row.updated_at = now_kst()
@@ -394,6 +460,23 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
             "[transcript] 자막 경로 냉각 중(%s 재개) — 받아쓰기로 갑니다", f"{cooling:%H:%M}"
         )
 
+    # **오디오까지 막혔으면 받아쓰기는 건너뜁니다.** 안 그러면 30초마다
+    # 같은 403 을 맞으면서 영상들의 재시도 횟수만 깎습니다 — 그게 이틀에
+    # 129편을 죽인 경로입니다.
+    audio_cooling = audio_blocked_until(db)
+    skip_asr = bool(audio_cooling and now_kst() < audio_cooling)
+    if skip_asr and skip_youtube:
+        logger.info(
+            "[transcript] 자막도 오디오도 냉각 중(%s·%s 재개) — 이번 사이클은 쉽니다",
+            f"{cooling:%H:%M}", f"{audio_cooling:%H:%M}",
+        )
+        return result
+    if skip_asr:
+        logger.info(
+            "[transcript] 오디오 냉각 중(%s 재개) — 자막이 있는 것만 봅니다",
+            f"{audio_cooling:%H:%M}",
+        )
+
     # 키워드끼리 번갈아 집습니다. 먼저 온 순서대로 하면 첫 키워드가 줄의
     # 앞을 통째로 차지해 나머지는 영원히 차례가 안 옵니다 (queue.py 참고).
     ids = queue.next_ids(db, "TRANSCRIPT_PENDING", limit)
@@ -401,6 +484,8 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
     videos = [v for v in videos if v is not None]
 
     spent = 0.0  # 이번 사이클에 받아쓰기로 쓴 시간
+    temp_streak = 0  # 일시적 실패가 연달아 몇 번 났나 (성공하면 0)
+    cap_streak = 0  # 자막이 연달아 막힌 횟수 (한 건이라도 받으면 0)
     for i, video in enumerate(videos):
         if spent > settings.asr_budget_sec:
             logger.info(
@@ -414,6 +499,9 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
             time.sleep(random.uniform(2.0, 5.0) if skip_youtube else random.uniform(*DELAY_RANGE))
         result["attempted"] += 1
         started = time.time()
+        # 워치독에게 "여기까지 왔다"고 알립니다. 한 호출이 다섯 편을 도는데
+        # 돌아올 때만 세면, 멀쩡히 받아쓰는 중에 붙들렸다는 경보가 납니다.
+        beat.beat("transcript", video.title)
 
         # **지금 붙들고 있다는 표시를 남깁니다.** 받아쓰기 한 편이 2~7분인데
         # 그동안 아무 기록이 없으면, 화면에서는 "자막 대기 107" 이 멈춘
@@ -424,21 +512,39 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
         db.commit()
 
         try:
-            fetched = _fetch_with_retry(video, skip_youtube=skip_youtube)
+            fetched = _fetch_with_retry(video, skip_youtube=skip_youtube, skip_asr=skip_asr)
+        except Deferred as e:
+            # 줄에 그대로 둡니다. 기록도 남기지 않습니다 — 아무 일도
+            # 일어나지 않았고, 남기면 화면의 이력이 "무슨 일이 있었나"가
+            # 아니라 "무슨 일이 없었나"로 채워집니다.
+            video.state = "TRANSCRIPT_PENDING"
+            db.commit()
+            result["deferred"] = result.get("deferred", 0) + 1
+
+            # **자막까지 막혔으면 이번 사이클에 할 수 있는 일이 없습니다.**
+            # 받아쓰기가 닫혀 있으니 자막을 못 받으면 그걸로 끝인데, 문을
+            # 열어 둔 채로 두면 30초마다 다시 와서 영상마다 세 번씩
+            # 두드립니다 — 차단이 풀릴 이유가 없고 오히려 길어집니다.
+            #
+            # **그래도 한 번으로 닫지는 않습니다.** 처음엔 그렇게 했다가
+            # 같은 사이클에서 **자막 3건을 성공해 놓고** 네 번째의 429 하나로
+            # 문을 한 시간 닫았습니다. 429 는 통째 차단일 때도 나지만 잠깐의
+            # 속도 제한으로도 나서, 한 번만 보고는 둘을 못 가릅니다.
+            # 오디오와 같은 기준(연속 3회)으로 봅니다 — 성공하면 0으로
+            # 돌아가므로, 자막이 살아 있는 한 문은 닫히지 않습니다.
+            if e.captions_blocked:
+                cap_streak += 1
+                if cap_streak >= CONSECUTIVE_TEMP_MAX:
+                    _cool_off(
+                        db, result, left=len(videos) - i - 1,
+                        why="자막도 오디오도 막혔습니다", kind="자막 차단", door="captions",
+                    )
+                    break
+            continue
         except Blocked as e:
             video.state = "TRANSCRIPT_PENDING"  # 붙들고 있던 표시를 풉니다
             db.commit()
-            streak = _streak(db) + 1
-            _set_streak(db, streak)
-            wait = cooldown_minutes(streak)
-            until = now_kst() + timedelta(minutes=wait)
-            state.set_time(db, COOLDOWN_KEY, until)
-            logger.error(
-                "[transcript] 차단 %d회 연속 — 남은 %d건 중단, %d분간 쉽니다 (%s 재개)",
-                streak, len(videos) - i, wait, f"{until:%H:%M}",
-            )
-            result["blocked"] = True
-            result["error"] = f"{e} ({wait}분 후 재개)"
+            _cool_off(db, result, left=len(videos) - i, why=str(e), kind="차단")
             break
         except TranscriptRetry as e:
             # **끝없이 다시 보지는 않습니다.** 되살리려다 큐를 맴도는 영상을
@@ -462,6 +568,18 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
                 video.id, tried, MAX_TRANSCRIPT_RETRY, e,
             )
             result["rows"].append((video.title, "·", f"다음에 다시 ({tried}회) — {e}"))
+
+            # **여기서 접지 않으면 재시도 다섯 번이 15분 만에 사라집니다.**
+            # 오디오가 403 이면 다음 영상도 403 입니다 — 줄에 있는 20편을
+            # 끝까지 두드려 봐야 20편 모두 한 번씩 까먹을 뿐이고, 그게
+            # 몇 사이클 반복되면 일시 차단이 영구 탈락이 됩니다.
+            temp_streak += 1
+            if temp_streak >= CONSECUTIVE_TEMP_MAX:
+                _cool_off(
+                    db, result, left=len(videos) - i - 1, why=str(e),
+                    kind="오디오 일시 실패", door="audio",
+                )
+                break
             continue
         except TranscriptUnavailable as e:
             video.state = "FAILED_TRANSCRIPT"
@@ -492,6 +610,8 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
         video.state_reason = None
         _event(db, video, run_id, "TRANSCRIBING", video.state, True, fetched.source)
         db.commit()
+        temp_streak = 0  # 받아졌으면 막힌 게 아닙니다
+        cap_streak = 0
         result["ok"] += 1
         result["rows"].append(
             (video.title, "○", f"{fetched.source} {fetched.language} · {row.est_tokens:,} 토큰")
@@ -520,7 +640,9 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
     return result
 
 
-def _fetch_with_retry(video: Video, *, skip_youtube: bool = False) -> Fetched:
+def _fetch_with_retry(
+    video: Video, *, skip_youtube: bool = False, skip_asr: bool = False
+) -> Fetched:
     """세 경로를 순서대로 시도합니다.
 
       1. youtube-transcript-api   공짜·즉시 — 있으면 언제나 이걸 씁니다
@@ -534,19 +656,38 @@ def _fetch_with_retry(video: Video, *, skip_youtube: bool = False) -> Fetched:
     차단은 재시도로 풀리지 않습니다 — 같은 경로로 다시 두드리면 차단만
     길어집니다. 그래서 짧게 두 번만 더 시도해 보고, 안 되면 **경로를 바꿉니다.**
     """
+    captions_blocked = False
     if not skip_youtube:
         delay = 5.0
+        why = "1차 경로 차단"
         for attempt in range(MAX_RETRY):
             try:
                 return fetch(video)
+            except VideoGone:
+                # **여기서 끝냅니다.** 영상이 없으면 받을 소리도 없습니다.
+                raise
+            except TranscriptUnavailable:
+                # **자막이 없는 것뿐입니다 — 소리로 받으면 됩니다.**
+                #
+                # 예전에는 이 예외가 그냥 밖으로 새어 나가 그 자리에서
+                # 탈락했습니다. `except Blocked` 만 잡고 있었거든요. 그래서
+                # "자막 경로가 전부 막혔을 때만 받아쓰기" 라고 적어 둔
+                # 설계와 달리, **정작 받아쓰기가 가장 필요한 경우**(자막이
+                # 아예 없는 영상)에는 한 번도 가지 않았습니다.
+                #
+                # 다시 시도할 이유도 없습니다 — 없는 자막은 5초 뒤에도
+                # 없습니다. 바로 다음 경로로 넘어갑니다.
+                why = "자막 없음"
+                break
             except Blocked:
+                captions_blocked = True
                 if attempt == MAX_RETRY - 1:
                     break
                 logger.warning("[transcript] 차단 감지 — %.0f초 후 재시도", delay)
                 time.sleep(delay)
                 delay *= 2
 
-        logger.warning("[transcript] %s — 1차 경로 차단, yt-dlp 로 시도합니다", video.id)
+        logger.warning("[transcript] %s — %s, yt-dlp 로 시도합니다", video.id, why)
         try:
             fetched = fetch_via_ytdlp(video)
         except TranscriptUnavailable:
@@ -555,6 +696,10 @@ def _fetch_with_retry(video: Video, *, skip_youtube: bool = False) -> Fetched:
             logger.info("[transcript] %s — yt-dlp 폴백 성공", video.id)
             return fetched
 
+    if skip_asr:
+        # **횟수를 깎지 않습니다.** 이 영상을 시도한 것이 아니라, 시도할
+        # 문이 닫혀 있어 그냥 지나친 것입니다.
+        raise Deferred("오디오 경로 냉각 중", captions_blocked=captions_blocked)
     return fetch_via_asr(video)
 
 
@@ -581,26 +726,68 @@ def fetch_via_asr(video: Video) -> Fetched:
     return Fetched(source=LOCAL_ASR, language=r.language, segments=r.segments)
 
 
+def _cool_off(
+    db: Session, result: dict, *, left: int, why: str, kind: str, door: str = "captions"
+) -> None:
+    """이 사이클을 접고 쉽니다. **차단과 연속 일시 실패가 같은 문을 씁니다.**
+
+    갈라 두면 한쪽만 냉각이 붙습니다 — 실제로 자막 429 에는 냉각이 있었고
+    오디오 403 에는 없어서, 403 이 나는 동안 줄에 있는 것을 끝까지 두드리며
+    재시도 횟수만 태웠습니다. 우리를 막고 있다는 신호라는 점에서 둘은
+    같은 일이고, 답도 같습니다 — 손을 떼고 기다리는 것.
+    """
+    key, cool = (
+        (AUDIO_STREAK_KEY, AUDIO_COOLDOWN_KEY) if door == "audio" else (STREAK_KEY, COOLDOWN_KEY)
+    )
+    streak = _streak(db, key) + 1
+    _set_streak(db, streak, key)
+    wait = cooldown_minutes(streak)
+    until = now_kst() + timedelta(minutes=wait)
+    state.set_time(db, cool, until)
+    logger.error(
+        "[transcript] %s %d회 연속 — 남은 %d건 중단, %d분간 쉽니다 (%s 재개)",
+        kind, streak, left, wait, f"{until:%H:%M}",
+    )
+    result["blocked"] = True
+    result["error"] = f"{why} ({wait}분 후 재개)"
+
+
 def _retries(db: Session, video: Video) -> int:
     """이 영상을 일시적 실패로 몇 번 미뤘나.
 
     **이력에서 셉니다.** 컬럼을 더할 만한 값이 아니고, `pipeline_events` 는
     이미 영상별 이력을 들고 있습니다. 미룰 때만 `TRANSCRIBING →
     TRANSCRIPT_PENDING` 이벤트를 남기므로 그것만 세면 됩니다.
+
+    **줄에 새로 선 뒤부터만 셉니다.** 전부 세면 되살린 영상이 되살아나지
+    않습니다 — 이미 다섯 번이 찍혀 있어서 첫 번째 딸꾹질에 그대로 다시
+    죽습니다. 일시 차단으로 죽은 것을 손으로 되살리는 일이 실제로 있고
+    (`scripts/revive_transcripts.py`), 그때 다시 다섯 번을 주는 것이 이
+    상한의 뜻입니다. 이력은 그대로 남습니다 — 지우지 않고 기준점만
+    옮깁니다.
     """
-    return int(
-        db.scalar(
-            select(func.count())
-            .select_from(PipelineEvent)
-            .where(
-                PipelineEvent.video_id == video.id,
-                PipelineEvent.stage == "transcript",
-                PipelineEvent.from_state == "TRANSCRIBING",
-                PipelineEvent.to_state == "TRANSCRIPT_PENDING",
-            )
+    since = db.scalar(
+        select(func.max(PipelineEvent.created_at)).where(
+            PipelineEvent.video_id == video.id,
+            PipelineEvent.to_state == "TRANSCRIPT_PENDING",
+            # 줄에 세우는 이벤트는 자막 단계가 아닌 쪽이 남깁니다
+            # (발견분 채우기·되살리기). 미루는 이벤트와 갈리는 자리입니다.
+            PipelineEvent.stage != "transcript",
         )
-        or 0
     )
+    stmt = (
+        select(func.count())
+        .select_from(PipelineEvent)
+        .where(
+            PipelineEvent.video_id == video.id,
+            PipelineEvent.stage == "transcript",
+            PipelineEvent.from_state == "TRANSCRIBING",
+            PipelineEvent.to_state == "TRANSCRIPT_PENDING",
+        )
+    )
+    if since is not None:
+        stmt = stmt.where(PipelineEvent.created_at >= since)
+    return int(db.scalar(stmt) or 0)
 
 
 def _event(db: Session, video: Video, run_id, frm: str, to: str, ok: bool, detail: str) -> None:
