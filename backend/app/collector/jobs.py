@@ -31,6 +31,7 @@ from app.collector import cadence
 from app.collector import cleanup
 from app.collector import discover as D
 from app.collector import resources
+from app.collector import upkeep
 from app.collector import quota
 from app.collector import queue
 from app.blog import publish
@@ -552,4 +553,15 @@ def cleanup_job(db: Session) -> JobResult:
     r.stats = out
     if r.did_work:
         r.label = f"자막 {out['transcripts']} · 이력 {out['events']} · 기록 {out['runs']} 정리"
+
+    # **낡아서 서는 것도 청소입니다.** yt-dlp 가 뒤지면 오디오가 통째로
+    # 403 이 되는데, 그 증상이 IP 차단의 얼굴을 하고 있어 사람이 엉뚱한
+    # 데를 뒤집니다 (collector/upkeep.py). 하루 한 번 확인합니다 —
+    # 청소 잡이 6시간마다 도니 그 안에서 스스로 주기를 셉니다.
+    if upkeep.due(db):
+        note = upkeep.refresh(db)
+        if note:
+            r.notes.append(note)
+            r.did_work = True
+            r.label = (r.label + " · " if r.label else "") + note
     return r

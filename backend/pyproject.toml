@@ -11,7 +11,16 @@ dependencies = [
     "cryptography>=43.0.0",
     "pydantic-settings>=2.6.0",
     "youtube-transcript-api>=1.2",
-    "yt-dlp>=2026.7",
+    # **낡으면 파이프라인이 통째로 섭니다.** 유튜브가 스트리밍 URL 서명
+    # 방식을 자주 바꾸고, 그때마다 옛 yt-dlp 는 `unable to download video
+    # data: HTTP Error 403` 을 냅니다. 메타데이터는 멀쩡히 읽히고 **실제
+    # 내려받기만** 막혀서 IP 차단처럼 보이는 것이 고약합니다 — 2026-08-20
+    # 에 VPN 을 바꿔 가며 찾다가, 같은 IP 에서 버전만 올려 갈렸습니다
+    # (2026.7.4 → 403 / 2026.8.19 → 3초에 15MB).
+    #
+    # 그래서 바닥을 올려 둡니다. 여기가 열려 있으면 다른 기계에서
+    # `uv sync` 할 때 옛 버전이 그대로 깔립니다.
+    "yt-dlp>=2026.8.19",
     # 요약을 만드는 곳. **인증은 구독입니다** — ANTHROPIC_API_KEY 를 쓰지
     # 않고, 이 기계에 로그인된 Claude Code 를 그대로 씁니다.
     #

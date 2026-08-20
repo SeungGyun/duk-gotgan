@@ -365,6 +365,11 @@ export interface Pipeline {
   reviewers: Reviewer[];
   blog: BlogStatus;
   stuck: { key: string; label: string; count: number }[];
+  /** 스스로 손본 것이 있으면 그 한 줄 (`yt-dlp 2026.7.4 → 2026.8.19 올렸습니다`).
+   *
+   *  **보이지 않는 자동 업그레이드는 믿을 수 없습니다** — 어느 날 받아쓰기가
+   *  이상해졌을 때 "그저께 뭔가 올랐나?" 를 물을 자리가 있어야 합니다. */
+  upkeep: string | null;
 }
 
 /** 실행 하나가 실제로 옮긴 것들. */

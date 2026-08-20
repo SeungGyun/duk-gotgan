@@ -16,7 +16,7 @@ from app.api.errors import ApiError
 from app.api.routes.lectures import Filters, _filtered
 from app.api.serializers import run_out
 from app.blog import publish
-from app.collector import cadence, quota, resources, transcript
+from app.collector import cadence, quota, resources, transcript, upkeep
 from app.collector.schedule import next_due_at
 from app.llm import pace
 from app.llm import usage as usage_guard
@@ -690,6 +690,11 @@ def pipeline(db: Session = Depends(get_db), _: User = Depends(current_user)):
         # 요약을 나눠 하는 회사들. 트랙 한 줄 아래 펼쳐 보입니다 — 한쪽만
         # 멎었을 때 "요약 쉬는 중" 으로 뭉뚱그리지 않기 위해서입니다.
         "reviewers": reviewers,
+        # **스스로 올린 것을 사람이 볼 수 있어야 합니다.** 보이지 않는
+        # 자동 업그레이드는 믿을 수 없는 자동 업그레이드입니다 — 어느 날
+        # 받아쓰기가 이상해졌을 때 "그저께 뭔가 올랐나?" 를 물을 자리가
+        # 있어야 합니다 (collector/upkeep.py).
+        "upkeep": upkeep.last_note(db),
         "blog": _blog(db),
         "stuck": [
             {"key": k, "label": label, "count": take(states)} for k, label, states in _STUCK

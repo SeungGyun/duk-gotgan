@@ -281,6 +281,9 @@ function Now({
       {stuck.length > 0 && (
         <FailedPanel stuck={stuck} canFix={canStart} onFixed={onFixed} />
       )}
+
+      {/* 스스로 손본 것. 조용히 지나가는 것이 정상이라 있을 때만 나옵니다. */}
+      {p.upkeep && <p className={s.upkeep}>스스로 손봄 · {p.upkeep}</p>}
     </Panel>
   );
 }

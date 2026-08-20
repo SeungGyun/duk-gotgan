@@ -52,3 +52,19 @@ def set_int(db: Session, key: str, value: int | None) -> None:
     row.value = "" if value is None else str(value)
     row.updated_at = now_kst()
     db.commit()
+
+
+def get_str(db: Session, key: str) -> str | None:
+    """사람이 읽을 문장. 비어 있으면 None — 빈 문자열과 "없음"을 가릅니다."""
+    row = db.get(AppState, key)
+    return (row.value or None) if row is not None else None
+
+
+def set_str(db: Session, key: str, value: str | None) -> None:
+    row = db.get(AppState, key)
+    if row is None:
+        row = AppState(key=key)
+        db.add(row)
+    row.value = value or ""
+    row.updated_at = now_kst()
+    db.commit()
