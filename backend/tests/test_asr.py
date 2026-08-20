@@ -400,3 +400,51 @@ def test_상한은_이제_메모리가_아니라_시간이_정한다():
 
     assert s.asr_max_duration_sec == 180 * 60
     assert s.asr_chunk_sec < s.asr_max_duration_sec
+
+
+def test_받아쓰기에는_유튜브의_언어값을_넘기지_않는다():
+    """**한쪽만 고쳐 두었던 것.**
+
+    `defaultAudioLanguage` 는 업로더가 손으로 넣는 값이라 못 믿습니다 —
+    `박종훈의 지식한방`(한국어 채널)의 영상 27편이 `ja` 로 찍혀 있습니다.
+    룰 필터는 그 사실을 알고 이 값을 이미 뺐는데, 받아쓰기는 그대로
+    1순위로 써서 위스퍼에게 "일본어로 받아써라" 고 시켰습니다.
+
+        [0:00] 7月29日は、私たちの最悪の日中の一つです。 コスピーとコスタクの市場で…
+               (실제 발화: 7월 29일은 우리에게 최악의 날 중 하나입니다…)
+
+    실측으로 요약 실패 43건 중 22건이 이 경로였습니다.
+    """
+    from app.collector import transcript
+
+    class 잘못찍힌영상:
+        default_language = "ja"
+
+    class 영어로찍힌영상:
+        default_language = "en-US"
+
+    assert transcript._asr_language(잘못찍힌영상()) == "", "빈 값이면 위스퍼가 듣고 정합니다"
+    assert transcript._asr_language(영어로찍힌영상()) == ""
+
+
+def test_자막을_찾을_때는_힌트로_써도_된다():
+    """받아쓰기와 다릅니다 — 틀려도 다음 후보로 넘어갈 뿐 잃는 것이
+    없습니다. 그래서 이쪽은 그대로 둡니다."""
+    from app.collector import transcript
+
+    class 영상:
+        default_language = "ja"
+
+    assert transcript._pick_languages(영상())[0] == "ja"
+
+
+def test_받아쓰기_호출에_기본값이_새지_않는다():
+    """`language=langs[0] if langs else "ko"` 로 되돌아가면 같은 자막이
+    같은 이유로 또 망가집니다."""
+    import inspect
+
+    from app.collector import transcript
+
+    src = inspect.getsource(transcript.fetch_via_asr)
+    assert "_asr_language(video)" in src
+    assert "_pick_languages" not in src, "받아쓰기는 자막 찾기와 다른 판단입니다"

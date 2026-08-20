@@ -1,11 +1,22 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { api } from "../api";
-import type { BlogStatus, Pipeline, Reviewer, Run, RunEvent, RunStats, Track } from "../api";
+import type {
+  BlogStatus,
+  Pipeline,
+  Reviewer,
+  Run,
+  RunEvent,
+  RunStats,
+  RunnableJob,
+  Track,
+} from "../api";
 import { Screen } from "../components/Screen";
-import { Chip, Empty, ErrorState, Loading, Panel } from "../components/ui";
+import { Button, Chip, Empty, ErrorState, Loading, Panel } from "../components/ui";
 import { useAsync } from "../hooks/useAsync";
 import { num, tokens } from "../lib/format";
+import { useMe } from "../me";
 import s from "./Runs.module.css";
 
 /** 도는 중일 때 새로 고치는 간격. 한 사이클이 몇 분씩 걸려서, 화면이
@@ -116,6 +127,37 @@ const STUCK_MIN = 30;
 export function Runs() {
   const runs = useAsync(() => api.listRuns(), []);
   const pipe = useAsync(() => api.getPipeline(), []);
+  // **시작 버튼이 여기 있는 이유.** 대시보드에 "지금 실행" 하나를 두었을
+  // 때는 그 버튼이 무엇을 하는지가 화면 어디에도 없었습니다(검색만
+  // 돌립니다). 무엇이 도는 중이고 언제 다음인지를 말하는 화면이 여기가
+  // 됐으니, 앞당기는 자리도 같은 줄이 맞습니다.
+  const me = useMe();
+  const [starting, setStarting] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  const say = useCallback((msg: string) => {
+    setNote(msg);
+    window.setTimeout(() => setNote(null), 6000);
+  }, []);
+
+  const start = useCallback(
+    async (job: RunnableJob, label: string) => {
+      setStarting(job);
+      try {
+        await api.requestRun(job);
+        // 워커가 다음 틱(30~60초)에 집어갑니다. 여기서 기다리지 않습니다 —
+        // 한 사이클이 몇 분씩 걸려서 브라우저가 먼저 끊깁니다.
+        say(`${label} 을(를) 시작하라고 알렸습니다. 곧 이 줄이 도는 중으로 바뀝니다.`);
+        pipe.reload();
+        runs.reload();
+      } catch (e) {
+        say(e instanceof Error ? e.message : "요청에 실패했습니다.");
+      } finally {
+        setStarting(null);
+      }
+    },
+    [pipe, runs, say],
+  );
 
   // **한 번만 불러오면 안 됩니다.** "지금 실행"은 요청만 남기고 워커가
   // 다음 틱에 집어가는 구조라, 눌러 놓고 이 화면을 봐도 대기 중인 실행이
@@ -152,7 +194,23 @@ export function Runs() {
       title="실행 로그"
       subtitle="지금 어디까지 왔는지, 기다리면 되는지"
     >
-      {pipe.data && <Now p={pipe.data} />}
+      {note && (
+        <p className={s.note} role="status">
+          {note}
+        </p>
+      )}
+      {pipe.data && (
+        <Now
+          p={pipe.data}
+          canStart={me.isOwner}
+          starting={starting}
+          onStart={start}
+          onFixed={(msg) => {
+            say(msg);
+            pipe.reload();
+          }}
+        />
+      )}
       {pipe.data?.blog?.enabled && <BlogPanel b={pipe.data.blog} />}
 
       <Panel title="지나간 실행" bodyless>
@@ -172,8 +230,22 @@ export function Runs() {
     셋을 따로 돌리게 된 뒤로 트랙을 각각 보여 줍니다. 하나만 보여 주면
     나머지가 멈춘 것처럼 읽힙니다 — 실제로 자막과 요약이 나란히 도는데
     화면에는 나중에 시작한 것만 떴습니다. */
-function Now({ p }: { p: Pipeline }) {
-  const stuckTotal = p.stuck.reduce((a, x) => a + x.count, 0);
+type StartFn = (job: RunnableJob, label: string) => void;
+
+function Now({
+  p,
+  canStart,
+  starting,
+  onStart,
+  onFixed,
+}: {
+  p: Pipeline;
+  canStart: boolean;
+  starting: string | null;
+  onStart: StartFn;
+  onFixed: (msg: string) => void;
+}) {
+  const stuck = p.stuck.filter((x) => x.count > 0);
 
   return (
     <Panel title="지금" className={s.nowPanel}>
@@ -189,35 +261,140 @@ function Now({ p }: { p: Pipeline }) {
 
       <ul className={s.tracks}>
         {p.tracks.map((t) => (
-          <TrackRow key={t.key} t={t} reviewers={t.key === "review" ? p.reviewers : undefined} />
+          <TrackRow
+            key={t.key}
+            t={t}
+            reviewers={t.key === "review" ? p.reviewers : undefined}
+            canStart={canStart}
+            starting={starting}
+            onStart={onStart}
+          />
         ))}
         {/* 블로그도 한 줄을 줍니다. 트랙 셋만 있던 때는 5분에 한 편씩
             글이 나가는 중에도 이 패널이 아무 말을 하지 않아서, 발행이
             도는지 멎었는지 화면으로는 알 길이 없었습니다. */}
-        {p.blog?.enabled && <BlogRow b={p.blog} />}
+        {p.blog?.enabled && (
+          <BlogRow b={p.blog} canStart={canStart} starting={starting} onStart={onStart} />
+        )}
       </ul>
 
-      {stuckTotal > 0 && (
-        <p className={s.stuck}>
-          손봐야 할 것:{" "}
-          {p.stuck
-            .filter((x) => x.count > 0)
-            .map((x) => `${x.label} ${x.count}건`)
-            .join(" · ")}
-        </p>
+      {stuck.length > 0 && (
+        <FailedPanel stuck={stuck} canFix={canStart} onFixed={onFixed} />
       )}
     </Panel>
   );
 }
 
-/** 트랙 한 줄이 답해야 하는 것은 셋입니다 — **무엇을 하고 있나, 왜 그러고
-    있나, 언제 다음이 오나.**
+/** 실패한 것들 — **여기서 바로 손댈 수 있어야 합니다.**
 
-    예전에는 첫째만 있었고 그마저 "쉬는 중" 한 마디였습니다. 그 세 글자는
-    "차례를 기다린다"와 "유튜브가 소리 내려받기를 막아 손을 뗐다"를 같은
-    말로 덮어서, 정작 알아야 할 때 아무것도 알려 주지 못했습니다. 나머지
-    둘은 워커 로그에만 있었고, 로그를 여는 사람은 이 집에 한 명뿐입니다. */
-function TrackRow({ t, reviewers }: { t: Track; reviewers?: Reviewer[] }) {
+    예전에는 "손봐야 할 것: 자막 실패 107건 · 요약 실패 58건" 한 줄이
+    전부였습니다. 세어서 보여 주기만 하고 손댈 자리는 없었으니, 읽고 나면
+    할 수 있는 일이 터미널을 여는 것뿐이었습니다
+    (`scripts/revive_transcripts.py` 가 그래서 생겼습니다).
+
+    **요약 실패는 대개 그 편의 문제가 아닙니다** — 세션이 죽었거나 모델이
+    스키마를 어긴 것이라, 고쳐 놓고 통째로 다시 돌리면 그냥 됩니다. 그
+    자리가 여기입니다. 반대로 자막 실패에는 "다시 해도 같은 것"(자막이
+    8자, 영상이 세 시간)이 섞여 있어 골라내야 하고, 고르는 일은 목록이
+    있는 화면에서 해야 합니다. */
+function FailedPanel({
+  stuck,
+  canFix,
+  onFixed,
+}: {
+  stuck: { key: string; label: string; count: number }[];
+  canFix: boolean;
+  onFixed: (msg: string) => void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const kindOf = (key: string): "review" | "transcript" =>
+    key === "failedReview" ? "review" : "transcript";
+
+  const retry = async (key: string, label: string) => {
+    setBusy(key);
+    try {
+      const { restored } = await api.retryFailed({ kind: kindOf(key), onlyRetryable: true });
+      onFixed(
+        restored > 0
+          ? `${label} 중 ${restored}편을 줄에 다시 세웠습니다. 워커가 다음 차례부터 집어갑니다.`
+          : `${label} 중 다시 해 볼 만한 것이 없습니다 — 대기 목록에서 골라 보세요.`,
+      );
+    } catch (e) {
+      onFixed(e instanceof Error ? e.message : "다시 돌리지 못했습니다.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className={s.failed}>
+      <span className={s.failedHead}>손봐야 할 것</span>
+      {stuck.map((x) => (
+        <div key={x.key} className={s.failedRow}>
+          <span className={s.failedLabel}>
+            {x.label} <strong>{num(x.count)}건</strong>
+          </span>
+          {canFix && (
+            <Button
+              size="small"
+              onClick={() => void retry(x.key, x.label)}
+              disabled={busy !== null}
+            >
+              {busy === x.key ? "…" : "다시 돌리기"}
+            </Button>
+          )}
+          {/* 고르는 일은 목록이 있는 화면에서. 여기서 60줄을 그리면 이
+              패널이 다시 벽이 되고, 정작 "지금 무엇을 하나"가 밀립니다. */}
+          <Link className={s.failedLink} to="/queue">
+            골라내기 →
+          </Link>
+        </div>
+      ))}
+      <p className={s.failedNote}>
+        “다시 돌리기” 는 <strong>다시 해 볼 만한 것만</strong> 줄에 세웁니다 — 자막이 8자거나
+        영상이 너무 긴 것처럼 해 봐야 같은 것은 그대로 둡니다. 그런 것을 아주 빼려면
+        대기 목록에서 고르세요.
+      </p>
+    </div>
+  );
+}
+
+/** 이 트랙을 지금 시작할 수 있는가, 없다면 왜 없는가.
+ *
+ *  처음에는 "막힌 것은 눌러서 넘기지 않는다"로 한 줄로 잠갔습니다. 차단된
+ *  문을 두드리면 차단만 길어지니까요. **그건 같은 IP 일 때 맞는 말이었습니다.**
+ *  사람이 VPN 을 바꾸면 냉각이 지키려던 조건 자체가 사라지는데, 화면은
+ *  04:09 까지 기다리라고만 했습니다 — 우리가 모르는 사실을 이유로 사람을
+ *  붙잡아 둔 셈입니다.
+ *
+ *  이제 **서버가 갈라 줍니다**(`hold.forcible`). 사람이 조건을 바꿀 수
+ *  있는 멈춤(IP 차단·회사 세션)은 열고, 바꿀 수 없는 것(유튜브 하루
+ *  할당량)은 잠급니다. */
+function startable(t: Track): string | null {
+  if (t.status === "running" || t.working) return "지금 도는 중입니다";
+  if (t.hold?.tone === "stop" && !t.hold.forcible) {
+    return t.hold.until
+      ? `${t.hold.title} — ${clock(t.hold.until)} 이후에 눌러 주세요`
+      : t.hold.title;
+  }
+  return null;
+}
+
+function TrackRow({
+  t,
+  reviewers,
+  canStart,
+  starting,
+  onStart,
+}: {
+  t: Track;
+  reviewers?: Reviewer[];
+  canStart: boolean;
+  starting: string | null;
+  onStart: StartFn;
+}) {
+  const blocked = startable(t);
   const live = t.status === "running" || t.working !== null;
   // 붙들려 있는 것은 도는 것과 다릅니다. 오래 쥐고 있으면 색을 바꿔
   // 두어야, 워커 로그의 워치독 경고를 화면에서도 만날 수 있습니다.
@@ -279,6 +456,24 @@ function TrackRow({ t, reviewers }: { t: Track; reviewers?: Reviewer[] }) {
         <Schedule t={t} />
         {reviewers && reviewers.length > 0 && <Reviewers list={reviewers} />}
       </div>
+
+      {canStart && (
+        <span className={s.trackAct}>
+          <Button
+            size="small"
+            onClick={() => onStart(t.key as RunnableJob, t.label)}
+            disabled={blocked !== null || starting !== null}
+            title={
+              blocked ??
+              (t.hold?.forcible
+                ? `${t.hold.title} — 회선을 바꿨다면 지금 시작하세요. 눌러 두면 냉각을 풀고 바로 돕니다.`
+                : `${t.label} 을(를) 다음 차례를 기다리지 않고 지금 시작합니다`)
+            }
+          >
+            {starting === t.key ? "…" : "시작"}
+          </Button>
+        </span>
+      )}
     </li>
   );
 }
@@ -308,14 +503,19 @@ function Reviewers({ list }: { list: Reviewer[] }) {
     <p className={s.reviewers}>
       {list.map((r) => (
         <span key={r.provider} className={s.reviewer}>
-          <span className={r.capped || r.restingUntil ? s.dotIdle : s.dotLive} aria-hidden="true" />
+          {/* **쥐고 있을 때만 깜빡입니다.** 막히지 않았다는 것과 일하는
+              중이라는 것은 다릅니다 — 대기 0 인 순간에 둘 다 도는 중으로
+              보이던 것이 그 차이를 뭉갠 결과였습니다. */}
+          <span className={r.working ? s.dotLive : s.dotIdle} aria-hidden="true" />
           {r.label}
           <em>
             {r.capped
               ? " 상한 도달"
               : r.restingUntil
                 ? ` 쉬는 중 · ${clock(r.restingUntil)}`
-                : " 도는 중"}
+                : r.working
+                  ? ` 도는 중 · ${elapsed(r.working.since)}`
+                  : " 대기 중"}
           </em>
         </span>
       ))}
@@ -329,7 +529,17 @@ function Reviewers({ list }: { list: Reviewer[] }) {
     점은 늘 쉬는 중입니다. 발행은 한 편을 몇 초에 올리고 끝나서, 화면을
     볼 때 걸려 있을 일이 사실상 없습니다 — 도는 척 깜빡이게 두면 없는
     일을 있다고 하는 셈입니다. */
-function BlogRow({ b }: { b: BlogStatus }) {
+function BlogRow({
+  b,
+  canStart,
+  starting,
+  onStart,
+}: {
+  b: BlogStatus;
+  canStart: boolean;
+  starting: string | null;
+  onStart: StartFn;
+}) {
   const last = b.recent[0];
   // 하루 상한에 닿으면 "쉬는 중"의 뜻이 달라집니다 — 간격이 돌아온 것이
   // 아니라 오늘은 끝난 것입니다. 이걸 안 적었을 때, 왜 안 올라가는지의
@@ -359,6 +569,26 @@ function BlogRow({ b }: { b: BlogStatus }) {
         )}
         {!full && last && <em className={s.trackSince}>· 마지막 {ago(last.at)}</em>}
       </span>
+      {canStart && (
+        <span className={s.trackAct}>
+          <Button
+            size="small"
+            onClick={() => onStart("publish", "블로그")}
+            disabled={starting !== null || full || b.sessionBadSince !== null || b.waiting === 0}
+            title={
+              b.sessionBadSince
+                ? "로그인이 필요합니다 — 터미널에서 tistory login"
+                : full
+                  ? "오늘 몫을 다 썼습니다 — 저쪽이 정한 상한이라 눌러서 넘길 수 없습니다"
+                  : b.waiting === 0
+                    ? "올릴 글이 없습니다"
+                    : "한 편을 지금 올리고, 다음 차례를 그 시각부터 다시 잡습니다"
+            }
+          >
+            {starting === "publish" ? "…" : "시작"}
+          </Button>
+        </span>
+      )}
     </li>
   );
 }

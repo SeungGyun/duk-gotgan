@@ -155,9 +155,20 @@ def save(
             video.state = "PUBLISHED"
             video.state_reason = None
         else:
-            # 요약이 없는 것은 판정 결과가 아니라 **실패**입니다.
+            # **왜 못 했는지를 같이 적습니다.**
+            #
+            # 예전에는 이 한 문장이 전부였습니다 — "요약이 오지 않았습니다."
+            # 그래서 화면에서는 고장인지 판정인지 갈리지 않았고, 사람이 할
+            # 수 있는 일은 다시 눌러 보는 것뿐이었습니다. 실제로 한 편이
+            # **38번** 그렇게 돌았습니다.
+            #
+            # 모델은 이유를 이미 말하고 있었습니다 — `red_flags` 에
+            # "한국어 영상을 일본어로 오인식한 ASR 결과물", "21초짜리 뉴스
+            # 쇼츠" 같은 문장이 들어 있었는데 우리가 안 옮겼을 뿐입니다.
+            # 그 한 줄이 있으면 자막을 다시 받을 일인지, 아주 뺄 일인지가
+            # 그 자리에서 갈립니다.
             video.state = "FAILED_REVIEW"
-            video.state_reason = "요약이 오지 않았습니다."
+            video.state_reason = _no_summary_reason(review)
 
         # 다 썼으니 놓습니다. 남겨 두면 좀비 회수가 끝난 영상을 계속
         # 훑고, 화면의 "지금 붙들고 있는 것"도 틀리게 나옵니다.
@@ -201,6 +212,22 @@ def _active_model() -> str:
     from config.settings import settings
 
     return settings.active_review_model
+
+
+# 사유 문장의 머리. **바꾸지 마세요** — 실패를 갈라 보는 쪽이 이 말을
+# 보고 "다시 해도 같은 것"으로 판단합니다 (collector/failures.py).
+NO_SUMMARY = "요약이 오지 않았습니다"
+
+
+def _no_summary_reason(review: LectureReview) -> str:
+    """모델이 요약을 못 하겠다고 한 이유를 사람 말로.
+
+    `red_flags` 의 첫 줄이 대개 그 이유입니다. 없으면 판정만이라도
+    적습니다 — "irrelevant" 한 낱말도 아무것도 없는 것보다 낫습니다.
+    """
+    why = next((f.strip() for f in review.red_flags if f.strip()), "")
+    head = f"{NO_SUMMARY} · {review.verdict}"
+    return f"{head} — {why}"[:400] if why else head
 
 
 def _red_flags(review: LectureReview, gap: int) -> list[str]:

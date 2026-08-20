@@ -2,6 +2,8 @@ import type { Api } from "./contract";
 import { ApiError } from "./contract";
 import type {
   ChannelBlock,
+  FailedItem,
+  FailedPick,
   Keyword,
   KeywordDraft,
   LectureDetail,
@@ -9,6 +11,7 @@ import type {
   Overview,
   Person,
   Run,
+  RunnableJob,
   Usage,
 } from "./types";
 
@@ -33,6 +36,49 @@ const runAt = (n: number, min = 0) => atHour(n, 4, min);
 
 /** 목에서 "지금 실행"으로 쌓인 요청 — 워커가 없으니 대기 상태로 남습니다 */
 let queuedRuns: Run[] = [];
+
+/** 손봐야 할 실패. **실제 장부에서 본 사유를 그대로 옮겼습니다** — 지어낸
+ *  문장으로 두면 화면이 실제 문자열 길이를 못 견디는지 알 수 없습니다. */
+const failed = (
+  videoId: string,
+  title: string,
+  reason: string,
+  attempts: number,
+  retryable: boolean,
+  hoursAgo: number,
+): FailedItem => ({
+  videoId,
+  title,
+  channelTitle: "어떤 채널",
+  durationSec: 1800,
+  publishedAt: daysAgo(3),
+  keywords: ["경제"],
+  order: null,
+  reason,
+  failedAt: iso(new Date(Date.now() - hoursAgo * 36e5)),
+  attempts,
+  retryable,
+});
+
+let mockFailed: FailedItem[] = [
+  failed("f1", "[lg전자 주가전망] 피지컬 AI 전략 + 영업이익",
+    "요약할 내용이 없습니다 · 453초 영상에 8자", 6, false, 3),
+  failed("f2", "[LG전자 주가전망] *핵폭탄 예고합니다* 이번에",
+    "요약할 내용이 없습니다 · 417초 영상에 8자", 7, false, 9),
+  failed("f3", "Chiranjeevi & Varun Tej Got Emotional",
+    "자막 없음 · 쓸 수 있는 자막이 없습니다(찾은 언어: ['en', 'ko']).", 5, true, 20),
+  failed("f4", "다음주 주식시장전망, 주도주 브리핑 ▶급등왕◀",
+    "자막 없음 · 영상이 너무 깁니다 (206분) — 받아쓰기 상한 180분.", 1, false, 26),
+];
+
+let mockFailedReview: FailedItem[] = [
+  failed("r1", "Trivikram Srinivas Speech at Event",
+    "5번 시도했습니다 — 실행 실패: Claude Code returned an error result", 5, true, 2),
+  failed("r2", "[최강기업] 지역과 함께! 역동적인 회계사들",
+    "5번 시도했습니다 — 실행 실패: Claude Code returned an error result", 10, true, 5),
+  failed("r3", "[갓생쇼] 세제 개편이 뒤흔든 부동산 시장",
+    "invalid arguments:\n- at '/summary': missing property 'targetAudience'", 9, true, 11),
+];
 
 /** 목의 차단 채널 — 자동 차단 예시 하나를 넣어 둡니다 */
 let channelBlocks: ChannelBlock[] = [
@@ -1233,12 +1279,13 @@ export const mockApi: Api = {
     channelBlocks = channelBlocks.filter((b) => b.channelId !== channelId);
   },
 
-  async requestRun() {
+  async requestRun(job: RunnableJob = "discover") {
     await delay(320);
+    const label = { discover: "검색", transcript: "자막", review: "요약", publish: "블로그" }[job];
     const run: Run = {
       id: nextId("run"),
-      label: "실행 대기 중",
-      job: "cycle",
+      label: `${label} — 시작 대기 중`,
+      job,
       trigger: "manual",
       status: "queued",
       startedAt: iso(new Date()),
@@ -1283,6 +1330,8 @@ export const mockApi: Api = {
             until: iso(new Date(Date.now() + 26 * 60_000)),
             since: null,
             fix: null,
+            // 회선을 바꾸면 사라지는 조건이라 사람이 앞당길 수 있습니다.
+            forcible: true,
           } },
         // 한 편을 붙들고 도는 모습.
         { key: "review", label: "요약", status: "running" as const, waiting: 2,
@@ -1303,13 +1352,17 @@ export const mockApi: Api = {
             until: iso(new Date(Date.now() + 12 * 60_000)),
             since: null,
             fix: null,
+            forcible: true,
           } },
       ],
       // 한쪽만 쉬는 모습 — 이게 안 보이면 "요약이 왜 느리지"의 답이 없습니다.
       reviewers: [
-        { provider: "claude", label: "클로드", restingUntil: null, capped: false },
+        // 한쪽은 한 편을 쥐고 있고, 다른 쪽은 쉬는 중. **쥐고 있는 것과
+        // 그냥 안 막힌 것을 갈라 두어야** 목업이 진짜 화면과 같아집니다.
+        { provider: "claude", label: "클로드", restingUntil: null, capped: false,
+          working: { title: "DNA 계통수 분석과 이명법", since: iso(new Date(Date.now() - 3 * 60_000)) } },
         { provider: "antigravity", label: "안티그래비티",
-          restingUntil: iso(new Date(Date.now() + 12 * 60_000)), capped: false },
+          restingUntil: iso(new Date(Date.now() + 12 * 60_000)), capped: false, working: null },
       ],
       // 켜 둔 상태로 둡니다 — 꺼진 모습은 "블로그 칸이 없는" 화면이라
       // 목업으로 볼 것이 없습니다.
@@ -1337,16 +1390,65 @@ export const mockApi: Api = {
             category: "AI", postId: "193", url: "https://example.tistory.com/193" },
         ],
       },
+      // **0 으로 두지 않습니다.** 손봐야 할 것이 없는 화면은 이 패널이
+      // 통째로 없는 화면이라, 정작 손볼 자리가 잘 생겼는지 볼 수 없습니다.
       stuck: [
-        { key: "failedTranscript", label: "자막 실패", count: 0 },
-        { key: "failedReview", label: "요약 실패", count: 0 },
+        { key: "failedTranscript", label: "자막 실패", count: mockFailed.length },
+        { key: "failedReview", label: "요약 실패", count: mockFailedReview.length },
       ],
     };
   },
 
   async getQueue() {
     await delay();
-    return { stages: [], skipped: [], asrRealtimeFactor: 5 };
+    // 실패 무리는 **서로 다른 모습**으로 둡니다. 요약 실패는 세션·모델
+    // 쪽이라 통째로 다시 돌릴 만하고, 자막 실패는 "다시 해도 같은 것"이
+    // 섞여 있어 골라내야 합니다 — 화면이 답해야 하는 것이 그 차이입니다.
+    return {
+      stages: [],
+      skipped: [],
+      failed: [
+        {
+          kind: "transcript" as const,
+          label: "자막 실패",
+          count: mockFailed.length,
+          items: mockFailed,
+        },
+        {
+          kind: "review" as const,
+          label: "요약 실패",
+          count: mockFailedReview.length,
+          items: mockFailedReview,
+        },
+      ],
+      asrRealtimeFactor: 5,
+    };
+  },
+
+  async retryFailed(pick: FailedPick) {
+    await delay(400);
+    const ids = new Set(pick.videoIds ?? []);
+    const hit = (xs: FailedItem[]) =>
+      pick.videoIds ? xs.filter((x) => ids.has(x.videoId)) : xs;
+    const n =
+      (pick.kind === "review" ? 0 : hit(mockFailed).length) +
+      (pick.kind === "transcript" ? 0 : hit(mockFailedReview).length);
+    mockFailed = mockFailed.filter((x) => !ids.has(x.videoId));
+    mockFailedReview = mockFailedReview.filter((x) => !ids.has(x.videoId));
+    if (!pick.videoIds) {
+      if (pick.kind !== "review") mockFailed = [];
+      if (pick.kind !== "transcript") mockFailedReview = [];
+    }
+    return { restored: n };
+  },
+
+  async excludeFailed(pick: FailedPick) {
+    await delay(400);
+    const ids = new Set(pick.videoIds ?? []);
+    const before = mockFailed.length + mockFailedReview.length;
+    mockFailed = mockFailed.filter((x) => !ids.has(x.videoId));
+    mockFailedReview = mockFailedReview.filter((x) => !ids.has(x.videoId));
+    return { excluded: before - (mockFailed.length + mockFailedReview.length) };
   },
 
   async skipQueued(_videoId: string) {

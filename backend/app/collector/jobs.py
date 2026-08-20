@@ -36,7 +36,7 @@ from app.collector import queue
 from app.blog import publish
 from app.collector.rules import window_start
 from app.collector.schedule import due_keywords
-from app.collector.transcript import blocked_until, transcribe_pending
+from app.collector.transcript import blocked_until, clear_cooldowns, transcribe_pending
 from app.collector.youtube import YouTubeError
 from app.db.models import CrawlRun, Evaluation, Keyword, PipelineEvent, Video, VideoKeyword
 from app.llm import pace, usage
@@ -221,7 +221,17 @@ def drop_stale(db: Session) -> int:
 
 
 def discover_job(db: Session, keyword_ids: list[str] | None = None, trigger: str = "scheduled"):
-    """차례가 된 키워드를 검색합니다. 초 단위로 끝나는 가벼운 일입니다."""
+    """차례가 된 키워드를 검색합니다. 초 단위로 끝나는 가벼운 일입니다.
+
+    **사람이 누르면 차례를 무시하고 전부 돕니다.** 문서에는 처음부터 그렇게
+    적혀 있었는데(docs/API.md `POST /runs`) 코드는 `due_keywords()` 를 그대로
+    써서, 오늘 이미 돈 키워드만 있는 날에는 눌러도 아무 일이 없었습니다 —
+    "지금 실행"이 아무 일도 안 하는 버튼이었습니다.
+
+    돌고 나면 `run_discovery` 가 `last_run_at` 을 갱신하므로 **다음 차례가
+    누른 시각 기준으로 다시 잡힙니다**(collector/schedule.py). 눌러 놓고
+    1분 뒤에 정기 실행이 또 도는 일이 없습니다.
+    """
     r = JobResult(job="discover")
 
     # **차례가 아니어도 재고는 씁니다.** 검색은 하루 한 번이지만, 이미
@@ -230,11 +240,18 @@ def discover_job(db: Session, keyword_ids: list[str] | None = None, trigger: str
     if filled:
         r.stats["rulePassed"] = filled
 
-    targets = (
-        list(db.scalars(select(Keyword).where(Keyword.id.in_(keyword_ids))))
-        if keyword_ids
-        else due_keywords(db)
-    )
+    if keyword_ids:
+        targets = list(db.scalars(select(Keyword).where(Keyword.id.in_(keyword_ids))))
+    elif trigger == "manual":
+        targets = list(
+            db.scalars(
+                select(Keyword).where(
+                    Keyword.status.in_(("pending", "active")), Keyword.archived_at.is_(None)
+                )
+            )
+        )
+    else:
+        targets = due_keywords(db)
     if not targets:
         if filled:
             run = _start(db, "discover", trigger, f"발견분 {filled}편을 자막 줄로")
@@ -263,9 +280,17 @@ def discover_job(db: Session, keyword_ids: list[str] | None = None, trigger: str
 # ── 2) 자막 ──────────────────────────────────────────────────
 
 
-def transcript_job(db: Session) -> JobResult:
-    """대기가 있으면 받아씁니다. 검색·검토를 기다리지 않습니다."""
+def transcript_job(db: Session, force: bool = False) -> JobResult:
+    """대기가 있으면 받아씁니다. 검색·검토를 기다리지 않습니다.
+
+    `force` 는 사람이 시작을 눌렀다는 뜻입니다. **냉각을 무시하는 것이
+    아니라 지웁니다** — 누르는 사람은 대개 회선을 바꾼 참이라, "이 IP 로는
+    안 된다"는 기록이 더 이상 참이 아닙니다(collector/transcript.py
+    `clear_cooldowns`). 그러고도 막히면 60분부터 다시 쌓입니다.
+    """
     r = JobResult(job="transcript")
+    if force:
+        clear_cooldowns(db)
 
     # **세우기 전에 기간부터 봅니다.** 줄에서 기다리는 동안 창을 벗어난
     # 것을 그대로 요약하면, 키워드마다 정해 둔 "며칠까지 볼 것인가" 를
@@ -317,8 +342,14 @@ def transcript_job(db: Session) -> JobResult:
 # ── 3) 요약 ──────────────────────────────────────────────────
 
 
-def review_due(db: Session) -> tuple[bool, int, str]:
-    """지금 검토를 돌릴 때인가. (돌릴까, 대기 수, 사유)"""
+def review_due(db: Session, force: bool = False) -> tuple[bool, int, str]:
+    """지금 요약을 돌릴 때인가. (돌릴까, 대기 수, 사유)
+
+    `force` 는 사람이 눌렀다는 뜻입니다. **모으기만 건너뜁니다** — 상한과
+    회사 사정은 그대로 지킵니다. 눌렀다고 상한을 넘겨 쓰면 그건 상한이
+    아니고, 안 받아 주는 회사에 한 번 더 던지는 것은 풀리는 데 도움이 되지
+    않습니다. 사람이 건너뛰고 싶은 것은 "5건 모일 때까지 기다리기" 쪽입니다.
+    """
     waiting = int(
         db.scalar(select(func.count()).select_from(Video).where(Video.state == "TRANSCRIBED")) or 0
     )
@@ -344,6 +375,9 @@ def review_due(db: Session) -> tuple[bool, int, str]:
         return False, waiting, "상한을 넘어 멈춤"
     pace.clear_capped(db, settings.review_provider)
 
+    if force:
+        return True, waiting, "사람이 눌러 시작"
+
     if waiting >= cadence.REVIEW_BATCH:
         return True, waiting, f"{waiting}건 모임"
 
@@ -358,12 +392,19 @@ def review_due(db: Session) -> tuple[bool, int, str]:
     return False, waiting, ""
 
 
-async def review_job(db: Session) -> JobResult:
+async def review_job(db: Session, force: bool = False) -> JobResult:
     """모인 자막을 몰아서 요약합니다."""
     r = JobResult(job="review")
     r.stats["zombies"] = recover_zombies(db)
 
-    go, waiting, why = review_due(db)
+    # **눌렀으면 "회사가 안 받는다"는 타이머도 지웁니다.** 그 타이머는
+    # 불러 봐야만 풀렸는지 알 수 있어서 둔 것인데, 사람이 계정을 바꾸거나
+    # 다시 로그인했으면 이미 답을 아는 셈입니다. 상한은 그대로입니다 —
+    # 그건 우리가 건 것이고 화면에서 올리면 곧바로 재개됩니다.
+    if force:
+        pace.clear(db, settings.review_provider)
+
+    go, waiting, why = review_due(db, force=force)
     if not go:
         return r
 
@@ -391,7 +432,7 @@ async def review_job(db: Session) -> JobResult:
 # ── 4) 블로그 발행 ───────────────────────────────────────────
 
 
-def publish_job(db: Session) -> JobResult:
+def publish_job(db: Session, force: bool = False) -> JobResult:
     """차례가 되면 한 편을 블로그로 내보냅니다 (.spec/tistory.md).
 
     **기본은 꺼져 있습니다.** 공개 발행은 되돌리기 번거로워서, 워커를
@@ -400,7 +441,13 @@ def publish_job(db: Session) -> JobResult:
     r = JobResult(job="publish")
     if not settings.blog_enabled:
         return r
-    if not publish.due(db):
+    # **간격만 건너뜁니다.** 하루 상한과 세션은 그대로입니다 — 저 둘은
+    # 저쪽이 정한 것이라 눌러서 넘길 수 있는 값이 아닙니다.
+    #
+    # 올리고 나면 `publish_once` 가 끝에서 다음 차례를 새로 잡습니다.
+    # 그래서 지금 한 편 내보내도 곧바로 또 나가지 않고, 30~60분이라는
+    # 원래 간격이 **누른 시각 기준으로** 다시 시작됩니다.
+    if not force and not publish.due(db):
         return r
 
     out = publish.publish_once(db)
@@ -425,11 +472,23 @@ def publish_job(db: Session) -> JobResult:
 # ── "지금 실행" ──────────────────────────────────────────────
 
 
-def take_queued_run(db: Session) -> CrawlRun | None:
-    """사용자가 누른 요청을 집어옵니다. 검색 잡이 처리합니다 —
-    누르는 의도는 "지금 새로 찾아봐"이지 "요약해"가 아닙니다."""
+def take_queued_run(db: Session, job: str) -> CrawlRun | None:
+    """사용자가 누른 요청 중 **이 잡 앞으로 온 것**을 집어옵니다.
+
+    예전에는 검색 잡이 잡을 가리지 않고 아무 요청이나 집었습니다. 요청이
+    한 종류(검색)뿐이던 때는 맞았지만, 이제 네 트랙을 따로 눌러 시작할 수
+    있어서 그대로 두면 검색 잡이 남의 요청을 삼키고 아무 일도 안 합니다.
+
+    잡을 나누기 전에 만들어진 요청(`job='cycle'`)은 검색이 같이 집어
+    갑니다. 아무도 자기 것으로 치지 않으면 영영 `queued` 로 남아, 화면의
+    "이미 기다리는 요청이 있습니다"가 풀리지 않습니다.
+    """
+    mine = [job] + (["cycle"] if job == "discover" else [])
     run = db.scalar(
-        select(CrawlRun).where(CrawlRun.status == "queued").order_by(CrawlRun.started_at).limit(1)
+        select(CrawlRun)
+        .where(CrawlRun.status == "queued", CrawlRun.job.in_(mine))
+        .order_by(CrawlRun.started_at)
+        .limit(1)
     )
     if run is not None:
         run.status = "running"

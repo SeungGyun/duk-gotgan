@@ -194,7 +194,13 @@ export const httpApi: Api = {
   skipQueued: (videoId) => req<void>(`/queue/${videoId}/skip`, { method: "POST" }),
   restoreQueued: (videoId) => req<void>(`/queue/${videoId}/restore`, { method: "POST" }),
 
-  requestRun: () => req<Run>("/runs", { method: "POST" }),
+  requestRun: (job = "discover") =>
+    req<Run>("/runs", { method: "POST", body: JSON.stringify({ job }) }),
+
+  retryFailed: (pick) =>
+    req<{ restored: number }>("/queue/retry", { method: "POST", body: JSON.stringify(pick) }),
+  excludeFailed: (pick) =>
+    req<{ excluded: number }>("/queue/exclude", { method: "POST", body: JSON.stringify(pick) }),
 
   listChannelBlocks: () => req("/channels/blocks"),
 

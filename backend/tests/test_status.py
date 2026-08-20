@@ -129,6 +129,7 @@ def test_요약은_회사별로_갈라_말한다(monkeypatch):
             "label": label,
             "restingUntil": resting,
             "capped": capped,
+            "working": None,
         }
 
     둘_다_멀쩡 = [회사("클로드"), 회사("안티그래비티")]
@@ -183,3 +184,82 @@ def test_회사_이름_뒤에_조사를_붙여_쓴다():
     assert _josa("안티그래비티", "은", "는") == "안티그래비티는"
     # 받침이 있으면 반대쪽입니다.
     assert _josa("사람", "이", "가") == "사람이"
+
+
+def test_막히지_않은_것과_일하는_중인_것을_가른다(monkeypatch):
+    """요약 대기가 0 인데 화면이 클로드·안티그래비티 둘 다 "도는 중"
+    이라고 적었습니다. 아무도 아무것도 안 하는 순간이었습니다.
+
+    `reviewers` 가 **막힘 여부만** 알고 있어서, 화면이 "안 막혔다"를
+    "돌고 있다"로 읽을 수밖에 없었습니다 — 화면이 지어낸 말이 아니라
+    우리가 답을 안 준 것입니다. 누가 무엇을 쥐고 있는지는
+    `videos.claimed_by` 가 회사 이름을 앞에 달고 알고 있습니다.
+    """
+    from app.api.routes import stats
+
+    monkeypatch.setattr(stats.pace, "resume_at", lambda db, p: None)
+    monkeypatch.setattr(stats.pace, "capped", lambda db, p: False)
+
+    class 붙든것:
+        def __init__(self, owner, title):
+            self.claimed_by, self.title = owner, title
+            self.claimed_at = self.updated_at = now_kst()
+
+    class 디비:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def scalars(self, _stmt):
+            return self.rows
+
+    쉬는중 = stats._reviewers(디비([]))
+    assert [r["working"] for r in 쉬는중] == [None, None], "대기 0 이면 쥔 것이 없습니다"
+
+    한쪽만 = {r["provider"]: r for r in stats._reviewers(디비([붙든것("antigravity:mac:9", "어떤 강의")]))}
+    assert 한쪽만["antigravity"]["working"]["title"] == "어떤 강의"
+    assert 한쪽만["claude"]["working"] is None, "남이 쥔 것을 내 것으로 세면 안 됩니다"
+
+
+def test_사람이_바꿀_수_있는_멈춤은_눌러서_앞당긴다(monkeypatch):
+    """**같은 IP 일 때만 맞는 말이었습니다.**
+
+    "차단된 문을 두드리면 차단만 길어진다"고 버튼을 통째로 잠갔는데,
+    사람이 VPN 을 바꾸면 냉각이 지키려던 조건 자체가 사라집니다. 그때
+    화면은 04:09 까지 기다리라고만 했습니다 — 우리가 모르는 사실을
+    이유로 사람을 붙잡아 둔 셈입니다.
+
+    가르는 기준은 **사람이 조건을 바꿀 수 있는가** 입니다.
+    """
+    from app.api.routes import stats
+    from app.collector import transcript
+
+    now = now_kst()
+    later = now + timedelta(hours=4)
+    monkeypatch.setattr(transcript, "blocked_until", lambda db: later)
+    monkeypatch.setattr(transcript, "audio_blocked_until", lambda db: later)
+
+    h = stats._transcript_hold(None, now)
+    assert h["tone"] == "stop"
+    assert h["forcible"] is True, "회선을 바꾸면 사라지는 조건입니다"
+
+    # 유튜브 하루 할당량은 구글이 셉니다 — 눌러도 소용없습니다.
+    ledger = type("L", (), {"youtube_units": 10**9})()
+    db = type("D", (), {"get": lambda self, m, k: ledger})()
+    q = stats._discover_hold(db, now)
+    assert q is not None and q["forcible"] is False
+
+
+def test_눌러서_시작하면_냉각을_무시하지_않고_지운다():
+    """무시와 지우기는 다릅니다. 무시하면 다음 사이클에 그 기록이 그대로
+    남아 또 막고, 누적된 백오프(60·120·240·480분)도 옛 IP 의 것이
+    그대로 이어집니다 — 새 회선에서 첫 실패가 곧바로 8시간짜리가 됩니다."""
+    import inspect
+
+    from app.collector import jobs, transcript
+
+    src = inspect.getsource(jobs.transcript_job)
+    assert "clear_cooldowns(db)" in src
+
+    body = inspect.getsource(transcript.clear_cooldowns)
+    assert "set_time" in body and "_set_streak" in body, "냉각과 누적을 같이 지웁니다"
+    assert "AUDIO_COOLDOWN_KEY" in body and "COOLDOWN_KEY" in body, "두 문 다"

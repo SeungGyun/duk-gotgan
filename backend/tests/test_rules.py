@@ -65,7 +65,7 @@ def test_통과하는_후보():
         ({"duration_sec": 20000}, "길이 초과"),
         ({"published_at": now_kst() - timedelta(days=1000)}, "오래됨"),
         ({"title": "무료특강 신청하세요"}, "홍보성 제목"),
-        ({"default_language": "en"}, "언어 불일치"),
+        ({"title": "சட்டப்பேரவையில் OPS"}, "읽을 수 없는 언어"),
     ],
 )
 def test_탈락_사유(over, expect):
@@ -238,7 +238,69 @@ def test_구독한_채널에는_언어_필터를_걸지_않는다():
     assert v.ok, v.reason
 
 
-def test_검색_키워드에는_언어_필터가_그대로_걸린다():
+def test_검색_키워드도_언어값으로는_거르지_않는다():
+    """**뒤집었습니다.** 예전에는 키워드 언어가 `ko` 면 `defaultAudioLanguage`
+    가 다른 것을 떨어뜨렸습니다. 그런데 그 값이 틀립니다 —
+    `박종훈의 지식한방`(한국어 채널) 27편이 `ja` 로 찍혀 있고, 요약 실패
+    43건 중 22건이 한국어 강의인데 `en-US`·`ja`·`zh` 였습니다.
+
+    채널 구독에만 예외를 두고 있었는데, 값 자체를 못 믿는 것이라 예외를
+    둘 자리가 아니었습니다. 언어는 이제 제목의 문자로 봅니다.
+    """
     kw = make_keyword(source_type="search", language="ko")
     v = evaluate(make_candidate(default_language="ja"), kw)
-    assert not v.ok and "언어 불일치" in v.reason
+    assert v.ok, "잘못 찍힌 한국어 강의를 떨어뜨리면 안 됩니다"
+
+
+# ── 읽을 수 없는 언어 ────────────────────────────────────────
+
+
+def test_읽을_수_없는_언어는_제목에서_갈린다():
+    """곳간은 한국어·영어 강의를 모으는데 검색은 언어를 가리지 않습니다.
+    타밀·태국·힌디 영상이 자막(GPU 2~7분)과 요약(편당 6~8만 토큰)을 다
+    치른 뒤에야 "무관"으로 판정됐습니다 — **18편이 공개까지 갔고 그중
+    15편이 irrelevant** 였습니다.
+    """
+    from app.collector.rules import foreign_script
+
+    assert foreign_script("சட்டப்பேரவையில் OPS, செங்கோட்டையன்") == "타밀"
+    assert foreign_script("AI Girl Series จะ Gen จนกว่าจะเจอ") == "태국"
+    assert foreign_script("Жуткое будущее ИИ | Варламов") == "키릴"
+    assert foreign_script("Energy Drinks ज़हर हैं") == "데바나가리"
+
+
+def test_한국어_영어_강의는_걸리지_않는다():
+    """실측: 낯선 문자 제목 131건 중 **한글이 섞인 것은 0건**이었습니다.
+    오탐이 0 인 신호는 흔치 않아서, 이 성질이 깨지면 알아야 합니다."""
+    from app.collector.rules import foreign_script
+
+    assert foreign_script("반도체 주가 역대급 싼 데, 왜 떨어졌나?") is None
+    assert foreign_script("PHOTON: LLM 추론 효율 극대화, 수직 스캐닝") is None
+    assert foreign_script("AI Is Changing Time: Those Who Can't Catch Up") is None
+
+
+def test_한자와_가나는_막지_않는다():
+    """한국어 제목에 한자가 섞이고(`韓`·`美`), 나중에 일본어 강의를 원할
+    수도 있습니다. 실측에서도 이 둘은 문제를 일으키지 않았습니다."""
+    from app.collector.rules import foreign_script
+
+    assert foreign_script("美 증시 전망과 韓 반도체") is None
+    assert foreign_script("日本語のタイトル") is None
+
+
+def test_못_믿는_언어값으로는_거르지_않는다():
+    """`defaultAudioLanguage` 는 업로더가 손으로 넣는 값이라 틀립니다 —
+    요약 실패 43건 중 22건이 한국어 강의인데 `en-US`·`ja`·`zh` 였습니다.
+
+    지금은 모든 키워드가 `any` 라 이 검사가 안 돌고 있었지만, **누군가
+    키워드를 `ko` 로 바꾸는 순간** 멀쩡한 강의가 조용히 떨어집니다.
+    그런 코드는 남겨 두면 함정이 됩니다.
+    """
+    import inspect
+
+    from app.collector import rules
+
+    code = "\n".join(
+        ln.split("#", 1)[0] for ln in inspect.getsource(rules.evaluate).splitlines()
+    )
+    assert "default_language" not in code, "못 믿는 값으로 거르면 안 됩니다"

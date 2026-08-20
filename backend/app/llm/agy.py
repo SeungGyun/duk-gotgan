@@ -135,6 +135,46 @@ def _argv(ws: workspace.Workspace, schema: Path, profile: Path | None) -> list[s
     return cmd
 
 
+def _sweep_group(pgid: int, video_id: str) -> None:
+    """agy 가 끝난 뒤 그 그룹에 남은 것들을 정리합니다.
+
+    **무엇이 남았는지 먼저 적습니다.** 2026-08-20 에 워커가 13분 멈췄을
+    때, 붙든 것이 `/usr/bin/security -i`(키체인 창을 띄운 채 서 있던 것)
+    라는 사실을 알아내는 데 `lsof` 로 파이프 반대쪽을 추적해야 했습니다.
+    이름 한 줄이 로그에 있었으면 곧바로 보였을 일입니다.
+
+    조용히 지나가는 것이 정상입니다 — 남은 것이 있을 때만 말합니다.
+    """
+    try:
+        left = subprocess.run(
+            ["ps", "-o", "pid=,command=", "-g", str(pgid)],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        left = ""
+    if left:
+        lines = [ln.strip() for ln in left.splitlines() if ln.strip()]
+        logger.warning(
+            "[agy] %s 뒤에 %d개가 남아 정리합니다 — %s",
+            video_id, len(lines), " / ".join(ln[:90] for ln in lines[:3]),
+        )
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        return
+
+
+def _read_and_drop(path: Path) -> str:
+    """받아 적은 것을 읽고 파일은 버립니다. 못 읽어도 넘어갑니다 —
+    출력이 없다는 것은 그 자체로 아래에서 다룰 수 있는 상태입니다."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        text = ""
+    path.unlink(missing_ok=True)
+    return text
+
+
 async def _kill_group(proc) -> None:
     """맏이가 아니라 **프로세스 그룹 전체**를 죽입니다.
 
@@ -180,38 +220,49 @@ async def review(
     if profile is None:
         logger.warning("[agy] 샌드박스가 꺼져 있습니다 — 자막이 홈 디렉터리를 읽게 할 수 있습니다")
 
+    # **파이프를 쓰지 않습니다.** 이것이 이 함수에서 가장 중요한 줄입니다.
+    #
+    # agy 는 언어 서버·`security`(키체인) 같은 도우미를 따로 띄우고,
+    # 그것들이 우리 파이프의 쓰기 끝을 물려받습니다. agy 자신이 끝나도
+    # 도우미가 살아 있으면 **EOF 가 오지 않아** `communicate()` 가 안
+    # 돌아옵니다 — 2026-08-20 에 `security -i` 가 키체인 창을 띄운 채 서
+    # 있어서 워커가 13분 30초를 멈췄고, 그전에는 72분짜리도 있었습니다.
+    #
+    # 파일로 받으면 그 커플링이 통째로 사라집니다. `proc.wait()` 는 **agy
+    # 자신이 죽는 순간** 돌아오고, 손자가 무엇을 쥐고 있든 상관하지
+    # 않습니다. 덤으로 16KB 파이프 버퍼 교착도 없어집니다 — 지금까지는
+    # agy 가 그보다 많이 뱉는 동안 우리가 안 읽으면 agy 쪽이 막혔습니다.
+    out_path = ws.path.parent / f"{ws.video_id}.agy.out"
+    err_path = ws.path.parent / f"{ws.video_id}.agy.err"
+    pgid = None
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *_argv(ws, schema, profile),
-            cwd=str(ws.path),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            # **자기 프로세스 그룹으로 띄웁니다.** agy 는 언어 서버·agentapi
-            # 같은 도우미를 따로 띄우고, 그것들이 우리 파이프를 물려받습니다.
-            # 맏이만 죽이면 도우미가 쓰기 끝을 쥔 채 남아 EOF 가 오지 않고,
-            # 읽는 쪽이 영원히 기다립니다 — 실제로 워커가 72분을 멈춰 있었고
-            # 그동안 요약이 한 건도 안 됐습니다.
-            start_new_session=True,
-            # 자막이 환경변수를 통해 무언가를 흘리지 못하게, 넘기는 것을
-            # 최소로 줄입니다. HOME 은 agy 가 인증을 찾는 데 필요합니다.
-            env={
-                "HOME": os.environ.get("HOME", ""),
-                "PATH": os.environ.get("PATH", ""),
-                "USER": os.environ.get("USER", ""),
-                "TERM": "dumb",
-            },
-        )
+        with out_path.open("wb") as fout, err_path.open("wb") as ferr:
+            proc = await asyncio.create_subprocess_exec(
+                *_argv(ws, schema, profile),
+                cwd=str(ws.path),
+                # 물어볼 데가 없어야 합니다. 도우미가 stdin 을 기다리며
+                # 서 있는 것도 멈춤의 한 갈래입니다.
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=fout,
+                stderr=ferr,
+                # **자기 프로세스 그룹으로 띄웁니다.** 뒷정리를 그룹 단위로
+                # 하려면 이게 있어야 합니다.
+                start_new_session=True,
+                # 자막이 환경변수를 통해 무언가를 흘리지 못하게, 넘기는 것을
+                # 최소로 줄입니다. HOME 은 agy 가 인증을 찾는 데 필요합니다.
+                env={
+                    "HOME": os.environ.get("HOME", ""),
+                    "PATH": os.environ.get("PATH", ""),
+                    "USER": os.environ.get("USER", ""),
+                    "TERM": "dumb",
+                },
+            )
+            pgid = proc.pid  # start_new_session 이라 pid 가 곧 그룹 id 입니다
         try:
             # CLI 자체 타임아웃이 있지만 그것만 믿지 않습니다 — 프로세스가
             # 먹통이 되면 워커가 통째로 멈춥니다.
-            out, err = await asyncio.wait_for(
-                proc.communicate(), timeout=settings.agy_timeout_sec + 60
-            )
+            await asyncio.wait_for(proc.wait(), timeout=settings.agy_timeout_sec + 60)
         except asyncio.TimeoutError:
-            # **여기서 `communicate()` 를 다시 부르면 안 됩니다.** 취소된
-            # 첫 호출이 파이프를 물고 있어서 두 번째 호출이 영영 안 끝납니다.
-            # 그렇게 워커가 통째로 멎었습니다 — 죽은 자식의 파이프 두 개를
-            # 붙든 채, 자식은 이미 없는데도요.
             await _kill_group(proc)
             # **영상 탓이 아닙니다.** 시한을 넘긴 15편의 자막 크기가
             # 1,295~20,086 토큰으로 고르게 퍼져 있습니다 — 가장 작은 것도
@@ -224,12 +275,16 @@ async def review(
         logger.exception("[agy] %s 실행 실패", ws.video_id)
         return result
     finally:
+        # **정상으로 끝났어도 뒷정리를 합니다.** 남은 도우미는 이제 우리를
+        # 멈춰 세우지는 못하지만, 그대로 두면 다음 창을 띄우고 쌓입니다.
+        if pgid is not None:
+            _sweep_group(pgid, ws.video_id)
         schema.unlink(missing_ok=True)
         if profile is not None:
             profile.unlink(missing_ok=True)
 
-    stdout = out.decode("utf-8", "replace").strip()
-    stderr = err.decode("utf-8", "replace").strip()
+    stdout = _read_and_drop(out_path)
+    stderr = _read_and_drop(err_path)
 
     payload = _last_json_object(stdout)
     if payload is None:

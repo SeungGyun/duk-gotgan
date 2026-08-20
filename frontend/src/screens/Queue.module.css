@@ -139,3 +139,176 @@
     line-height: 1.45;
   }
 }
+
+/* ── 실패 — 손봐야 할 것 ─────────────────────────────────
+   이 패널만 다중 선택을 씁니다. 대기 목록의 다른 칸은 한 줄씩 빼는 일이라
+   버튼 하나로 끝나지만, 실패는 "여러 번 죽은 것을 한꺼번에" 가 하고 싶은
+   일이라 고르는 도구가 필요합니다. */
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 10px 14px 0;
+}
+.tab,
+.tabOn {
+  border: 1px solid var(--border-strong);
+  border-bottom: 0;
+  border-radius: var(--r) var(--r) 0 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--muted);
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.tabOn {
+  background: var(--surface-2);
+  color: var(--ink);
+  font-weight: 650;
+}
+.tabCount {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  margin-left: 4px;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 14px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.chip,
+.chipOn {
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 3px 11px;
+  cursor: pointer;
+}
+.chipOn {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 650;
+}
+/* 몇 건이 걸렸는지. **필터 옆에 붙어야 합니다** — 버튼을 눌렀는데 목록이
+   안 바뀌면 필터가 고장 난 줄 알게 되고, 이 숫자가 그때 답이 됩니다. */
+.filterCount {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.pickAll {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.pickedCount {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  margin-right: auto;
+}
+/* 되돌릴 수 없는 것을 묻는 줄. 색으로 갈라야 "다시 돌리기" 와 헷갈리지
+   않습니다 — 둘은 같은 자리에서 번갈아 나오니까요. */
+.ask {
+  font-size: 12.5px;
+  color: var(--fail);
+  font-weight: 600;
+}
+.note {
+  margin: 0;
+  padding: 9px 14px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.rowPicked {
+  composes: row;
+  background: var(--accent-soft);
+}
+.rowPicked + .row,
+.row + .rowPicked,
+.rowPicked + .rowPicked {
+  border-top: 1px solid var(--border);
+}
+.check {
+  justify-self: end;
+  cursor: pointer;
+}
+
+/* 실패 횟수. 되풀이하는 것을 찾으러 온 화면이라 제목보다 이 숫자로
+   훑게 됩니다 — 넘긴 것은 색으로 튀워 둡니다. */
+.tries,
+.triesHot {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.triesHot {
+  color: var(--fail);
+  font-weight: 650;
+}
+
+/* 사유. **접지 않습니다** — 여기까지 온 사람은 그걸 읽으러 왔습니다.
+   다시 해도 같은 것은 흐리게 두어, 훑을 때 되살릴 것과 갈립니다. */
+.why,
+.whyDead {
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.why {
+  color: var(--ink-2);
+}
+/* 취소선을 넣어 봤다가 뺐습니다 — 읽으라고 넣은 문장에 줄을 그으면
+   읽기가 나빠지고, 네 줄이 다 그어져 있으면 갈라 보이지도 않습니다.
+   흐리게 두고, 딱지 한 개로 표시합니다. */
+.whyDead {
+  color: var(--muted);
+}
+.dead {
+  display: inline-block;
+  margin-right: 5px;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  font-size: 10px;
+  font-weight: 650;
+  color: var(--muted);
+  vertical-align: 1px;
+}
+
+@media (max-width: 560px) {
+  .filterCount,
+  .pickedCount {
+    margin-left: 0;
+    flex: 1 0 100%;
+  }
+}

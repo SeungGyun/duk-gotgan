@@ -1,5 +1,6 @@
 import type {
   ChannelBlock,
+  FailedPick,
   Keyword,
   KeywordDraft,
   LectureDetail,
@@ -14,6 +15,7 @@ import type {
   Queue,
   Run,
   RunEvent,
+  RunnableJob,
   Usage,
 } from "./types";
 
@@ -115,8 +117,19 @@ export interface Api {
   /** 처리 전에 뺍니다 — 받아쓰기도 검토도 하지 않습니다. */
   skipQueued(videoId: string): Promise<void>;
   restoreQueued(videoId: string): Promise<void>;
-  /** "지금 실행" — 요청만 남깁니다. 워커가 다음 틱에 집어갑니다. */
-  requestRun(): Promise<Run>;
+  /** 트랙 하나를 지금 시작합니다 — **요청만 남깁니다.** 워커가 다음 틱에
+   *  집어갑니다. 기다리는 요청은 트랙마다 하나씩이라, 검색을 눌러 놓고도
+   *  요약을 누를 수 있습니다. 이미 기다리는 중이면 409 `RUN_ALREADY_QUEUED`.
+   *
+   *  검색을 누르면 차례를 무시하고 활성 키워드를 전부 돌고, **다음 차례가
+   *  누른 시각 기준으로 다시 잡힙니다.** 블로그도 마찬가지로 간격이 다시
+   *  시작됩니다 — 눌러 놓고 1분 뒤에 정기 실행이 또 도는 일이 없습니다. */
+  requestRun(job?: RunnableJob): Promise<Run>;
+  /** 실패한 것을 줄에 다시 세웁니다. 자막이 남아 있으면 요약 줄로,
+   *  없으면 자막부터. 되살린 수를 돌려줍니다. */
+  retryFailed(pick: FailedPick): Promise<{ restored: number }>;
+  /** 되풀이해 실패하는 것을 완전히 뺍니다 — **다시 수집하지 않습니다.** */
+  excludeFailed(pick: FailedPick): Promise<{ excluded: number }>;
 
   // 채널
   listChannelBlocks(): Promise<ChannelBlock[]>;

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 
 import { api } from "../api";
 import type { Failure, Overview, ProviderUsage, Usage } from "../api";
@@ -33,26 +34,16 @@ export function Dashboard({
   error: string | null;
   onRetry: () => void;
 }) {
-  // "지금 실행"은 요청만 남깁니다. 워커가 다음 틱에 집어가므로 버튼을 누른
-  // 뒤 몇 초 안에 실행 로그에 나타납니다 — 여기서 결과를 기다리지 않습니다.
-  const [requesting, setRequesting] = useState(false);
-  const [runNote, setRunNote] = useState<string | null>(null);
+  // **"지금 실행" 버튼은 실행 로그로 옮겼습니다.**
+  //
+  // 여기 있을 때 그 버튼은 검색만 돌렸는데, 화면 어디에도 그 말이 없어서
+  // "전부 다시 돈다"로 읽혔습니다. 게다가 눌러 놓고 무슨 일이 벌어지는지
+  // 보려면 결국 실행 로그로 가야 했습니다.
+  //
+  // 지금은 트랙마다(검색·자막·요약·블로그) 자기 줄에 시작 버튼이 있고,
+  // 그 옆에 지금 무엇을 하는 중이고 언제 다음인지가 같이 적힙니다.
+  // 누르는 자리와 결과를 보는 자리가 같아졌습니다.
   const me = useMe();
-
-  const requestRun = async () => {
-    setRequesting(true);
-    setRunNote(null);
-    try {
-      await api.requestRun();
-      setRunNote("실행을 요청했습니다. 곧 시작됩니다 — 실행 로그에서 진행을 볼 수 있습니다.");
-      onRetry();
-    } catch (e) {
-      setRunNote(e instanceof Error ? e.message : "요청에 실패했습니다.");
-    } finally {
-      setRequesting(false);
-      window.setTimeout(() => setRunNote(null), 6000);
-    }
-  };
 
   if (error) {
     return (
@@ -103,17 +94,11 @@ export function Dashboard({
       title="대시보드"
       subtitle={`마지막 실행 ${when(overview.lastRunAt)}`}
       actions={
-        <Button variant="primary" onClick={() => void requestRun()} disabled={requesting}>
-          {requesting ? "요청 중…" : "지금 실행"}
-        </Button>
+        <Link className={s.toRuns} to="/runs">
+          실행 로그에서 시작 →
+        </Link>
       }
     >
-      {runNote && (
-        <p className={s.runNote} role="status">
-          {runNote}
-        </p>
-      )}
-
       <Panel bodyless>
         <div className={s.stats}>
           <div className={s.stat}>

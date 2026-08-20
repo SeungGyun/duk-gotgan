@@ -153,8 +153,40 @@ class Fetched:
 NOT_A_LANGUAGE = {"zx", "zxx", "un", "und", "mul", "mu", "mis", "mi"}
 
 
+def _asr_language(video: Video) -> str:
+    """**받아쓰기에는 유튜브의 언어값을 넘기지 않습니다.** 빈 문자열이면
+    위스퍼가 소리를 듣고 스스로 정합니다 (`asr._whisper_language`).
+
+    `defaultAudioLanguage` 는 업로더가 손으로 넣는 값이고, **우리는 이미
+    그것이 못 믿을 값이라는 걸 알고 있었습니다** — `collector/rules.py` 에
+    "`박종훈의 지식한방`(한국어 채널)의 영상 27편이 `ja` 로 찍혀 있어
+    통째로 떨어지고 있었습니다" 라고 적어 두고, 그래서 **필터에서는** 이
+    값을 뺐습니다. 그런데 받아쓰기는 그대로 1순위로 쓰고 있었습니다.
+    한쪽만 고친 것입니다.
+
+    그 대가가 이렇습니다. 한국어 강의를 일본어로 받아쓴 결과입니다.
+
+        [0:00] 7月29日は、私たちの最悪の日中の一つです。 コスピーとコスタクの市場で…
+               (실제 발화: 7월 29일은 우리에게 최악의 날 중 하나입니다…)
+
+    자막을 **찾을** 때와 다릅니다. 거기서는 틀려도 다음 후보로 넘어갈 뿐
+    잃는 것이 없어서 힌트로 써도 됩니다(`_pick_languages`). 받아쓰기는
+    강제로 먹이는 것이라 틀리면 통째로 망가지고, 그 자막으로 요약까지
+    가서 편당 토큰을 태운 뒤 "요약 불가"로 죽습니다 — 실측으로 요약 실패
+    43건 중 **22건이 이 경로**였습니다.
+
+    **모르면 재지 말고 들어 보게 합니다.**
+    """
+    return ""
+
+
 def _pick_languages(video: Video) -> list[str]:
-    """어느 언어 자막을 먼저 찾을지. 영상 언어를 알면 그것부터."""
+    """어느 언어 **자막**을 먼저 찾을지. 영상 언어를 알면 그것부터.
+
+    여기서는 유튜브 값을 써도 됩니다 — 틀리면 다음 후보로 넘어갈 뿐이고,
+    자막 목록을 훑는 데는 값이 들지 않습니다. 받아쓰기는 다릅니다
+    (`_asr_language`).
+    """
     langs = ["ko", "en"]
     raw = (video.default_language or "").lower()
     if raw.split("-")[0] in NOT_A_LANGUAGE:
@@ -443,6 +475,23 @@ def _set_streak(db: Session, n: int, key: str = STREAK_KEY) -> None:
     db.commit()
 
 
+def clear_cooldowns(db: Session) -> None:
+    """두 문의 냉각과 누적을 지웁니다 — **사람이 조건을 바꿨을 때만.**
+
+    냉각은 "이 IP 로는 지금 안 된다"는 기록입니다. 그런데 사람이 VPN 을
+    바꾸거나 회선을 다시 잡으면 그 전제가 사라집니다. 그때까지 기다리게
+    하는 것은 우리가 모르는 사실을 이유로 사람을 붙잡아 두는 셈입니다.
+
+    **누적(streak)도 같이 지웁니다.** 60·120·240·480분으로 늘려 온 그
+    값은 옛 IP 가 쌓은 것입니다. 새 회선에서 첫 실패가 곧바로 8시간짜리가
+    되면, 바꾼 보람이 사라집니다. 그러고도 또 막히면 60분부터 다시 쌓입니다.
+    """
+    for cool, streak in ((COOLDOWN_KEY, STREAK_KEY), (AUDIO_COOLDOWN_KEY, AUDIO_STREAK_KEY)):
+        state.set_time(db, cool, None)
+        _set_streak(db, 0, streak)
+    logger.info("[transcript] 냉각을 풀었습니다 — 사람이 시작을 눌렀습니다")
+
+
 def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) -> dict:
     """자막 대기 중인 영상을 순서대로 처리합니다.
 
@@ -707,9 +756,8 @@ def fetch_via_asr(video: Video) -> Fetched:
     """소리를 받아 직접 받아씁니다. 자막 경로가 전부 막혔을 때만."""
     from app.collector import asr
 
-    langs = _pick_languages(video)
     try:
-        r = asr.transcribe(video.id, video.duration_sec or 0, language=langs[0] if langs else "ko")
+        r = asr.transcribe(video.id, video.duration_sec or 0, language=_asr_language(video))
     except asr.AudioUnavailable as e:
         # 이 영상만의 문제입니다. 자막 없음으로 적고 다음 영상으로 넘어갑니다 —
         # 차단으로 다루면 멀쩡한 나머지까지 60분씩 멈춥니다.

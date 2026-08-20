@@ -45,19 +45,27 @@ TICKS = cadence.TICKS
 # 안 됩니다.
 
 
+# **눌러서 시작하는 길.** 네 트랙 모두 자기 앞으로 온 요청을 집어갑니다
+# (`take_queued_run`). 집어간 요청은 그 자리에서 닫고, 실제로 한 일은 잡이
+# 새로 여는 기록에 남습니다 — 요청과 실행은 다른 사건이라 한 줄에 담으면
+# "언제 눌렀나"와 "무엇을 했나" 중 하나를 잃습니다.
+def _take(db, job: str) -> bool:
+    queued = jobs.take_queued_run(db, job)
+    if queued is None:
+        return False
+    queued.status = "succeeded"
+    db.commit()
+    logger.info("[%s] 사람이 눌러 시작합니다", job)
+    return True
+
+
 def _discover_blocking() -> str | None:
     db = SessionLocal()
     try:
         jobs.recover_stale_runs(db, "discover")
-        # "지금 실행"은 검색 잡이 집어갑니다 — 누르는 의도는 "지금 새로
-        # 찾아봐"이지 "요약해"가 아닙니다.
-        queued = jobs.take_queued_run(db)
-        if queued is not None:
-            queued.status = "succeeded"
-            db.commit()
-            r = jobs.discover_job(db, trigger="manual")
-        else:
-            r = jobs.discover_job(db)
+        # 눌러서 시작하면 **차례를 무시하고 활성 키워드를 전부** 돕니다.
+        manual = _take(db, "discover")
+        r = jobs.discover_job(db, trigger="manual" if manual else "scheduled")
         return r.label if r.did_work else None
     finally:
         db.close()
@@ -76,7 +84,11 @@ def _transcript_blocking() -> str | None:
     db = SessionLocal()
     try:
         jobs.recover_stale_runs(db, "transcript")
-        r = jobs.transcript_job(db)
+        # 눌러서 시작하면 **냉각을 풉니다.** 누르는 사람은 대개 회선을
+        # 바꾼 참이라("VPN 바꾸고 시작해 보려고"), "이 IP 로는 안 된다"는
+        # 기록이 더 이상 참이 아닙니다. 그냥 무시하는 것과 다릅니다 —
+        # 기록을 지우므로 그러고도 막히면 60분부터 다시 쌓입니다.
+        r = jobs.transcript_job(db, force=_take(db, "transcript"))
         return r.label if r.did_work else None
     finally:
         db.close()
@@ -86,7 +98,7 @@ def _publish_blocking() -> str | None:
     db = SessionLocal()
     try:
         jobs.recover_stale_runs(db, "publish")
-        r = jobs.publish_job(db)
+        r = jobs.publish_job(db, force=_take(db, "publish"))
         return r.label if r.did_work else None
     finally:
         db.close()
@@ -120,7 +132,8 @@ async def _run_review() -> None:
     db = SessionLocal()
     try:
         jobs.recover_stale_runs(db, "review")
-        r = await jobs.review_job(db)
+        # 눌러서 시작하면 "5건 모일 때까지" 만 건너뜁니다.
+        r = await jobs.review_job(db, force=_take(db, "review"))
         if r.did_work:
             logger.info("[review] %s", r.label)
             for n in r.notes:

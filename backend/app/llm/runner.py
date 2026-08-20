@@ -9,10 +9,12 @@
 캐시 프리픽스가 깨집니다.
 """
 
+import asyncio
 import logging
 import os
 import re
 import socket
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -187,17 +189,43 @@ async def review_video(
     db.commit()
 
     outcome = ReviewOutcome()
+    started = time.monotonic()
 
     try:
         if settings.review_provider == "antigravity":
             await _via_agy(run, ws, outcome, run_id, owner)
         else:
-            await _via_claude(run, ws, outcome, run_id, owner, transcript.est_tokens)
+            # **클로드 경로에는 시한이 없었습니다.** `max_turns` 는 턴 수를
+            # 셀 뿐이라, 한 턴이 안 돌아오면 워커가 무한정 붙들립니다 —
+            # agy 쪽은 진작 상한을 두고 있었는데 이쪽만 비어 있었습니다.
+            #
+            # 값은 넉넉하게 잡습니다. 실측할 근거가 아직 없고(편당 소요를
+            # 안 남기고 있었습니다 — 아래에서 남기기 시작합니다), 관측된
+            # 가장 긴 성공이 21.5분이라 그보다 짧게 잡으면 멀쩡한 것을
+            # 죽입니다. 잡는 것은 "영영 안 돌아오는" 경우뿐입니다.
+            await asyncio.wait_for(
+                _via_claude(run, ws, outcome, run_id, owner, transcript.est_tokens),
+                timeout=settings.review_timeout_sec,
+            )
+    except asyncio.TimeoutError:
+        # **영상 탓이 아닙니다.** agy 쪽과 같게 다룹니다 — 탈락이 아니라
+        # 줄로 되돌아갑니다. 안 그러면 오늘 같은 멈춤 한 번에 그 편들이
+        # 영구 실패로 적힙니다.
+        run.transient = True
+        run.error = f"요약이 {settings.review_timeout_sec // 60}분 안에 끝나지 않았습니다."
+        logger.warning("[review] %s — %s", video.id, run.error)
     except Exception as e:  # noqa: BLE001
         run.error = f"실행 실패: {e}"
         logger.exception("[review] %s 실행 실패", video.id)
     finally:
         ws.cleanup()
+
+    # **편당 소요를 남깁니다.** 이 줄이 없어서 시한을 실측으로 정하지 못하고
+    # 어림으로 잡았습니다. 쌓이면 다음에 조일 수 있습니다.
+    logger.info(
+        "[review] %s %.1f분 (%s)",
+        video.id, (time.monotonic() - started) / 60, settings.review_provider,
+    )
 
     if outcome.error:
         run.error = outcome.error

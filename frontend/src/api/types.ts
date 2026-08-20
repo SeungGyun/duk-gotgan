@@ -272,6 +272,15 @@ export interface Hold {
   /** **사람이 해야 할 일**. 비어 있으면 기다리면 되는 일입니다 — 이
    *  구분이 없으면 모든 줄이 똑같이 불안하게 읽힙니다. */
   fix: string | null;
+  /** 사람이 눌러서 앞당길 수 있는 멈춤인가.
+   *
+   *  가르는 기준은 **사람이 조건을 바꿀 수 있는가** 입니다. IP 차단은
+   *  VPN 을 바꾸면 사라지고, 회사 세션은 다시 로그인하면 됩니다. 반면
+   *  유튜브 하루 할당량은 구글이 세는 것이라 눌러도 소용없습니다.
+   *
+   *  누르면 무시하는 게 아니라 **냉각을 지웁니다** — 그러고도 막히면
+   *  처음부터 다시 쌓입니다. */
+  forcible: boolean;
 }
 
 /** 한 트랙(검색·자막·요약)의 지금 상태. **셋이 나란히 돕니다** — 하나만
@@ -308,6 +317,10 @@ export interface Reviewer {
   restingUntil: string | null;
   /** 우리가 건 상한을 넘음 — **상한을 올리면 곧바로 재개**됩니다. */
   capped: boolean;
+  /** 지금 이 회사가 쥐고 있는 영상. **막히지 않은 것과 일하는 중인 것은
+   *  다릅니다** — 이 값이 없던 동안 화면은 대기 0 인 순간에도 둘 다
+   *  "도는 중"이라고 적었습니다. */
+  working: { title: string; since: string } | null;
 }
 
 /** 블로그에 올라간 글 하나. */
@@ -527,8 +540,51 @@ export interface QueueStage {
   items: QueueItem[];
 }
 
+/** 실패해서 줄에서 빠진 것 하나.
+ *
+ *  **손봐야 풀립니다** — 자막·요약은 저절로 다시 시도하지 않습니다.
+ *  대개는 그 편의 문제가 아니라 그때 유튜브가 막혔거나 요약 세션이
+ *  죽은 것이라, 다시 세우면 그냥 됩니다. */
+export interface FailedItem extends QueueItem {
+  failedAt: string | null;
+  /** 지금까지 실패로 기록된 횟수. "되풀이 실패"를 고르는 기준입니다. */
+  attempts: number;
+  /** 다시 해 볼 만한가. **어림짐작입니다** — 다시 해도 같은 사유(자막이
+   *  8자, 영상이 너무 김, 비공개)만 false 이고 모르는 실패는 true 입니다.
+   *  자동으로 아무것도 하지 않고, 걸러 보는 데만 씁니다. */
+  retryable: boolean;
+}
+
+export interface FailedGroup {
+  kind: "transcript" | "review";
+  label: string;
+  count: number;
+  items: FailedItem[];
+}
+
 export interface Queue {
   stages: QueueStage[];
   skipped: QueueItem[];
+  /** 손봐야 할 실패 — 자막·요약 두 무리. */
+  failed: FailedGroup[];
   asrRealtimeFactor: number;
+}
+
+/** 눌러서 시작할 수 있는 트랙. 정기 실행을 앞당길 뿐, 막힌 것(차단·상한·
+ *  세션)은 건너뛰지 않습니다. */
+export type RunnableJob = "discover" | "transcript" | "review" | "publish";
+
+/** 무엇을 다시 돌리거나 뺄 것인가.
+ *
+ *  **화면이 고른 것을 그대로 보냅니다.** 서버에 필터 언어를 두면 보여 준
+ *  목록과 서버가 고른 목록이 갈릴 수 있고, 그 차이가 하필 일괄 삭제에서
+ *  나타납니다. `kind` 만 주면 그 무리 전체입니다. */
+export interface FailedPick {
+  videoIds?: string[];
+  kind?: "transcript" | "review";
+  onlyRetryable?: boolean;
+  /** **자막부터 다시 받습니다.** 지금 있는 자막이 못 쓸 것일 때 — 받아쓰기가
+   *  언어를 잘못 잡아 한국어 강의를 일본어로 옮겨 놓은 것들이 그랬습니다.
+   *  요약만 다시 부르면 그 자막을 읽고 같은 결론이 나옵니다. */
+  refetch?: boolean;
 }

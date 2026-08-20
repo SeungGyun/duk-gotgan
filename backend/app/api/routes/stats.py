@@ -320,7 +320,24 @@ def _hold(
     until=None,
     since=None,
     fix: str | None = None,
+    forcible: bool = False,
 ) -> dict:
+    """`forcible` — **사람이 눌러서 앞당길 수 있는 멈춤인가.**
+
+    처음에는 "막힌 것은 눌러서 넘기지 않는다"로 한 줄로 정했습니다. 차단된
+    문을 두드리면 차단만 길어지니까요. 그런데 그건 **같은 IP 일 때** 맞는
+    말이었습니다. 사람이 VPN 을 바꾸면 IP 가 달라지고, 냉각이 지키려던
+    조건 자체가 사라집니다 — 그때는 04:09 까지 기다릴 이유가 없습니다.
+
+    가르는 기준은 **사람이 조건을 바꿀 수 있는가**입니다.
+
+      바꿀 수 있음   IP 차단(VPN·회선) · 회사 세션(계정 바꾸기)
+      바꿀 수 없음   유튜브 하루 할당량(구글이 셉니다) · 메모리 · 모으는 중
+
+    누르면 그냥 무시하는 게 아니라 **냉각을 지웁니다.** 조건이 바뀌었다고
+    보는 것이므로 누적된 백오프도 같이 지웁니다 — 그 누적은 옛 IP 의
+    것입니다. 그러고도 또 막히면 60분부터 다시 쌓입니다.
+    """
     return {
         "code": code,
         "tone": tone,
@@ -329,6 +346,7 @@ def _hold(
         "until": to_utc_iso(until) if until else None,
         "since": to_utc_iso(since) if since else None,
         "fix": fix,
+        "forcible": forcible,
     }
 
 
@@ -369,17 +387,21 @@ def _transcript_hold(db: Session, now) -> dict | None:
             "transcript_blocked",
             "유튜브가 자막도 소리도 막았습니다",
             "자막 내려받기와 음성 파일 내려받기가 둘 다 막혔습니다. 여기서 더 두드리면 "
-            "차단이 길어지기만 하므로 손을 뗍니다 — 시간이 지나면 저절로 풀립니다.",
+            "차단이 길어지기만 하므로 손을 뗍니다 — 시간이 지나면 저절로 풀립니다. "
+            "회선을 바꿨다면(VPN·재접속) 기다릴 이유가 없으니 지금 시작하세요.",
             tone="stop",
             until=max(caps, audio),
+            forcible=True,
         )
     if audio:
         return _hold(
             "audio_blocked",
             "음성 파일을 내려받지 못하고 있습니다",
             "소리를 받아 직접 받아쓰는 길이 막혔습니다. 그동안은 유튜브에 자막이 이미 "
-            "있는 영상만 처리하고, 자막이 없는 영상은 줄에서 그대로 기다립니다.",
+            "있는 영상만 처리하고, 자막이 없는 영상은 줄에서 그대로 기다립니다. "
+            "회선을 바꿨다면 지금 시작해도 됩니다.",
             until=audio,
+            forcible=True,
         )
     if caps:
         return _hold(
@@ -389,6 +411,7 @@ def _transcript_hold(db: Session, now) -> dict | None:
             "이 길은 막히지 않습니다.",
             tone="info",
             until=caps,
+            forcible=True,
         )
     return None
 
@@ -399,10 +422,28 @@ def _reviewers(db: Session) -> list[dict]:
     **한쪽만 쉬는 것과 둘 다 멎은 것은 완전히 다른 상황입니다.** 합쳐서
     "요약 쉬는 중" 이라고 적으면 그 차이가 사라집니다 — 실제로 안티그래비티
     쪽만 멎어 있는데 화면으로는 알 길이 없었습니다.
+
+    **막히지 않은 것과 일하는 중인 것을 갈라 보냅니다.** 처음에는 막힘
+    여부만 보냈는데, 화면이 그걸 "도는 중" 으로 읽었습니다. 그래서 요약
+    대기가 0 이라 아무도 아무것도 안 하는 순간에 둘 다 "도는 중" 으로
+    떴습니다 — 화면이 지어낸 말이 아니라, 우리가 답을 안 준 것입니다.
+
+    누가 무엇을 쥐고 있는지는 `videos.claimed_by` 가 압니다. 좀비 회수가
+    자기 회사 것만 골라내려고 회사 이름을 앞에 붙여 두었는데
+    (`llm/runner.worker_id`), 같은 접두사로 여기서도 가릅니다.
     """
+    busy: dict[str, Video] = {}
+    for v in db.scalars(select(Video).where(Video.state == "REVIEWING")):
+        name = (v.claimed_by or "").split(":", 1)[0]
+        # 회사마다 락이 하나라 한 회사가 둘을 쥘 일은 없습니다. 그래도
+        # 회수 직전의 좀비가 겹칠 수 있어 먼저 집은 쪽을 씁니다.
+        if name and name not in busy:
+            busy[name] = v
+
     out = []
     for name in usage_guard.PROVIDERS:
         resting = pace.resume_at(db, name)
+        v = busy.get(name)
         out.append(
             {
                 "provider": name,
@@ -412,6 +453,12 @@ def _reviewers(db: Session) -> list[dict]:
                 "restingUntil": to_utc_iso(resting) if resting else None,
                 # 우리가 건 상한을 넘은 것 — **상한을 올리면 곧바로 재개**됩니다.
                 "capped": pace.capped(db, name),
+                # 지금 이 회사가 쥐고 있는 영상. 없으면 차례를 기다리는 중입니다.
+                "working": (
+                    {"title": v.title, "since": to_utc_iso(v.claimed_at or v.updated_at)}
+                    if v is not None
+                    else None
+                ),
             }
         )
     return out
@@ -467,6 +514,7 @@ def _review_hold(db: Session, now, waiting: int, reviewers: list[dict]) -> dict 
             tone="info",
             until=until,
             fix=fix,
+            forcible=True,
         )
     return _hold(
         "provider_down",
@@ -475,6 +523,7 @@ def _review_hold(db: Session, now, waiting: int, reviewers: list[dict]) -> dict 
         tone="stop",
         until=until,
         fix=fix,
+        forcible=True,
     )
 
 
@@ -679,24 +728,62 @@ def run_events(run_id: str, db: Session = Depends(get_db), _: User = Depends(cur
     ]
 
 
+# 눌러서 시작할 수 있는 잡과, 눌렀을 때 무엇이 달라지는지.
+#
+# **네 트랙 모두 정기적으로 돕니다.** 버튼은 그 주기를 앞당길 뿐이지 없던
+# 일을 만들지 않습니다. 잡마다 건너뛰는 것이 다른데, 공통점은 **막힌 것은
+# 건너뛰지 않는다**는 것입니다 — 차단·상한·세션은 눌러서 넘길 수 있는 값이
+# 아니고, 두드리면 오히려 길어집니다.
+RUNNABLE = {
+    "discover": "검색",
+    "transcript": "자막",
+    "review": "요약",
+    "publish": "블로그",
+}
+
+
+class RunRequest(BaseModel):
+    """어느 트랙을 시작할 것인가. 없으면 검색 — 예전 버튼의 뜻입니다."""
+
+    job: str = "discover"
+
+
 @router.post("/runs", status_code=202)
-def request_run(db: Session = Depends(get_db), _: User = Depends(require_owner)):
-    """"지금 실행" — **요청만 남깁니다.** 워커가 다음 틱에 집어갑니다.
+def request_run(
+    body: RunRequest | None = None,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_owner),
+):
+    """트랙 하나를 지금 시작합니다 — **요청만 남깁니다.** 워커가 다음 틱에
+    집어갑니다.
 
     여기서 직접 돌리지 않는 이유: 한 사이클이 몇 분씩 걸려서 HTTP 요청이
     그동안 매달려 있게 되고, 브라우저가 먼저 끊으면 진행 상황을 알 수
     없습니다. 요청을 기록으로 남기면 실행 로그에 바로 보이고, 워커가
     집어가면서 상태가 이어집니다.
+
+    **기다리는 요청은 잡마다 하나씩입니다.** 예전에는 전체에 하나였는데,
+    트랙을 따로 누르게 된 지금 그대로 두면 검색을 눌러 놓고 요약을 못
+    누릅니다 — 서로 다른 일인데 한 줄을 두고 다투게 됩니다.
     """
-    waiting = db.scalar(select(CrawlRun).where(CrawlRun.status == "queued"))
+    job = (body.job if body else "discover") or "discover"
+    if job not in RUNNABLE:
+        raise ApiError(400, "UNKNOWN_JOB", f"시작할 수 없는 트랙입니다: {job}")
+
+    waiting = db.scalar(
+        select(CrawlRun).where(CrawlRun.status == "queued", CrawlRun.job == job)
+    )
     if waiting is not None:
-        raise ApiError(409, "RUN_ALREADY_QUEUED", "이미 실행을 기다리는 요청이 있습니다.")
+        raise ApiError(
+            409, "RUN_ALREADY_QUEUED", f"{RUNNABLE[job]} 은(는) 이미 시작을 기다리고 있습니다."
+        )
 
     run = CrawlRun(
         trigger="manual",
+        job=job,
         status="queued",
         started_at=now_kst(),
-        label="실행 대기 중",
+        label=f"{RUNNABLE[job]} — 시작 대기 중",
         stats={},
     )
     db.add(run)

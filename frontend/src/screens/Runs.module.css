@@ -280,7 +280,7 @@
 }
 .track {
   display: grid;
-  grid-template-columns: 10px 34px 62px minmax(0, 1fr);
+  grid-template-columns: 10px 34px 62px minmax(0, 1fr) auto;
   gap: 9px;
   align-items: baseline;
   padding: 9px 0;
@@ -483,11 +483,90 @@
    그 둘은 짧고, 훑을 때 세로로 줄이 맞아야 표처럼 읽힙니다. */
 @media (max-width: 560px) {
   .track {
-    grid-template-columns: 10px auto minmax(0, 1fr);
+    grid-template-columns: 10px auto minmax(0, 1fr) auto;
     gap: 3px 9px;
   }
   .trackBody {
     grid-column: 1 / -1;
     padding-left: 19px;
+  }
+}
+
+/* 시작 버튼. **첫 줄에 붙습니다** — 이유 문장이 길어져도 버튼이 아래로
+   흘러내리지 않아야, 훑을 때 트랙마다 같은 자리에서 눈에 걸립니다. */
+.trackAct {
+  align-self: start;
+}
+
+/* 눌러서 시작했다는 알림. 결과가 아니라 접수 확인이라 조용하게 둡니다 —
+   실제로 무슨 일이 벌어지는지는 바로 아래 트랙 줄이 말합니다. */
+.note {
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border-radius: var(--r);
+  background: var(--surface-2);
+  font-size: 12.5px;
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+
+/* ── 손봐야 할 것 ────────────────────────────────────────
+   세어서 보여 주기만 하던 자리입니다. 읽고 나서 할 수 있는 일이 터미널을
+   여는 것뿐이면, 그 줄은 알림이 아니라 잔소리입니다. */
+.failed {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r);
+  background: var(--surface-2);
+}
+.failedHead {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.failedRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 12.5px;
+}
+.failedLabel {
+  min-width: 122px;
+  color: var(--ink-2);
+}
+.failedLabel strong {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.failedLink {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 12px;
+}
+.failedLink:hover {
+  text-decoration: underline;
+}
+/* 버튼이 무엇을 건드리고 무엇을 안 건드리는지. **일괄 처리에는 이 한
+   문단이 반드시 있어야 합니다** — 누르는 사람이 범위를 모르면 그건
+   버튼이 아니라 도박입니다. */
+.failedNote {
+  margin: 7px 0 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+@media (max-width: 560px) {
+  .failedRow {
+    flex-wrap: wrap;
+    gap: 6px 10px;
+  }
+  .failedLabel {
+    min-width: 0;
+    flex: 1 0 100%;
   }
 }

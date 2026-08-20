@@ -9,6 +9,8 @@
 숫자만 줄이면 필터를 조일지 풀지 판단할 근거가 없습니다.
 """
 
+import re
+
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -106,6 +108,13 @@ def evaluate(
     if blocked and c.channel_id in blocked:
         return Verdict(False, f"차단한 채널 · {c.channel_title}")
 
+    # 읽을 수 없는 언어 — **원본 제목으로 봅니다.** 위에서 소문자로 접은
+    # `title` 이 아니라요. 대소문자 접기는 문자 종류를 바꾸지 않지만, 여기서
+    # 보려는 것이 "무슨 글자로 쓰였나" 라서 원본을 보는 편이 뜻이 분명합니다.
+    script = foreign_script(c.title or "")
+    if script is not None:
+        return Verdict(False, f"읽을 수 없는 언어 · {script} 문자")
+
     # 길이 — 키워드별 설정이 우선
     min_sec = kw.min_duration_sec or 0
     if min_sec and c.duration_sec < min_sec:
@@ -161,15 +170,61 @@ def evaluate(
     # 없습니다. 게다가 `defaultLanguage` 는 업로더가 손으로 넣는 값이라
     # 믿을 게 못 됩니다: `박종훈의 지식한방`(한국어 채널)의 영상 27편이
     # `ja` 로 찍혀 있어 통째로 떨어지고 있었습니다.
-    if (
-        kw.source_type != "channel"
-        and kw.language in ("ko", "en")
-        and c.default_language
-    ):
-        if not c.default_language.lower().startswith(kw.language):
-            return Verdict(False, f"언어 불일치 · {c.default_language} (기준 {kw.language})")
-
+    # **`defaultAudioLanguage` 로는 거르지 않습니다.** 예전에는 키워드
+    # 언어가 `ko`·`en` 일 때 이 값을 봤는데, 업로더가 손으로 넣는 값이라
+    # 틀립니다 — `박종훈의 지식한방`(한국어 채널) 27편이 `ja` 로 찍혀 있었고,
+    # 요약 실패 43건 중 22건이 한국어 강의인데 `en-US`·`ja`·`zh` 였습니다.
+    #
+    # 지금은 모든 키워드가 `any` 라 이 검사가 아예 안 돌고 있었습니다.
+    # 그래서 아무 해도 없어 보였지만, **누군가 키워드를 `ko` 로 바꾸는 순간**
+    # 멀쩡한 한국어 강의가 조용히 떨어집니다. 그런 코드는 남겨 두면 함정이
+    # 됩니다. 언어는 이제 제목의 문자로 봅니다(위 `foreign_script`).
     return Verdict(True)
+
+
+# **읽을 수 없는 언어는 제목에서 갈립니다.**
+#
+# 곳간은 한국어·영어 강의를 모읍니다. 그런데 검색은 언어를 가리지 않아서
+# 타밀·태국·힌디 영상이 꾸준히 들어왔고, 자막(GPU 2~7분)과 요약(편당 6~8만
+# 토큰)을 다 치른 뒤에야 "무관"으로 판정됐습니다. 실제로 **18편이 공개까지
+# 갔고 그중 15편이 `irrelevant`** 였습니다 — 태국어 "AI Girl Series" 8편,
+# 타밀어 정치 연설, 힌디어 주식 영상.
+#
+# **유튜브가 주는 `defaultAudioLanguage` 로는 못 가릅니다.** 업로더가 손으로
+# 넣는 값이라 틀립니다 — 요약 실패 43건을 뜯어보니 22건이 한국어 강의인데
+# `en-US`·`ja`·`zh` 로 찍혀 있었습니다. 그 값을 믿고 거르면 멀쩡한 강의가
+# 조용히 떨어집니다(받아쓰기가 그 값을 믿다가 한국어를 일본어로 옮겼습니다 —
+# collector/transcript.py `_asr_language`).
+#
+# 제목의 문자는 다릅니다. 사람이 안 적고 유니코드가 정합니다. 실측:
+#
+#   낯선 문자 제목 131건 · 그중 한글이 섞인 것 **0건**
+#
+# 한국어·영어 강의와 완전히 갈립니다. 오탐이 0 인 신호는 흔치 않습니다.
+#
+# **가나와 한자는 넣지 않습니다.** 한국어 제목에 한자가 섞이고(`韓`·`美`),
+# 나중에 일본어 강의를 원할 수도 있습니다. 실측에서도 이 둘은 문제를
+# 일으키지 않았습니다.
+FOREIGN_SCRIPTS = (
+    ("타밀", "\u0b80-\u0bff"),
+    ("크메르", "\u1780-\u17ff"),
+    ("미얀마", "\u1000-\u109f"),
+    ("태국", "\u0e00-\u0e7f"),
+    ("아랍", "\u0600-\u06ff"),
+    ("데바나가리", "\u0900-\u097f"),
+    ("키릴", "\u0400-\u04ff"),
+    ("히브리", "\u0590-\u05ff"),
+    ("그리스", "\u0370-\u03ff"),
+)
+_FOREIGN = tuple((name, re.compile(f"[{rng}]")) for name, rng in FOREIGN_SCRIPTS)
+
+
+def foreign_script(title: str) -> str | None:
+    """제목에 읽을 수 없는 문자가 있으면 그 이름. 없으면 None."""
+    for name, pat in _FOREIGN:
+        if pat.search(title or ""):
+            return name
+    return None
 
 
 def _mmss(sec: int) -> str:
