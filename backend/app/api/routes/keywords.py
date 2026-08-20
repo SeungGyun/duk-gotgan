@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.auth import current_user
+from app.api.auth import current_user, optional_user
 from app.api.errors import ApiError
 from app.api.serializers import keyword_out
 from app.collector.rules import WINDOW_DEFAULT_DAYS, WINDOW_MAX_DAYS
@@ -172,7 +172,7 @@ def _user_names(db: Session) -> dict[str, str]:
     return {u.id: u.name for u in db.scalars(select(User)).all()}
 
 
-def _mark_author(d: dict, k: Keyword, user_id: str, names: dict[str, str]) -> dict:
+def _mark_author(d: dict, k: Keyword, user_id: str | None, names: dict[str, str]) -> dict:
     """누가 만들었고, 내가 고칠 수 있는가.
 
     화면이 버튼을 감추는 근거이자 라우트가 막는 근거를 **한 값으로** 둡니다.
@@ -253,19 +253,33 @@ def list_keywords(
     archived: bool = Query(default=False, description="true 면 삭제(보관)된 것만"),
     mine: bool = Query(default=True, description="false 면 남이 보는 것까지"),
     db: Session = Depends(get_db),
-    user: User = Depends(current_user),
+    user: User | None = Depends(optional_user),
 ):
     """`mine=false` 면 **아직 구독하지 않은 것까지** 돌려줍니다.
 
     새로 들어온 사람이 고를 목록이고, 이미 쓰던 사람에게도 "다른 사람은
     이런 걸 보는구나" 가 됩니다 — 남이 이미 등록해 둔 키워드를 구독하면
     수집 비용이 전혀 늘지 않으므로, 새로 만드는 것보다 이쪽이 낫습니다.
+
+    **`mine=false` 만 로그인 없이 열립니다.** 가입 2단계("무엇을
+    보시겠어요?")가 계정을 만들기 **전에** 부르는 곳이라, 세션을 요구하면
+    아무도 통과할 수 없는 화면이 됩니다 — 실제로 쿠키가 없는 진짜 신규
+    방문자는 여기서 401 을 받고 빈 곳간으로 들어갔습니다. 쿠키가 남아
+    있던 브라우저에서만 되던 화면이었습니다.
+
+    내 목록(`mine=true`)과 삭제 영역(`archived=true`)은 "나" 가 있어야
+    답할 수 있는 질문이라 그대로 막습니다. 로그인 없이 나가는 것은
+    **등록된 검색어 목록**뿐인데, 그건 선택 화면이 이미 이름과 편수를
+    내놓는 것과 같은 수준입니다(집 공유기 안 전제 — ops/api.sh).
     """
+    if user is None and (archived or mine):
+        raise ApiError(401, "NO_SESSION", "누구인지 먼저 골라 주세요.")
+
     counts = lecture_counts(db)
     subs = subscriber_counts(db)
     names = _user_names(db)
 
-    if archived:
+    if archived and user is not None:
         # **내가 끊은 것**만입니다. 키워드가 아직 살아 있어도(남이 보고 있어도)
         # 내 삭제 영역에는 있어야 되살릴 수 있습니다.
         gone = db.scalars(
@@ -292,7 +306,9 @@ def list_keywords(
             out.append(_mark_author(d, k, user.id, names))
         return out
 
-    owned = _my_subs(db, user.id, archived=False)
+    # 아직 계정이 없는 사람에게는 구독한 것도 고칠 수 있는 것도 없습니다.
+    owned = _my_subs(db, user.id, archived=False) if user else set()
+    uid = user.id if user else None
     rows = db.scalars(
         select(Keyword).where(Keyword.status != "archived").order_by(Keyword.created_at)
     ).all()
@@ -304,7 +320,7 @@ def list_keywords(
         d = keyword_out(k, counts.get(k.id, 0))
         d["isMine"] = k.id in owned
         d["subscriberCount"] = subs.get(k.id, 0)
-        out.append(_mark_author(d, k, user.id, names))
+        out.append(_mark_author(d, k, uid, names))
     return out
 
 

@@ -151,6 +151,20 @@ def current_user(
     return user
 
 
+def optional_user(request: Request, db: Session = Depends(get_db)) -> User | None:
+    """있으면 그 사람, 없으면 None. **401 을 내지 않습니다.**
+
+    로그인 전에도 열려야 하는 조회가 하나 있습니다 — 가입 2단계의
+    "무엇을 보시겠어요?" 입니다. 계정을 아직 안 만든 사람이 고를 목록인데
+    `current_user` 를 지나면 **아무도 통과할 수 없는 화면**이 됩니다.
+
+    쓰는 라우트가 스스로 "로그인 없이 열어도 되는 경우"를 좁혀야 합니다
+    (`routes/keywords.py` 의 `list_keywords`). 이 함수는 누구인지만 알려
+    주고, 열지 말지는 정하지 않습니다.
+    """
+    return find_user(db, request)
+
+
 def require_owner(user: User = Depends(current_user)) -> User:
     """관리자만 누를 수 있는 것 — 수집을 직접 돌리는 버튼 같은 것.
 
@@ -173,6 +187,7 @@ __all__ = [
     "current_user",
     "find_user",
     "open_session",
+    "optional_user",
     "owner_id",
     "require_owner",
 ]

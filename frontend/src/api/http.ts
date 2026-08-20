@@ -7,6 +7,7 @@ import type {
   LectureQuery,
   Person,
   PersonDraft,
+  PersonRemoved,
   Run,
 } from "./types";
 
@@ -100,6 +101,12 @@ export const httpApi: Api = {
 
   createPerson: (draft: PersonDraft) =>
     req<Person>("/users", { method: "POST", body: JSON.stringify(draft) }),
+
+  deletePerson: (id, pin) =>
+    req<PersonRemoved>(`/users/${id}`, {
+      method: "DELETE",
+      body: JSON.stringify({ pin: pin ?? null }),
+    }),
 
   leave: () => req<void>("/session", { method: "DELETE" }),
 

@@ -1,8 +1,10 @@
 """사람 고르기 — 선택 화면이 쓰는 API.
 
-이 파일의 라우트 중 **`GET /users` 와 `POST /session` 만 로그인 없이** 열려
-있습니다. 선택 화면 자체가 로그인 전 화면이라 그렇습니다. 나머지는 전부
-`current_user` 를 지납니다.
+이 파일의 라우트 중 **`GET /users`·`POST /session`·`DELETE /users/{id}` 만
+로그인 없이** 열려 있습니다. 선택 화면 자체가 로그인 전 화면이라 그렇습니다 —
+사람을 만드는 자리가 거기라면 지우는 자리도 거기여야 합니다. 대신 삭제는
+그 사람의 비밀번호를 묻습니다(잠근 사람이면). 나머지는 전부 `current_user`
+를 지납니다.
 """
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -10,9 +12,17 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.auth import check_pin, close_session, current_user, open_session
+from app.api.auth import (
+    COOKIE,
+    check_pin,
+    close_session,
+    current_user,
+    find_user,
+    open_session,
+)
 from app.api.errors import ApiError
 from app.db.models import Keyword, User, UserKeyword
+from app.db.purge import delete_user as purge_user
 from app.db.session import get_db
 from app.security import hash_pin, is_valid_pin, verify_pin
 from config.settings import settings
@@ -44,6 +54,11 @@ class PinChange(BaseModel):
 
 class Rename(BaseModel):
     name: str
+
+
+class Remove(BaseModel):
+    # 잠긴 사람을 지울 때만. 이미 그 사람으로 들어와 있거나 관리자면 안 씁니다.
+    pin: str | None = None
 
 
 def _lecture_counts(db: Session, ids: list[str]) -> dict[str, int]:
@@ -165,6 +180,63 @@ def create_user(draft: NewUser, response: Response, db: Session = Depends(get_db
 
     open_session(db, user, response)
     return user_out(user, _lecture_counts(db, [user.id])[user.id])
+
+
+@router.delete("/users/{user_id}")
+def remove_user(
+    user_id: str,
+    request: Request,
+    response: Response,
+    body: Remove | None = None,
+    db: Session = Depends(get_db),
+):
+    """사람을 지웁니다. **되돌릴 수 없습니다.**
+
+    지워지는 것은 `db/purge.py` 에 적어 두었습니다. 요약하면 그 사람만의
+    것(읽음·즐겨찾기·제외·채널 숨김)과, **그 사람이 빠지면 보는 사람이
+    0명이 되는 키워드**와, 그 키워드‘만’ 데려온 강의입니다. 남이 아직 보는
+    키워드는 그대로 돕니다.
+
+    **문은 선택 화면과 같은 문입니다.** 만드는 자리가 로그인 전 화면이라
+    지우는 자리도 거기여야 하는데, 거기서 물을 수 있는 것은 그 사람의
+    비밀번호뿐입니다. 잠긴 사람은 네 자리를 받고(틀리면 로그인과 똑같이
+    잠깁니다), 안 잠근 사람은 그냥 지웁니다 — 어차피 눌러서 그 사람으로
+    들어간 다음 지울 수 있으므로, 한 단계를 더 두어도 막는 것이 없습니다.
+
+    이미 그 사람으로 들어와 있으면 다시 묻지 않고, 관리자는 식구를 비밀번호
+    없이 지울 수 있습니다.
+
+    **관리자는 지울 수 없습니다.** 선택 화면에서 관리자 자리가 비면 수집을
+    돌릴 사람도, 남을 지울 사람도 없어집니다 — 화면에서 되돌릴 방법이
+    없는 상태라 아예 막습니다.
+    """
+    target = db.get(User, user_id)
+    if target is None:
+        raise ApiError(404, "USER_NOT_FOUND", "그 사람을 찾을 수 없습니다.")
+    if target.is_owner:
+        raise ApiError(
+            403,
+            "OWNER_UNDELETABLE",
+            "관리자는 지울 수 없습니다. 관리자가 없으면 수집을 돌릴 사람도 없어집니다.",
+        )
+
+    me = find_user(db, request)
+    mine = me is not None and me.id == target.id
+    if not mine and (me is None or not me.is_owner) and target.password_hash:
+        if body is None or not body.pin:
+            raise ApiError(
+                401, "PIN_REQUIRED", f"{target.name} 님의 비밀번호 네 자리를 입력해 주세요."
+            )
+        check_pin(target, body.pin)  # 틀리면 여기서 끝나고, 여러 번이면 잠깁니다
+
+    removed = purge_user(db, target)
+
+    # 내 계정을 지웠으면 이 기기도 나갑니다. 세션 행은 이미 없어졌지만
+    # 쿠키가 남아 있으면 다음 요청이 401 로 튕기는 것으로만 알게 됩니다.
+    if mine:
+        response.delete_cookie(COOKIE, path="/")
+
+    return {"removedKeywords": removed.keywords, "removedLectures": removed.lectures}
 
 
 @router.get("/me")

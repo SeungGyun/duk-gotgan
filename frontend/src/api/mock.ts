@@ -787,6 +787,49 @@ export const mockApi: Api = {
     return { ...p };
   },
 
+  /** 목에는 사람이 하나만 있는 것처럼 굴러갑니다(키워드 목록이 곧 `current`
+   *  의 것). 그래서 **내 계정을 지울 때만** 내용까지 지웁니다 — 남을 지우는
+   *  것은 목에서는 사람 하나가 목록에서 빠지는 일입니다. */
+  async deletePerson(id, pin) {
+    await delay();
+    const p = people.find((x) => x.id === id);
+    if (!p) throw new ApiError("그 사람을 찾을 수 없습니다.", 404, "USER_NOT_FOUND");
+    if (p.isOwner) {
+      throw new ApiError(
+        "관리자는 지울 수 없습니다. 관리자가 없으면 수집을 돌릴 사람도 없어집니다.",
+        403,
+        "OWNER_UNDELETABLE",
+      );
+    }
+    const asked = current?.id === p.id;
+    // 목에서는 0000 만 맞다고 봅니다 — 진짜 검증은 서버 몫입니다.
+    if (!asked && p.hasPin && pin !== "0000") {
+      throw new ApiError(
+        pin ? "비밀번호가 다릅니다." : `${p.name} 님의 비밀번호 네 자리를 입력해 주세요.`,
+        401,
+        pin ? "PIN_WRONG" : "PIN_REQUIRED",
+      );
+    }
+
+    people = people.filter((x) => x.id !== p.id);
+    if (!asked) return { removedKeywords: 0, removedLectures: 0 };
+
+    // 나 혼자 보던 키워드(구독자 1명)와, 그 키워드‘만’ 데려온 강의.
+    const gone = keywords.filter((k) => k.isMine && k.subscriberCount <= 1);
+    const goneIds = new Set(gone.map((k) => k.id));
+    let removedLectures = 0;
+    for (let i = lectures.length - 1; i >= 0; i--) {
+      const l = lectures[i]!;
+      if (l.keywordIds.length && l.keywordIds.every((kid) => goneIds.has(kid))) {
+        lectures.splice(i, 1);
+        removedLectures += 1;
+      }
+    }
+    keywords = keywords.filter((k) => !goneIds.has(k.id));
+    current = null;
+    return { removedKeywords: gone.length, removedLectures };
+  },
+
   async leave() {
     await delay();
     current = null;

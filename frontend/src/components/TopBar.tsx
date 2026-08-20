@@ -288,6 +288,8 @@ function Account({
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // 계정 지우기를 한 번 눌렀는가 (두 번째가 진짜입니다)
+  const [sure, setSure] = useState(false);
 
   const only4 = (v: string) => v.replace(/\D/g, "").slice(0, 4);
 
@@ -314,6 +316,22 @@ function Account({
     // 셸 전체를 다시 그려야 하므로 통째로 다시 읽습니다. 라우터로만
     // 옮기면 이미 받아 둔 남의 목록이 화면에 남습니다.
     window.location.assign("/who");
+  };
+
+  /** 내 계정 지우기. **두 번 눌러야 지워집니다** — 사용자 바꾸기 바로 옆에
+   *  있어서, 한 번에 지워지면 나가려다 계정을 잃습니다. */
+  const erase = async () => {
+    if (!sure) return setSure(true);
+    setBusy(true);
+    setError(null);
+    try {
+      await api.deletePerson(me.id);
+      window.location.assign("/who");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "지우지 못했습니다.");
+      setSure(false);
+      setBusy(false);
+    }
   };
 
   return (
@@ -384,6 +402,28 @@ function Account({
           닫기
         </button>
       </div>
+
+      {/* **관리자에게는 안 냅니다.** 관리자를 지우면 수집을 돌릴 사람도,
+          남을 지울 사람도 없어집니다 — 서버가 막는 것을 화면에서도 같이
+          감춥니다(눌러도 403 인 버튼은 "왜 나만 안 되지" 가 됩니다). */}
+      {!me.isOwner && (
+        <div className={s.menuDanger}>
+          <button
+            type="button"
+            className={s.menuErase}
+            onClick={() => void erase()}
+            disabled={busy}
+          >
+            {sure ? "정말 지웁니다 — 한 번 더" : "계정 지우기"}
+          </button>
+          {sure && (
+            <p className={s.menuDangerHint}>
+              읽음·즐겨찾기·제외 표시가 사라지고, 나만 보던 키워드와 그 키워드가 데려온 강의도
+              함께 지워집니다. 되돌릴 수 없습니다.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

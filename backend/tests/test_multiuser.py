@@ -674,3 +674,181 @@ def test_기간은_석_달을_넘길_수_없다(client, db, days):
     assert client.post(f"{API}/keywords", json={"term": "경제", "searchWindowDays": days}).status_code == 400
     kw = client.post(f"{API}/keywords", json={"term": "경제"}).json()
     assert client.patch(f"{API}/keywords/{kw['id']}", json={"searchWindowDays": days}).status_code == 400
+
+
+# ── 사람 지우기 ────────────────────────────────────────────────
+
+
+def remove(client, user, pin=None):
+    """DELETE 에 본문을 실어야 해서 `client.delete` 를 못 씁니다(httpx 제약)."""
+    return client.request("DELETE", f"{API}/users/{user.id}", json={"pin": pin})
+
+
+def test_사람을_지우면_아무도_안_보는_키워드까지_지운다(client, db):
+    """**"관련 내용"이 어디까지인가가 이 기능의 전부입니다.**
+
+    혼자 보던 키워드는 그 사람이 빠지면 아무도 안 읽습니다 — 남겨 두면
+    보는 사람 0명인 것을 매일 수집합니다. 반대로 남이 아직 보는 키워드는
+    손대면 안 됩니다: 지운 적 없는 사람의 곳간이 말라붙습니다.
+    """
+    from app.db.models import Transcript, UserKeyword
+
+    주인 = a_user(db, "주인", owner=True)
+    아내 = a_user(db, "아내")
+    같이 = a_keyword(db, "쿠버네티스", by=주인)
+    혼자 = a_keyword(db, "요리", by=아내)
+    a_lecture(db, "vid_k_000001", 같이, "CNI 플러그인")
+    a_lecture(db, "vid_c_000001", 혼자, "된장찌개")
+    db.add(Transcript(video_id="vid_c_000001", source="youtube_auto", content="…"))
+    for u in (주인, 아내):
+        db.add(UserKeyword(user_id=u.id, keyword_id=같이.id))
+    db.add(UserKeyword(user_id=아내.id, keyword_id=혼자.id))
+    db.commit()
+
+    r = remove(client, 아내)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"removedKeywords": 1, "removedLectures": 1}
+
+    s = fresh(db)
+    assert s.get(User, 아내.id) is None
+    assert s.get(Keyword, 혼자.id) is None, "아무도 안 보는 키워드는 같이 지웁니다"
+    assert s.get(Keyword, 같이.id) is not None, "주인이 아직 보고 있습니다"
+    assert s.get(Video, "vid_c_000001") is None, "그 키워드만 데려온 영상은 내용까지 지웁니다"
+    assert s.get(Transcript, "vid_c_000001") is None
+    assert s.get(Video, "vid_k_000001") is not None
+
+    login(client, 주인)
+    assert titles(client) == {"CNI 플러그인"}, "남은 사람 것은 그대로여야 합니다"
+
+
+def test_다른_키워드도_데려온_영상은_남는다(client, db):
+    """영상은 키워드와 N:M 입니다. 지울 키워드가 데려왔다는 이유만으로
+    지우면, 같은 영상을 다른 키워드로 보던 사람에게서 **지운 적 없는
+    것이 사라집니다.**"""
+    from app.db.models import UserKeyword, VideoKeyword
+
+    주인 = a_user(db, "주인", owner=True)
+    아내 = a_user(db, "아내")
+    주인것 = a_keyword(db, "쿠버네티스", by=주인)
+    아내것 = a_keyword(db, "도커", by=아내)
+    a_lecture(db, "vid_k_000001", 주인것, "둘 다 데려온 것")
+    db.add(VideoKeyword(video_id="vid_k_000001", keyword_id=아내것.id))
+    db.add(UserKeyword(user_id=주인.id, keyword_id=주인것.id))
+    db.add(UserKeyword(user_id=아내.id, keyword_id=아내것.id))
+    db.commit()
+
+    assert remove(client, 아내).json() == {"removedKeywords": 1, "removedLectures": 0}
+
+    s = fresh(db)
+    assert s.get(Keyword, 아내것.id) is None
+    assert s.get(Video, "vid_k_000001") is not None
+
+    login(client, 주인)
+    assert titles(client) == {"둘 다 데려온 것"}
+
+
+def test_읽음과_즐겨찾기는_지운_사람_것만_사라진다(client, db):
+    from app.db.models import UserKeyword, UserLecture
+
+    주인 = a_user(db, "주인", owner=True)
+    아내 = a_user(db, "아내")
+    kw = a_keyword(db, "쿠버네티스", by=주인)
+    a_lecture(db, "vid_k_000001", kw, "CNI 플러그인")
+    for u in (주인, 아내):
+        db.add(UserKeyword(user_id=u.id, keyword_id=kw.id))
+    db.commit()
+
+    for u in (주인, 아내):
+        login(client, u)
+        client.patch(f"{API}/lectures/vid_k_000001", json={"isFavorite": True})
+
+    assert remove(client, 아내).status_code == 200
+
+    s = fresh(db)
+    assert s.get(UserLecture, {"user_id": 아내.id, "video_id": "vid_k_000001"}) is None
+    assert s.get(UserLecture, {"user_id": 주인.id, "video_id": "vid_k_000001"}) is not None
+
+
+def test_관리자는_지울_수_없다(client, db):
+    """선택 화면에서 관리자 자리가 비면 수집을 돌릴 사람도, 남을 지울
+    사람도 없어집니다. 화면에서 되돌릴 방법이 없으므로 아예 막습니다."""
+    주인 = a_user(db, "주인", pin="0000", owner=True)
+    r = remove(client, 주인, pin="0000")
+    assert r.status_code == 403
+    assert r.json()["error"]["code"] == "OWNER_UNDELETABLE"
+    assert fresh(db).get(User, 주인.id) is not None
+
+
+def test_잠근_사람은_비밀번호가_있어야_지워진다(client, db):
+    """지우는 문은 들어가는 문과 같아야 합니다 — 잠가 뒀는데 옆에서
+    누구나 지울 수 있으면 잠근 것이 아닙니다."""
+    from app.api import auth
+
+    auth._tries.clear()
+    a_user(db, "주인", owner=True)
+    아내 = a_user(db, "아내", pin="1234")
+
+    assert remove(client, 아내).status_code == 401
+    assert remove(client, 아내, pin="9999").status_code == 401
+    assert fresh(db).get(User, 아내.id) is not None
+    assert remove(client, 아내, pin="1234").status_code == 200
+    assert fresh(db).get(User, 아내.id) is None
+    auth._tries.clear()
+
+
+def test_관리자는_식구를_비밀번호_없이_지운다(client, db):
+    주인 = a_user(db, "주인", owner=True)
+    아내 = a_user(db, "아내", pin="1234")
+
+    login(client, 주인)
+    assert remove(client, 아내).status_code == 200
+    assert fresh(db).get(User, 아내.id) is None
+
+
+def test_내_계정을_지우면_그_기기도_나간다(client, db):
+    """쿠키가 남아 있으면 다음 요청이 401 로 튕기는 것으로만 알게 됩니다."""
+    a_user(db, "주인", owner=True)
+    아내 = a_user(db, "아내", pin="1234")
+
+    login(client, 아내, pin="1234")
+    assert remove(client, 아내).status_code == 200, "이미 그 사람이면 비밀번호를 또 묻지 않습니다"
+    assert client.get(f"{API}/me").status_code == 401
+
+
+def test_가입_2단계는_로그인_없이_키워드를_고른다(client, db):
+    """계정을 만들기 **전에** 부르는 화면입니다. 세션을 요구하면 쿠키가
+    없는 진짜 신규 방문자는 아무도 통과하지 못하고 빈 곳간으로 들어갑니다 —
+    쿠키가 남아 있던 브라우저에서만 되던 화면이었습니다.
+
+    열리는 것은 `mine=false` 하나뿐입니다. 내 목록과 삭제 영역은 "나" 가
+    있어야 답할 수 있는 질문이라 그대로 막혀야 합니다.
+    """
+    주인 = a_user(db, "주인", owner=True)
+    a_keyword(db, "쿠버네티스", by=주인)
+
+    r = client.get(f"{API}/keywords", params={"mine": "false"})
+    assert r.status_code == 200, r.text
+    assert [k["term"] for k in r.json()] == ["쿠버네티스"]
+    assert r.json()[0]["isMine"] is False
+    assert r.json()[0]["canEdit"] is False, "아직 계정이 없는 사람이 고칠 수 있으면 안 됩니다"
+
+    assert client.get(f"{API}/keywords").status_code == 401
+    assert client.get(f"{API}/keywords", params={"archived": "true"}).status_code == 401
+
+
+def test_고른_키워드로_가입하면_바로_곳간이_찬다(client, db):
+    """"일단 둘러보기" 로 빠지면 키워드 0개 = 빈 곳간입니다. 고른 것이
+    실제로 붙어야 들어가자마자 강의가 보입니다."""
+    주인 = a_user(db, "주인", owner=True)
+    kw = a_keyword(db, "쿠버네티스", by=주인)
+    a_lecture(db, "vid_k_000001", kw, "CNI 플러그인")
+
+    pick = client.get(f"{API}/keywords", params={"mine": "false"}).json()
+    r = client.post(
+        f"{API}/users",
+        json={"name": "새사람", "pin": None, "keywordIds": [k["id"] for k in pick]},
+    )
+    assert r.status_code == 201, r.text
+    # 만들고 나면 바로 그 사람으로 들어가 있습니다 — 쿠키가 심어집니다.
+    assert client.get(f"{API}/me").json()["name"] == "새사람"
+    assert titles(client) == {"CNI 플러그인"}

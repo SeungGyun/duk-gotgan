@@ -19,6 +19,7 @@ const PICK_MAX = 10;
 type Step =
   | { at: "list" }
   | { at: "pin"; person: Person }
+  | { at: "remove"; person: Person }
   | { at: "name" }
   | { at: "keywords"; name: string; pin: string | null };
 
@@ -33,6 +34,12 @@ type Step =
 export function Who() {
   const people = useAsync(() => api.listPeople(), []);
   const [step, setStep] = useState<Step>({ at: "list" });
+  // 지우는 손잡이는 접어 둡니다. 매번 보는 화면에 ⊗ 가 늘 떠 있으면
+  // 누르려던 것 옆에 되돌릴 수 없는 것이 붙어 있는 셈입니다.
+  const [editing, setEditing] = useState(false);
+  // 지운 뒤 한 줄. 키워드와 강의까지 사라진 것을 나중에 빈 목록으로 알게
+  // 되는 것보다, 누른 자리에서 말해 주는 편이 낫습니다.
+  const [note, setNote] = useState<string | null>(null);
 
   const enter = () => {
     // **주소만 바꾸면 안 들어가집니다.** 위쪽 `getMe()` 는 쿠키가 없던
@@ -64,9 +71,20 @@ export function Who() {
         {step.at === "list" && (
           <Pick
             people={people.data}
+            editing={editing}
+            note={note}
             onPick={(p) => {
+              setNote(null);
               if (p.hasPin) setStep({ at: "pin", person: p });
               else void api.pickPerson(p.id).then(enter);
+            }}
+            onRemove={(p) => {
+              setNote(null);
+              setStep({ at: "remove", person: p });
+            }}
+            onToggleEdit={() => {
+              setNote(null);
+              setEditing((v) => !v);
             }}
             onNew={() => setStep({ at: "name" })}
           />
@@ -77,6 +95,22 @@ export function Who() {
             person={step.person}
             onBack={() => setStep({ at: "list" })}
             onDone={enter}
+          />
+        )}
+
+        {step.at === "remove" && (
+          <RemoveStep
+            person={step.person}
+            onBack={() => setStep({ at: "list" })}
+            onDone={(said) => {
+              setNote(said);
+              // 마지막 한 명을 지웠으면 접습니다 — ⊗ 가 없는 목록에서
+              // "편집 끝내기" 만 남아 있으면 무엇을 편집하는 화면인지
+              // 알 수 없습니다.
+              setEditing(false);
+              setStep({ at: "list" });
+              people.reload();
+            }}
           />
         )}
 
@@ -100,44 +134,85 @@ export function Who() {
   );
 }
 
-/** 사람 고르기. */
+/** 사람 고르기.
+ *
+ *  **만드는 자리가 여기라 지우는 자리도 여기입니다.** 다만 ⊗ 는 "편집"
+ *  을 누른 동안에만 나옵니다 — 매번 누르는 이름 옆에 되돌릴 수 없는
+ *  버튼이 늘 붙어 있을 이유가 없습니다. */
 function Pick({
   people,
+  editing,
+  note,
   onPick,
+  onRemove,
+  onToggleEdit,
   onNew,
 }: {
   people: Person[];
+  editing: boolean;
+  note: string | null;
   onPick: (p: Person) => void;
+  onRemove: (p: Person) => void;
+  onToggleEdit: () => void;
   onNew: () => void;
 }) {
+  // 관리자는 못 지웁니다. 지울 사람이 하나도 없으면 "편집" 도 내지
+  // 않습니다 — 눌러도 아무 일이 없는 버튼이 됩니다.
+  const removable = people.some((p) => !p.isOwner);
+
   return (
     <>
       <h1 className={s.ask}>누구세요?</h1>
+
+      {note && <p className={s.note}>{note}</p>}
+
       <div className={s.row}>
         {people.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            className={`${s.who} ${p.isOwner ? s.owner : ""}`}
-            onClick={() => onPick(p)}
-          >
-            <span className={s.avatar}>{p.name.slice(0, 1)}</span>
-            <span className={s.nm}>{p.name}</span>
-            <span className={s.sub}>
-              {/* 누르기 전에 뭐가 있을지 보이는 편이 낫습니다. */}
-              {p.lectureCount}편{p.hasPin && " · 잠김"}
-            </span>
-          </button>
+          <div key={p.id} className={s.slot}>
+            <button
+              type="button"
+              className={`${s.who} ${p.isOwner ? s.owner : ""}`}
+              onClick={() => onPick(p)}
+            >
+              <span className={s.avatar}>{p.name.slice(0, 1)}</span>
+              <span className={s.nm}>{p.name}</span>
+              <span className={s.sub}>
+                {/* 누르기 전에 뭐가 있을지 보이는 편이 낫습니다. */}
+                {p.lectureCount}편{p.hasPin && " · 잠김"}
+              </span>
+            </button>
+
+            {editing && !p.isOwner && (
+              <button
+                type="button"
+                className={s.del}
+                onClick={() => onRemove(p)}
+                aria-label={`${p.name} 지우기`}
+                title={`${p.name} 지우기`}
+              >
+                ⊗
+              </button>
+            )}
+          </div>
         ))}
 
-        <button type="button" className={`${s.who} ${s.add}`} onClick={onNew}>
-          <span className={s.avatar} aria-hidden="true">
-            +
-          </span>
-          <span className={s.nm}>새로 만들기</span>
-          <span className={s.sub}>&nbsp;</span>
-        </button>
+        <div className={s.slot}>
+          <button type="button" className={`${s.who} ${s.add}`} onClick={onNew}>
+            <span className={s.avatar} aria-hidden="true">
+              +
+            </span>
+            <span className={s.nm}>새로 만들기</span>
+            <span className={s.sub}>&nbsp;</span>
+          </button>
+        </div>
       </div>
+
+      {removable && (
+        <button type="button" className={s.editToggle} onClick={onToggleEdit} aria-pressed={editing}>
+          {editing ? "편집 끝내기" : "편집"}
+        </button>
+      )}
+      {editing && <p className={s.hint}>지울 사람의 ⊗ 를 누르세요. 관리자는 지울 수 없습니다.</p>}
 
       {/* 처음 온 사람은 여기가 뭐 하는 곳인지 모릅니다. 이름만 늘어놓고
           고르라고 하면 아무것도 알려 주지 않은 셈입니다. */}
@@ -223,6 +298,86 @@ function Pin({
       <button type="button" className={s.back} onClick={onBack}>
         ← 다른 사람
       </button>
+    </>
+  );
+}
+
+/** 지우기 전에 한 번. **되돌릴 수 없는 유일한 버튼이라 화면을 따로 씁니다.**
+ *
+ *  카드 위의 작은 확인 상자로 두면 무엇이 같이 사라지는지 쓸 자리가 없고,
+ *  잠긴 사람에게 비밀번호를 받을 자리도 없습니다. 잠금은 여기서도 그대로
+ *  지킵니다 — 들어가는 문이 잠겨 있는데 지우는 문이 열려 있으면 잠근 것이
+ *  아닙니다. */
+function RemoveStep({
+  person,
+  onBack,
+  onDone,
+}: {
+  person: Person;
+  onBack: () => void;
+  onDone: (note: string) => void;
+}) {
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const go = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const gone = await api.deletePerson(person.id, pin || undefined);
+      const also =
+        gone.removedKeywords > 0
+          ? ` 아무도 안 보게 된 키워드 ${gone.removedKeywords}개와 강의 ${gone.removedLectures}편도 함께 지웠습니다.`
+          : "";
+      onDone(`${person.name} 님을 지웠습니다.${also}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "지우지 못했습니다.");
+      setPin("");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <h1 className={s.ask}>{person.name} 님을 지울까요?</h1>
+      <p className={s.hint}>
+        읽음·즐겨찾기·제외 표시가 사라집니다. {person.name} 님만 보던 키워드와 그 키워드가
+        데려온 강의도 함께 지워집니다 — 다른 사람도 보는 키워드는 그대로 돕니다.{" "}
+        <b>되돌릴 수 없습니다.</b>
+      </p>
+
+      {person.hasPin && (
+        <div className={s.form}>
+          <label className={s.field}>
+            <span className={s.fieldLabel}>{person.name} 님의 비밀번호 네 자리</span>
+            <input
+              className={s.text}
+              value={pin}
+              onChange={(e) => {
+                setPin(e.target.value.replace(/\D/g, "").slice(0, PIN_LEN));
+                setError(null);
+              }}
+              onKeyDown={(e) => e.key === "Enter" && void go()}
+              placeholder="숫자 네 자리"
+              inputMode="numeric"
+              type="tel"
+              autoFocus
+            />
+          </label>
+        </div>
+      )}
+
+      {error && <p className={s.err}>{error}</p>}
+
+      <div className={s.actions}>
+        <button type="button" className={s.back} onClick={onBack} disabled={busy}>
+          ← 돌아가기
+        </button>
+        <button type="button" className={s.danger} onClick={() => void go()} disabled={busy}>
+          지우기
+        </button>
+      </div>
     </>
   );
 }
@@ -347,10 +502,21 @@ function KeywordStep({
         이미 모아 둔 것들입니다. 고르면 바로 채워집니다 — 나중에 바꿀 수 있어요.
       </p>
 
-      {all.error && <p className={s.err}>{all.error}</p>}
-      {!all.data ? (
+      {/* **오류일 때 "불러오는 중" 을 같이 띄우면 안 됩니다.** 목록은
+          영영 오지 않는데 화면은 기다리는 것처럼 보여서, 빨간 줄을 읽고도
+          더 기다리게 됩니다. 다시 받아 볼 길만 내놓고 넘어갑니다 —
+          키워드는 들어가서도 고를 수 있으니 여기서 막을 이유가 없습니다. */}
+      {all.error && (
+        <>
+          <p className={s.err}>{all.error}</p>
+          <button type="button" className={s.back} onClick={all.reload}>
+            다시 불러오기
+          </button>
+        </>
+      )}
+      {!all.data && !all.error ? (
         <Loading />
-      ) : all.data.length === 0 ? (
+      ) : !all.data ? null : all.data.length === 0 ? (
         <p className={s.hint}>아직 등록된 키워드가 없습니다. 들어가서 만드시면 됩니다.</p>
       ) : (
         <div className={s.chips}>

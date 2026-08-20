@@ -353,6 +353,44 @@
   cursor: default;
 }
 
+/* 되돌릴 수 없는 것은 맨 아래에, 선 하나 밑에 따로 둡니다 — "사용자
+   바꾸기" 옆에 나란히 있으면 나가려던 손이 계정을 지웁니다. */
+.menuDanger {
+  padding: 8px 14px 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.menuErase {
+  align-self: flex-start;
+  background: none;
+  border: 0;
+  padding: 4px 2px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--fail);
+  cursor: pointer;
+}
+
+.menuErase:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.menuErase:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.menuDangerHint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
 
 /* 읽는 화면과 기계 화면 사이의 칸막이. 관리자에게만 보입니다 —
    메뉴 여섯 개가 한 줄로 늘어서면 어디까지가 "내가 읽는 것" 인지

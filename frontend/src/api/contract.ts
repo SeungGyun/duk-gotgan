@@ -9,6 +9,7 @@ import type {
   Overview,
   Person,
   PersonDraft,
+  PersonRemoved,
   Pipeline,
   Queue,
   Run,
@@ -34,6 +35,17 @@ export interface Api {
   pickPerson(id: string, pin?: string): Promise<Person>;
   /** 새로 만들고 바로 그 사람으로 들어갑니다. */
   createPerson(draft: PersonDraft): Promise<Person>;
+  /** 사람을 지웁니다. **되돌릴 수 없습니다.**
+   *
+   *  그 사람만의 것(읽음·즐겨찾기·제외·채널 숨김)과, 그 사람이 빠지면
+   *  **보는 사람이 0명이 되는** 키워드와, 그 키워드‘만’ 데려온 강의가
+   *  함께 지워집니다. 남이 아직 보는 키워드는 그대로 돕니다.
+   *
+   *  만드는 자리가 로그인 전 화면이라 지우는 자리도 거기입니다. 비밀번호를
+   *  건 사람은 네 자리가 필요하고(`PIN_REQUIRED`), 이미 그 사람으로
+   *  들어와 있거나 관리자면 묻지 않습니다. 관리자는 못 지웁니다
+   *  (`OWNER_UNDELETABLE`). */
+  deletePerson(id: string, pin?: string): Promise<PersonRemoved>;
   /** 사용자 바꾸기 — 이 기기만 나갑니다. 계정은 그대로. */
   leave(): Promise<void>;
   /** 지금 누구인지. 쿠키가 없으면 401 이 나고 선택 화면으로 갑니다. */

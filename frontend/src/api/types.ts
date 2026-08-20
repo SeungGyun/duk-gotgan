@@ -27,6 +27,17 @@ export interface Me extends Person {
   pinIsDefault: boolean;
 }
 
+/** 사람을 지우고 나서 함께 사라진 것들.
+ *
+ *  "지웠습니다" 한 줄로 끝내면, 키워드와 강의까지 없어졌다는 것을 나중에
+ *  빈 목록으로 알게 됩니다. 누른 자리에서 바로 말해 줍니다. */
+export interface PersonRemoved {
+  /** 그 사람이 빠져서 **보는 사람이 0명이 된** 키워드 수 */
+  removedKeywords: number;
+  /** 그 키워드‘만’ 데려왔던 강의 편수 */
+  removedLectures: number;
+}
+
 /** 새 사람 만들기. 비밀번호는 건너뛸 수 있습니다. */
 export interface PersonDraft {
   name: string;

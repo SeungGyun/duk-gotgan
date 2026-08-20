@@ -46,6 +46,69 @@
   margin-top: 6px;
 }
 
+/* ⊗ 를 카드 모서리에 얹기 위한 자리. 카드 자체를 relative 로 만들면
+   버튼 안에 버튼을 넣게 되어 눌리는 곳이 겹칩니다. */
+.slot {
+  position: relative;
+  display: flex;
+}
+
+.del {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  /* 폰에서 누를 것이라 32px 은 되어야 합니다 — 이보다 작으면 옆의 이름이
+     같이 눌립니다. */
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--fail);
+  background: var(--surface);
+  color: var(--fail);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.del:hover {
+  background: var(--fail);
+  color: #fff;
+}
+
+/* 지우는 손잡이를 여는 곳. 고르는 것을 방해하지 않게 작고 조용히. */
+.editToggle {
+  background: none;
+  border: 0;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.editToggle:hover,
+.editToggle[aria-pressed="true"] {
+  color: var(--ink-2);
+}
+
+/* 지운 뒤 한 줄. 오류가 아니라 결과라 붉게 칠하지 않습니다. */
+.note {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  background: var(--surface-sink);
+  border-radius: var(--r);
+  padding: 8px 12px;
+  max-width: 40ch;
+  line-height: 1.55;
+}
+
 .who {
   width: 112px;
   background: var(--surface);
@@ -294,8 +357,23 @@
   cursor: pointer;
 }
 
+/* 되돌릴 수 없는 버튼. **파랑(강조)으로 두지 않습니다** — 다음으로
+   넘어가는 버튼과 같은 색이면 손이 습관대로 갑니다. */
+.danger {
+  padding: 9px 20px;
+  border: 1px solid var(--fail);
+  border-radius: var(--r);
+  background: var(--fail);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
 .go:disabled,
-.back:disabled {
+.back:disabled,
+.danger:disabled {
   opacity: 0.5;
   cursor: default;
 }
