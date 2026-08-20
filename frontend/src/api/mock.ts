@@ -1259,13 +1259,55 @@ export const mockApi: Api = {
         { key: "review", label: "요약 대기", count: 2 },
         { key: "published", label: "공개", count: lectures.length },
       ],
+      // 셋을 **서로 다른 모습**으로 둡니다. 전부 "쉬는 중" 인 목업으로는
+      // 정작 손봐야 할 화면(막혔을 때 무엇을 어떻게 말하는가)을 볼 수
+      // 없습니다 — 이 패널이 존재하는 이유가 그쪽이니까요.
       tracks: [
+        // 아무 문제 없이 다음 차례를 기다리는 모습.
         { key: "discover", label: "검색", status: "idle" as const, waiting: 4,
-          runLabel: null, startedAt: null, working: null, lastAt: null, nextAt: null },
+          runLabel: null, startedAt: null, working: null, lastAt: null,
+          nextAt: iso(new Date(Date.now() + 42 * 60_000)), everySec: 60, hold: null },
+        // 우회 중 — 막혔지만 일은 되고 있습니다.
         { key: "transcript", label: "자막", status: "idle" as const, waiting: 3,
-          runLabel: null, startedAt: null, working: null, lastAt: null, nextAt: null },
-        { key: "review", label: "요약", status: "idle" as const, waiting: 2,
-          runLabel: null, startedAt: null, working: null, lastAt: null, nextAt: null },
+          runLabel: null, startedAt: null, working: null, lastAt: null,
+          nextAt: iso(new Date(Date.now() + 26 * 60_000)), everySec: 30,
+          hold: {
+            code: "audio_blocked",
+            tone: "warn" as const,
+            title: "음성 파일을 내려받지 못하고 있습니다",
+            detail:
+              "소리를 받아 직접 받아쓰는 길이 막혔습니다. 그동안은 유튜브에 자막이 이미 " +
+              "있는 영상만 처리하고, 자막이 없는 영상은 줄에서 그대로 기다립니다.",
+            until: iso(new Date(Date.now() + 26 * 60_000)),
+            since: null,
+            fix: null,
+          } },
+        // 한 편을 붙들고 도는 모습.
+        { key: "review", label: "요약", status: "running" as const, waiting: 2,
+          runLabel: "요약 — 대기 2건 (5건 모임)", startedAt: iso(new Date(Date.now() - 3 * 60_000)),
+          working: { title: "DNA 계통수 분석과 이명법", since: iso(new Date(Date.now() - 3 * 60_000)) },
+          lastAt: iso(new Date(Date.now() - 9 * 60_000)),
+          nextAt: iso(new Date(Date.now() + 12 * 60_000)), everySec: 60,
+          // 도는 중인데 한쪽 회사가 쉬는 모습. 아래 `reviewers` 와 같은
+          // 이야기를 해야 합니다 — 어긋나면 목업이 있지도 않은 화면을
+          // 보여 주게 됩니다.
+          hold: {
+            code: "provider_partial",
+            tone: "info" as const,
+            title: "요약을 한쪽만 하고 있습니다",
+            detail:
+              "안티그래비티가 지금 요청을 받지 않습니다. 클로드가 이어서 요약하므로 " +
+              "줄은 계속 줄어듭니다 — 다만 그만큼 느려집니다.",
+            until: iso(new Date(Date.now() + 12 * 60_000)),
+            since: null,
+            fix: null,
+          } },
+      ],
+      // 한쪽만 쉬는 모습 — 이게 안 보이면 "요약이 왜 느리지"의 답이 없습니다.
+      reviewers: [
+        { provider: "claude", label: "클로드", restingUntil: null, capped: false },
+        { provider: "antigravity", label: "안티그래비티",
+          restingUntil: iso(new Date(Date.now() + 12 * 60_000)), capped: false },
       ],
       // 켜 둔 상태로 둡니다 — 꺼진 모습은 "블로그 칸이 없는" 화면이라
       // 목업으로 볼 것이 없습니다.
@@ -1297,7 +1339,6 @@ export const mockApi: Api = {
         { key: "failedTranscript", label: "자막 실패", count: 0 },
         { key: "failedReview", label: "요약 실패", count: 0 },
       ],
-      transcriptCoolingUntil: null,
     };
   },
 

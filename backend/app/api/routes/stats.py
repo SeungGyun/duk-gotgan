@@ -16,8 +16,9 @@ from app.api.errors import ApiError
 from app.api.routes.lectures import Filters, _filtered
 from app.api.serializers import run_out
 from app.blog import publish
-from app.collector import transcript
+from app.collector import cadence, quota, resources, transcript
 from app.collector.schedule import next_due_at
+from app.llm import pace
 from app.llm import usage as usage_guard
 from app.db.models import (
     BlogPost,
@@ -263,6 +264,229 @@ def _blog(db: Session) -> dict:
     }
 
 
+# ── 지금 왜 이러고 있나 ──────────────────────────────────────
+#
+# **"쉬는 중" 한 마디로는 손댈지 기다릴지 정할 수 없습니다.** 자막 트랙이
+# 반나절을 그 한 마디로 보낸 적이 있는데, 실제로는 오디오 내려받기가 막혀
+# 자막이 있는 영상만 처리하는 중이었습니다. 그 사실도, 언제 풀리는지도
+# 워커 로그 안에만 있었고 로그를 여는 사람은 이 집에 한 명뿐입니다.
+#
+# 그래서 트랙마다 **무엇 때문에 · 언제까지 · 그동안 무슨 일이 벌어지는지**를
+# 문장으로 만들어 내려보냅니다. 셋으로 가릅니다.
+#
+#   info  기다리면 됩니다. 그동안 우회로로 일이 되고 있습니다.
+#   warn  일부가 멎었습니다. 저절로 풀리지만 처리량이 줍니다.
+#   stop  이 트랙은 지금 아무것도 못 합니다.
+#
+# 사람이 해야 할 일이 있으면 `fix` 에 적습니다 — 비어 있으면 기다리면
+# 되는 일이라는 뜻입니다. 이 구분이 없으면 모든 줄이 똑같이 불안합니다.
+_PROVIDER_LABEL = {"claude": "클로드", "antigravity": "안티그래비티"}
+
+
+def _josa(word: str, with_batchim: str, without: str) -> str:
+    """이름 뒤에 조사를 붙입니다.
+
+    `f"{label} 가 쉬는 중"` 으로 두었더니 "클로드 가 쉬는 중입니다" 가
+    나왔습니다. 회사 이름은 설정에서 오는 값이라 문장에 박아 둘 수 없고,
+    띄어 쓰거나 "안티그래비티은" 처럼 틀리면 그 한 글자에서 기계가 쓴
+    티가 납니다. 받침만 보면 되는 일입니다.
+    """
+    ch = word.strip()[-1:] or ""
+    batchim = "가" <= ch <= "힣" and (ord(ch) - 0xAC00) % 28 != 0
+    return word + (with_batchim if batchim else without)
+
+
+def _hold(
+    code: str,
+    title: str,
+    detail: str,
+    *,
+    tone: str = "warn",
+    until=None,
+    since=None,
+    fix: str | None = None,
+) -> dict:
+    return {
+        "code": code,
+        "tone": tone,
+        "title": title,
+        "detail": detail,
+        "until": to_utc_iso(until) if until else None,
+        "since": to_utc_iso(since) if since else None,
+        "fix": fix,
+    }
+
+
+def _discover_hold(db: Session, now) -> dict | None:
+    """검색이 멈추는 이유는 하나뿐입니다 — 유튜브 할당량.
+
+    **장부를 읽기만 합니다.** `quota.remaining()` 은 오늘 행을 `FOR UPDATE`
+    로 잠그고 없으면 만드는데, 화면이 5초마다 부르는 자리에서 할 일이
+    아닙니다.
+    """
+    budget = int(settings.youtube_unit_limit * quota.SAFETY_MARGIN)
+    ledger = db.get(UsageLedger, now.date())
+    used = ledger.youtube_units if ledger else 0
+    if used + quota.UNITS_SEARCH <= budget:
+        return None
+    return _hold(
+        "youtube_quota",
+        "오늘 쓸 유튜브 검색 할당량을 다 썼습니다",
+        f"검색 한 번에 {quota.UNITS_SEARCH}유닛이 드는데 오늘 {used:,}/{budget:,} 유닛을 "
+        "썼습니다. 이미 찾아 둔 영상은 그대로 자막·요약으로 넘어갑니다.",
+        until=_midnight(now.date() + timedelta(days=1)),
+    )
+
+
+def _transcript_hold(db: Session, now) -> dict | None:
+    """자막이 멈추는 이유는 **문이 둘**이라 셋으로 갈립니다.
+
+    자막 경로만 막힌 것은 멈춤이 아니라 우회입니다 — 소리를 받아 직접
+    받아쓰면 됩니다. 그런데 화면은 이 셋을 다 "쉬는 중" 으로 적었습니다.
+    """
+    caps = transcript.blocked_until(db)
+    audio = transcript.audio_blocked_until(db)
+    caps = caps if caps and caps > now else None
+    audio = audio if audio and audio > now else None
+
+    if caps and audio:
+        return _hold(
+            "transcript_blocked",
+            "유튜브가 자막도 소리도 막았습니다",
+            "자막 내려받기와 음성 파일 내려받기가 둘 다 막혔습니다. 여기서 더 두드리면 "
+            "차단이 길어지기만 하므로 손을 뗍니다 — 시간이 지나면 저절로 풀립니다.",
+            tone="stop",
+            until=max(caps, audio),
+        )
+    if audio:
+        return _hold(
+            "audio_blocked",
+            "음성 파일을 내려받지 못하고 있습니다",
+            "소리를 받아 직접 받아쓰는 길이 막혔습니다. 그동안은 유튜브에 자막이 이미 "
+            "있는 영상만 처리하고, 자막이 없는 영상은 줄에서 그대로 기다립니다.",
+            until=audio,
+        )
+    if caps:
+        return _hold(
+            "captions_blocked",
+            "유튜브 자막이 막혔습니다",
+            "대신 소리를 받아 직접 받아쓰고 있습니다. 한 편에 2~7분이라 느리지만 "
+            "이 길은 막히지 않습니다.",
+            tone="info",
+            until=caps,
+        )
+    return None
+
+
+def _reviewers(db: Session) -> list[dict]:
+    """요약을 나눠 하는 회사들의 지금.
+
+    **한쪽만 쉬는 것과 둘 다 멎은 것은 완전히 다른 상황입니다.** 합쳐서
+    "요약 쉬는 중" 이라고 적으면 그 차이가 사라집니다 — 실제로 안티그래비티
+    쪽만 멎어 있는데 화면으로는 알 길이 없었습니다.
+    """
+    out = []
+    for name in usage_guard.PROVIDERS:
+        resting = pace.resume_at(db, name)
+        out.append(
+            {
+                "provider": name,
+                "label": _PROVIDER_LABEL.get(name, name),
+                # 회사가 안 받아 주는 중 — 불러 봐야만 풀렸는지 알 수 있어
+                # 타이머로 셉니다 (llm/pace.py).
+                "restingUntil": to_utc_iso(resting) if resting else None,
+                # 우리가 건 상한을 넘은 것 — **상한을 올리면 곧바로 재개**됩니다.
+                "capped": pace.capped(db, name),
+            }
+        )
+    return out
+
+
+def _review_hold(db: Session, now, waiting: int, reviewers: list[dict]) -> dict | None:
+    window_end = usage_guard.window_end()
+
+    # 메모리가 먼저입니다. 여기 걸리면 회사가 멀쩡해도 아무것도 안 뜹니다.
+    if resources.memory_tight():
+        return _hold(
+            "memory_tight",
+            "메모리가 빡빡해 잠시 비켜서 있습니다",
+            "받아쓰기가 긴 오디오를 통째로 올리는 중입니다. 이때 요약을 띄우면 뜨지도 "
+            "못하고 죽으므로, 자리가 날 때까지 기다립니다.",
+            tone="info",
+        )
+
+    down = [r for r in reviewers if r["restingUntil"] or r["capped"]]
+    if not down:
+        return _batching_hold(db, now, waiting)
+
+    def why(r: dict) -> str:
+        return (
+            f"{_josa(r['label'], '은', '는')} 이번 창의 토큰 상한에 닿았습니다"
+            if r["capped"]
+            else f"{_josa(r['label'], '이', '가')} 지금 요청을 받지 않습니다"
+        )
+
+    # **늦게 풀리는 쪽을 적습니다.** 둘 다 멎었는데 이른 쪽을 적으면, 그
+    # 시각이 지나도 아무 일이 없어 화면이 거짓말한 것이 됩니다.
+    untils = [
+        window_end if r["capped"] else pace.resume_at(db, r["provider"]) for r in down
+    ]
+    until = max([u for u in untils if u], default=None)
+    fix = (
+        "토큰 상한을 올리면 다음 차례에 곧바로 이어서 합니다 — 사용량 화면에서 바꿉니다."
+        if any(r["capped"] for r in down)
+        else None
+    )
+
+    live = [r for r in reviewers if r not in down]
+    if live:
+        return _hold(
+            "provider_partial",
+            # **이름을 여기 적지 않습니다.** 바로 아래 문장이 누가 왜
+            # 쉬는지로 시작하는데, 제목이 같은 이름으로 시작하면 한 줄을
+            # 두 번 읽게 됩니다. 제목이 할 일은 "절반만 돈다"는 것 하나입니다.
+            "요약을 한쪽만 하고 있습니다",
+            f"{' · '.join(why(r) for r in down)}. "
+            f"{_josa(' · '.join(r['label'] for r in live), '이', '가')} 이어서 요약하므로 "
+            "줄은 계속 줄어듭니다 — 다만 그만큼 느려집니다.",
+            tone="info",
+            until=until,
+            fix=fix,
+        )
+    return _hold(
+        "provider_down",
+        "요약할 수 있는 곳이 없습니다",
+        f"{' · '.join(why(r) for r in down)}. 자막은 그대로 쌓이고, 풀리는 대로 이어서 합니다.",
+        tone="stop",
+        until=until,
+        fix=fix,
+    )
+
+
+def _batching_hold(db: Session, now, waiting: int) -> dict | None:
+    """막힌 데는 없는데 안 도는 경우 — **모이기를 기다리는 중입니다.**
+
+    이게 화면에 없으면 "대기 3건인데 왜 가만있지" 의 답이 어디에도
+    없습니다. 고장이 아니라 그렇게 하기로 한 것입니다.
+    """
+    if waiting <= 0 or waiting >= cadence.REVIEW_BATCH:
+        return None
+    last = db.scalar(select(func.max(Evaluation.created_at)))
+    if last is None:
+        return None
+    due = last + timedelta(minutes=cadence.REVIEW_MAX_WAIT_MIN)
+    if due <= now:
+        return None
+    return _hold(
+        "batching",
+        f"{cadence.REVIEW_BATCH}건 모이면 시작합니다",
+        f"지금 {waiting}건. 프롬프트 앞부분이 매번 18,700 토큰이라 몇 건 모아 연달아 "
+        "돌리면 그만큼이 훨씬 싸집니다. 안 모여도 아래 시각에는 그냥 시작합니다.",
+        tone="info",
+        until=due,
+    )
+
+
 def _now_working(db: Session, state: str) -> dict | None:
     v = db.scalars(
         select(Video).where(Video.state == state).order_by(Video.updated_at.desc())
@@ -349,6 +573,14 @@ def pipeline(db: Session = Depends(get_db), _: User = Depends(current_user)):
         if n is not None
     ]
 
+    now = now_kst()
+    reviewers = _reviewers(db)
+    holds = {
+        "discover": _discover_hold(db, now),
+        "transcript": _transcript_hold(db, now),
+        "review": _review_hold(db, now, take(("TRANSCRIBED",)), reviewers),
+    }
+
     tracks = []
     for key, label, waiting_states in (
         ("discover", "검색", ("DISCOVERED",)),
@@ -356,6 +588,7 @@ def pipeline(db: Session = Depends(get_db), _: User = Depends(current_user)):
         ("review", "요약", ("TRANSCRIBED",)),
     ):
         run = running.get(key)
+        hold = holds[key]
         tracks.append(
             {
                 "key": key,
@@ -368,21 +601,35 @@ def pipeline(db: Session = Depends(get_db), _: User = Depends(current_user)):
                 # 건지"가 구분됩니다.
                 "working": _now_working(db, _WORKING[key]) if key in _WORKING else None,
                 "lastAt": to_utc_iso(last_by_stage.get(key)),
-                "nextAt": to_utc_iso(min(upcoming)) if key == "discover" and upcoming else None,
+                # **다음에 실제로 무슨 일이 일어나는 시각입니다.** 검색은
+                # 키워드의 차례이고, 나머지 둘은 막힌 것이 풀리는 때입니다.
+                # 막힌 데가 없으면 비어 있고, 그때는 `everySec` 이 답입니다
+                # — 30초마다 도는 트랙에 "다음 차례 01:45" 를 적어 두면
+                # 맞는 말인데도 쓸모가 없습니다.
+                "nextAt": (
+                    to_utc_iso(min(upcoming))
+                    if key == "discover" and upcoming
+                    else (hold or {}).get("until")
+                ),
+                # 몇 초마다 확인하는가. 워커와 같은 값을 봅니다(collector/cadence.py).
+                "everySec": cadence.TICKS[key],
+                # 멈춰 있다면 왜, 언제까지, 그동안 무슨 일이 벌어지는지.
+                "hold": hold,
             }
         )
 
-    cooling = transcript.blocked_until(db)
     return {
         "funnel": [
             {"key": k, "label": label, "count": take(states)} for k, label, states in _FUNNEL
         ],
         "tracks": tracks,
+        # 요약을 나눠 하는 회사들. 트랙 한 줄 아래 펼쳐 보입니다 — 한쪽만
+        # 멎었을 때 "요약 쉬는 중" 으로 뭉뚱그리지 않기 위해서입니다.
+        "reviewers": reviewers,
         "blog": _blog(db),
         "stuck": [
             {"key": k, "label": label, "count": take(states)} for k, label, states in _STUCK
         ],
-        "transcriptCoolingUntil": to_utc_iso(cooling) if cooling else None,
     }
 
 

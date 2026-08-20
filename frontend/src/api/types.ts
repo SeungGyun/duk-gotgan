@@ -256,6 +256,24 @@ export type RunStatus =
   | "failed"
   | "interrupted";
 
+/** 트랙이 멈춰 있는 이유. **"쉬는 중" 한 마디로는 손댈지 기다릴지 정할
+ *  수 없습니다** — 그 한 마디로 반나절을 보낸 적이 있는데, 실제로는
+ *  오디오 내려받기가 막혀 자막이 있는 영상만 처리하는 중이었습니다. */
+export interface Hold {
+  /** 화면이 분기할 때 쓰는 값. 문장이 바뀌어도 코드는 안 바뀝니다. */
+  code: string;
+  /** info: 우회로로 일이 되는 중 · warn: 일부가 멎음 · stop: 아무것도 못 함. */
+  tone: "info" | "warn" | "stop";
+  title: string;
+  detail: string;
+  /** 언제 풀리는지. 없으면 "다음 확인 때 다시 봅니다". */
+  until: string | null;
+  since: string | null;
+  /** **사람이 해야 할 일**. 비어 있으면 기다리면 되는 일입니다 — 이
+   *  구분이 없으면 모든 줄이 똑같이 불안하게 읽힙니다. */
+  fix: string | null;
+}
+
 /** 한 트랙(검색·자막·요약)의 지금 상태. **셋이 나란히 돕니다** — 하나만
  *  보여 주면 나머지가 멈춘 것처럼 읽힙니다. */
 export interface Track {
@@ -268,8 +286,28 @@ export interface Track {
   /** 지금 붙들고 있는 영상. 이게 있어야 "도는 중"이 눈에 보입니다. */
   working: { title: string; since: string } | null;
   lastAt: string | null;
-  /** 검색만 — 다음 차례 시각. */
+  /** **다음에 실제로 무슨 일이 일어나는 시각.** 검색은 키워드의 차례이고,
+   *  나머지 둘은 막힌 것이 풀리는 때입니다. 막힌 데가 없으면 비어 있고,
+   *  그때 답이 되는 값은 `everySec` 입니다. */
   nextAt: string | null;
+  /** 몇 초마다 확인하는가. 워커와 같은 값입니다(collector/cadence.py). */
+  everySec: number;
+  /** 멈춰 있다면 왜. 아무 문제 없으면 null. */
+  hold: Hold | null;
+}
+
+/** 요약을 나눠 하는 회사 하나의 지금.
+ *
+ *  **한쪽만 쉬는 것과 둘 다 멎은 것은 완전히 다른 상황입니다.** 합쳐서
+ *  "요약 쉬는 중"이라고 적으면 그 차이가 사라집니다 — 실제로 안티그래비티
+ *  쪽만 멎어 있는데 화면으로는 알 길이 없었습니다. */
+export interface Reviewer {
+  provider: string;
+  label: string;
+  /** 회사가 요청을 안 받아 주는 중 — 불러 봐야만 풀렸는지 압니다. */
+  restingUntil: string | null;
+  /** 우리가 건 상한을 넘음 — **상한을 올리면 곧바로 재개**됩니다. */
+  capped: boolean;
 }
 
 /** 블로그에 올라간 글 하나. */
@@ -310,9 +348,10 @@ export interface BlogStatus {
 export interface Pipeline {
   funnel: { key: string; label: string; count: number }[];
   tracks: Track[];
+  /** 요약 트랙을 회사별로 펼친 것. 요약 줄 아래에 붙습니다. */
+  reviewers: Reviewer[];
   blog: BlogStatus;
   stuck: { key: string; label: string; count: number }[];
-  transcriptCoolingUntil: string | null;
 }
 
 /** 실행 하나가 실제로 옮긴 것들. */

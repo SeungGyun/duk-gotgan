@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { api } from "../api";
-import type { BlogStatus, Pipeline, Run, RunEvent, RunStats, Track } from "../api";
+import type { BlogStatus, Pipeline, Reviewer, Run, RunEvent, RunStats, Track } from "../api";
 import { Screen } from "../components/Screen";
 import { Chip, Empty, ErrorState, Loading, Panel } from "../components/ui";
 import { useAsync } from "../hooks/useAsync";
@@ -79,11 +79,39 @@ function clock(iso: string): string {
 }
 
 function ago(iso: string): string {
-  const sec = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
-  if (sec < 60) return `${sec}초 전`;
-  if (sec < 3600) return `${Math.round(sec / 60)}분 전`;
-  return `${Math.round(sec / 3600)}시간 전`;
+  return `${span(Date.now() - new Date(iso).getTime())} 전`;
 }
+
+/** 시작한 지 얼마나 됐나 — "9분째". "9분 전 시작"보다 한 낱말 짧고,
+    지금도 하고 있다는 뜻이 같이 담깁니다. */
+function elapsed(iso: string): string {
+  return `${span(Date.now() - new Date(iso).getTime())}째`;
+}
+
+/** 그때까지 얼마나 남았나 — "37분 뒤". 이미 지났으면 "곧" 입니다.
+    다음 차례를 적어 두고 그 시각이 지나도 아무 일이 없는 것이 흔한데,
+    "-2분 뒤"로 보이면 화면이 고장 난 것처럼 읽힙니다. */
+function left(iso: string): string {
+  const ms = new Date(iso).getTime() - Date.now();
+  return ms <= 0 ? "곧" : `${span(ms)} 뒤`;
+}
+
+function span(ms: number): string {
+  const sec = Math.max(0, Math.round(ms / 1000));
+  if (sec < 60) return `${sec}초`;
+  if (sec < 3600) return `${Math.round(sec / 60)}분`;
+  return `${Math.round(sec / 3600)}시간`;
+}
+
+/** 확인 주기를 사람 말로. 30 → "30초마다", 60 → "1분마다". */
+function every(sec: number): string {
+  return sec < 60 ? `${sec}초마다` : `${Math.round(sec / 60)}분마다`;
+}
+
+/** 한 편을 이보다 오래 붙들고 있으면 붙들린 것으로 봅니다.
+    워커의 워치독과 **같은 값입니다**(scripts/worker.py STALL_FLOOR_SEC).
+    갈라 두면 로그는 경고를 내는데 화면은 아무 말도 안 하게 됩니다. */
+const STUCK_MIN = 30;
 
 export function Runs() {
   const runs = useAsync(() => api.listRuns(), []);
@@ -145,7 +173,6 @@ export function Runs() {
     나머지가 멈춘 것처럼 읽힙니다 — 실제로 자막과 요약이 나란히 도는데
     화면에는 나중에 시작한 것만 떴습니다. */
 function Now({ p }: { p: Pipeline }) {
-  const cooling = p.transcriptCoolingUntil ? new Date(p.transcriptCoolingUntil) : null;
   const stuckTotal = p.stuck.reduce((a, x) => a + x.count, 0);
 
   return (
@@ -162,22 +189,13 @@ function Now({ p }: { p: Pipeline }) {
 
       <ul className={s.tracks}>
         {p.tracks.map((t) => (
-          <TrackRow key={t.key} t={t} />
+          <TrackRow key={t.key} t={t} reviewers={t.key === "review" ? p.reviewers : undefined} />
         ))}
         {/* 블로그도 한 줄을 줍니다. 트랙 셋만 있던 때는 5분에 한 편씩
             글이 나가는 중에도 이 패널이 아무 말을 하지 않아서, 발행이
             도는지 멎었는지 화면으로는 알 길이 없었습니다. */}
         {p.blog?.enabled && <BlogRow b={p.blog} />}
       </ul>
-
-      {/* 냉각은 실패가 아니라 기다리면 풀리는 상태입니다. 이 한 줄이
-          "손대야 하나"에 대한 답이 됩니다. */}
-      {cooling && cooling.getTime() > Date.now() && (
-        <p className={s.paused}>
-          유튜브 자막이 막혀 쉬는 중입니다 — {clock(p.transcriptCoolingUntil!)} 이후 재개.
-          그동안은 소리를 받아 직접 받아씁니다.
-        </p>
-      )}
 
       {stuckTotal > 0 && (
         <p className={s.stuck}>
@@ -192,32 +210,116 @@ function Now({ p }: { p: Pipeline }) {
   );
 }
 
-function TrackRow({ t }: { t: Track }) {
-  const running = t.status === "running";
+/** 트랙 한 줄이 답해야 하는 것은 셋입니다 — **무엇을 하고 있나, 왜 그러고
+    있나, 언제 다음이 오나.**
+
+    예전에는 첫째만 있었고 그마저 "쉬는 중" 한 마디였습니다. 그 세 글자는
+    "차례를 기다린다"와 "유튜브가 소리 내려받기를 막아 손을 뗐다"를 같은
+    말로 덮어서, 정작 알아야 할 때 아무것도 알려 주지 못했습니다. 나머지
+    둘은 워커 로그에만 있었고, 로그를 여는 사람은 이 집에 한 명뿐입니다. */
+function TrackRow({ t, reviewers }: { t: Track; reviewers?: Reviewer[] }) {
+  const live = t.status === "running" || t.working !== null;
+  // 붙들려 있는 것은 도는 것과 다릅니다. 오래 쥐고 있으면 색을 바꿔
+  // 두어야, 워커 로그의 워치독 경고를 화면에서도 만날 수 있습니다.
+  const stuck =
+    t.working !== null &&
+    Date.now() - new Date(t.working.since).getTime() > STUCK_MIN * 60_000;
+
   return (
     <li className={s.track}>
-      <span className={running ? s.dotLive : s.dotIdle} aria-hidden="true" />
+      <span className={live && !stuck ? s.dotLive : stuck ? s.dotStuck : s.dotIdle} aria-hidden="true" />
       <span className={s.trackName}>{t.label}</span>
       <span className={s.trackWait}>대기 {num(t.waiting)}</span>
-      <span className={s.trackWhat}>
-        {t.working ? (
-          <>
-            <span className={s.trackTitle}>{t.working.title}</span>
-            <em className={s.trackSince}>· {ago(t.working.since)} 시작</em>
-          </>
-        ) : (
-          <span className={s.trackTitle}>
-            {running
-              ? (t.runLabel ?? "도는 중")
-              : t.nextAt
-                ? `쉬는 중 · 다음 차례 ${clock(t.nextAt)}`
-                : t.lastAt
-                  ? `쉬는 중 · 마지막 ${ago(t.lastAt)}`
-                  : "쉬는 중"}
-          </span>
+
+      <div className={s.trackBody}>
+        <div className={s.trackHead}>
+          {t.working ? (
+            <>
+              <span className={s.trackTitle}>{t.working.title}</span>
+              <em className={stuck ? s.trackHeld : s.trackSince}>
+                · {elapsed(t.working.since)}
+                {stuck && " — 오래 붙들려 있습니다"}
+              </em>
+            </>
+          ) : t.status === "running" ? (
+            <span className={s.trackTitle}>{t.runLabel ?? "도는 중"}</span>
+          ) : t.hold ? (
+            <span className={s.holdTitle} data-tone={t.hold.tone}>
+              {t.hold.tone === "stop" ? "멈춤" : t.hold.tone === "warn" ? "일부 멈춤" : "우회 중"}
+              {" · "}
+              {t.hold.title}
+            </span>
+          ) : (
+            <span className={s.trackTitle}>
+              {t.waiting > 0 ? "차례를 기다리는 중" : "대기 없음 — 새 영상이 들어오면 시작합니다"}
+            </span>
+          )}
+        </div>
+
+        {/* 왜 그런지. 한 문장이면 손댈지 기다릴지가 정해집니다.
+            **도는 중에도 나옵니다** — 한쪽 회사가 상한에 닿은 채로 다른
+            쪽이 도는 상황이 흔한데, 첫 줄을 지금 하는 일에 내주고 나면
+            그 사실을 적을 자리가 여기밖에 없습니다. 그때는 제목을 문장
+            앞에 붙여, 무슨 이야기인지 모른 채로 읽지 않게 합니다. */}
+        {t.hold && (
+          <p className={s.holdDetail}>
+            {(t.working || t.status === "running") && (
+              <span className={s.holdInline} data-tone={t.hold.tone}>
+                {t.hold.title} —{" "}
+              </span>
+            )}
+            {t.hold.detail}
+          </p>
         )}
-      </span>
+        {/* **사람이 할 일이 있을 때만** 눈에 걸리게 합니다. 없는 줄까지
+            같은 색으로 칠하면 전부 불안하게 읽혀서, 정작 손대야 할 때
+            구분이 안 됩니다. */}
+        {t.hold?.fix && <p className={s.holdFix}>→ {t.hold.fix}</p>}
+
+        <Schedule t={t} />
+        {reviewers && reviewers.length > 0 && <Reviewers list={reviewers} />}
+      </div>
     </li>
+  );
+}
+
+/** 시각 줄 — **시작 · 다음 · 확인 주기.**
+
+    "다음 차례 04:08" 만 적으면 지금이 몇 시인지 머릿속으로 빼야 합니다.
+    남은 시간을 같이 적으면 그 계산이 없어집니다. 반대로 남은 시간만
+    적으면 언제 다시 와 볼지를 정할 수가 없습니다 — 둘 다 필요합니다. */
+function Schedule({ t }: { t: Track }) {
+  const startedAt = t.working?.since ?? t.startedAt;
+  const bits: string[] = [];
+  if (startedAt) bits.push(`시작 ${clock(startedAt)} (${elapsed(startedAt)})`);
+  if (t.nextAt) bits.push(`다음 ${clock(t.nextAt)} (${left(t.nextAt)})`);
+  bits.push(`${every(t.everySec)} 확인`);
+  // 마지막으로 무언가 옮긴 때. 시작도 다음도 없을 때만 — 셋을 다 적으면
+  // 줄이 길어져서 정작 다음 차례가 눈에 안 들어옵니다.
+  if (!startedAt && !t.nextAt && t.lastAt) bits.push(`마지막 ${ago(t.lastAt)}`);
+  return <p className={s.trackWhen}>{bits.join(" · ")}</p>;
+}
+
+/** 요약은 **두 회사가 나눠 합니다.** 한 줄로 뭉뚱그리면 "안티그래비티가
+    안 도는데 왜 그런가"에 답할 자리가 없습니다 — 실제로 그 답이 워커
+    로그 안에만 있었습니다. */
+function Reviewers({ list }: { list: Reviewer[] }) {
+  return (
+    <p className={s.reviewers}>
+      {list.map((r) => (
+        <span key={r.provider} className={s.reviewer}>
+          <span className={r.capped || r.restingUntil ? s.dotIdle : s.dotLive} aria-hidden="true" />
+          {r.label}
+          <em>
+            {r.capped
+              ? " 상한 도달"
+              : r.restingUntil
+                ? ` 쉬는 중 · ${clock(r.restingUntil)}`
+                : " 도는 중"}
+          </em>
+        </span>
+      ))}
+    </p>
   );
 }
 

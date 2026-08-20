@@ -105,16 +105,6 @@
 .lastTitle {
   color: var(--ink-2);
 }
-/* 기다리면 풀리는 것과 손봐야 하는 것을 색으로 가릅니다 */
-.paused {
-  margin: 10px 0 0;
-  padding: 8px 11px;
-  border-radius: var(--r);
-  background: var(--surface-2);
-  font-size: 12.5px;
-  color: var(--ink-2);
-  line-height: 1.55;
-}
 .stuck {
   margin: 8px 0 0;
   padding: 8px 11px;
@@ -293,8 +283,21 @@
   grid-template-columns: 10px 34px 62px minmax(0, 1fr);
   gap: 9px;
   align-items: baseline;
-  padding: 7px 0;
+  padding: 9px 0;
   font-size: 12.5px;
+}
+/* 넷째 칸은 이제 한 줄이 아니라 덩어리입니다 — 무엇을 하는 중인지 ·
+   왜 멈췄는지 · 언제 다음인지가 세로로 쌓입니다. 이름·대기 수와는
+   첫 줄에서 베이스라인이 맞아야 표처럼 읽힙니다. */
+.trackBody {
+  min-width: 0;
+}
+.trackHead {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  color: var(--ink-2);
 }
 .track + .track {
   border-top: 1px solid var(--border);
@@ -305,6 +308,14 @@
   border-radius: 50%;
   background: var(--surface-sink);
   border: 1px solid var(--border-strong);
+}
+/* 붙들려 있는 것은 도는 것과 다릅니다. 깜빡이게 두면 잘 돌고 있는
+   것으로 읽혀서, 정작 30분째 한 편에 매달려 있는 줄을 그냥 지나칩니다. */
+.dotStuck {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fail);
 }
 .trackName {
   font-weight: 650;
@@ -334,6 +345,15 @@
 .trackSince {
   font-style: normal;
   color: var(--muted);
+  flex: none;
+}
+/* 한 편을 오래 붙들고 있을 때의 경과 시간. **줄어들지 않게 둡니다** —
+   flex 안에서 이 값이 줄면 "42분째 — 오래 붙들려…" 가 잘리는데, 잘리는
+   순간 그냥 도는 중과 구분이 사라집니다. 줄어드는 것은 제목 쪽입니다. */
+.trackHeld {
+  font-style: normal;
+  color: var(--fail);
+  font-weight: 600;
   flex: none;
 }
 /* 사람이 손대야 풀리는 줄. 기다리면 되는 것과 색으로 가릅니다 —
@@ -374,4 +394,100 @@
 .figLabel {
   font-size: 10.5px;
   color: var(--muted);
+}
+
+/* ── 왜 멈춰 있나 ────────────────────────────────────────
+   색을 셋으로 가릅니다. 전부 빨갛게 칠하면 "소리를 받아 우회하는 중"과
+   "아무것도 못 하는 중"이 같은 무게로 읽혀서, 정작 손대야 할 때 그 줄이
+   눈에 안 들어옵니다. */
+.holdTitle {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.holdTitle[data-tone="info"] {
+  color: var(--ink-2);
+}
+.holdTitle[data-tone="warn"] {
+  color: var(--warn);
+}
+.holdTitle[data-tone="stop"] {
+  color: var(--fail);
+}
+/* 첫 줄을 지금 하는 일에 내줬을 때, 제목을 이유 문장 앞에 붙입니다.
+   `.holdTitle` 을 그대로 쓸 수 없습니다 — 저쪽은 한 줄짜리라 nowrap 인데,
+   여기서는 문장 안에 섞여 흘러야 합니다. */
+.holdInline {
+  font-weight: 600;
+}
+.holdInline[data-tone="warn"] {
+  color: var(--warn);
+}
+.holdInline[data-tone="stop"] {
+  color: var(--fail);
+}
+.holdInline[data-tone="info"] {
+  color: var(--ink-2);
+}
+
+/* 이유 한 문장. 제목과 달리 접지 않습니다 — 여기까지 읽는 사람은
+   이미 "왜?"를 묻고 있고, 잘린 이유는 이유가 아닙니다. */
+.holdDetail {
+  margin: 3px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+/* 사람이 해야 할 일. 있을 때만 나오므로 눈에 걸려야 맞습니다. */
+.holdFix {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+/* 시작 · 다음 · 확인 주기. 숫자를 견주는 줄이라 고정폭으로 둡니다. */
+.trackWhen {
+  margin: 4px 0 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 요약을 나눠 하는 회사들. 트랙 줄 안에 들여 두어, 별개의 일이 아니라
+   그 트랙을 펼친 것으로 읽히게 합니다. */
+.reviewers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 5px 0 0;
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+.reviewer {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.reviewer em {
+  font-style: normal;
+  color: var(--muted);
+}
+
+/* 폰에서는 넷째 칸이 통째로 아랫줄로 내려갑니다. 62px 짜리 "대기 55" 와
+   한 줄을 나눠 쓰면 이유 문장이 서너 글자마다 꺾여서, 읽으라고 넣은
+   문장이 읽을 수 없는 것이 됩니다. 이름·대기 수는 그대로 한 줄에 둡니다 —
+   그 둘은 짧고, 훑을 때 세로로 줄이 맞아야 표처럼 읽힙니다. */
+@media (max-width: 560px) {
+  .track {
+    grid-template-columns: 10px auto minmax(0, 1fr);
+    gap: 3px 9px;
+  }
+  .trackBody {
+    grid-column: 1 / -1;
+    padding-left: 19px;
+  }
 }
