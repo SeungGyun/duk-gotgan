@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.llm import store, workspace
-from app.llm.schemas import LectureReview, flat_schema
+from app.llm.schemas import LectureReview, lenient_schema
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -76,13 +76,41 @@ class AgyResult:
 
 
 def _prompt() -> str:
-    """본문 + 이 회사의 전달 방식. 루브릭은 두 회사가 같은 것을 읽습니다."""
+    """본문 + 이 회사의 전달 방식. 루브릭은 두 회사가 같은 것을 읽습니다.
+
+    **영상마다 달라지는 것은 여기 넣지 않습니다.** 뒤에 `_task()` 로 붙습니다 —
+    앞이 매번 같아야 프롬프트 캐시가 삽니다.
+    """
     body = (PROMPTS / "lecture-review.md").read_text(encoding="utf-8")
     delivery = (PROMPTS / "delivery-agy.md").read_text(encoding="utf-8")
-    return f"{body}\n{delivery}\n\n{TASK}"
+    return f"{body}\n{delivery}"
 
 
-TASK = "작업 폴더의 자막을 판정하고, 정리해서 스키마에 맞는 JSON 하나로 내보내세요."
+def _task(ws: workspace.Workspace) -> str:
+    """이 영상의 지시. **파일을 절대 경로로 부릅니다.**
+
+    `--add-dir` 로 폴더를 열어 줬는데도 못 읽는 일이 계속 있었습니다.
+
+        failed to read file: open /metadata.json
+        failed to read file: open /tmp/metadata.json
+        failed to read file: open ~/.gemini/antigravity-cli/brain/<uuid>/workspace/metadata.json
+
+    agy 는 상대 경로를 **자기 brain 폴더 기준**으로 풉니다. 우리가 이름만
+    알려주니(프롬프트 본문의 "작업 폴더에 두 개의 파일이 있습니다") 모델이
+    어림짐작으로 세 군데를 찍어 본 것입니다. 2026-08-21~23 사흘에 9편이
+    이걸로 죽었습니다.
+
+    **실제 경로로 씁니다.** 맥에서 `/tmp` 는 `/private/tmp` 라, 적힌 그대로
+    넘기면 샌드박스가 여는 자리와 모델이 부르는 자리가 갈립니다.
+    """
+    root = ws.path.resolve()
+    return (
+        f"작업 폴더는 `{root}` 입니다. 파일은 **아래 절대 경로 그대로** 읽으세요 — "
+        f"상대 경로로 부르면 다른 곳을 뒤지게 됩니다.\n"
+        f"- `{root / 'metadata.json'}`\n"
+        f"- `{root / 'transcript.md'}`\n\n"
+        "자막을 판정하고, 정리해서 스키마에 맞는 JSON 하나로 내보내세요."
+    )
 
 
 def _write_sandbox_profile(ws: workspace.Workspace) -> Path:
@@ -105,8 +133,10 @@ def _write_schema(ws: workspace.Workspace) -> Path:
     읽어 토큰을 쓰고, `이 폴더에는 파일 두 개가 있습니다`라는 프롬프트와도
     어긋납니다."""
     path = ws.path.parent / f"{ws.video_id}.schema.json"
+    # **관대한 쪽을 넘깁니다.** 저쪽 검증기가 거부하면 우리가 고칠 기회
+    # 자체가 없습니다 (llm/schemas.py `lenient_schema`).
     path.write_text(
-        json.dumps(flat_schema(LectureReview), ensure_ascii=False), encoding="utf-8"
+        json.dumps(lenient_schema(LectureReview), ensure_ascii=False), encoding="utf-8"
     )
     return path
 
@@ -114,14 +144,17 @@ def _write_schema(ws: workspace.Workspace) -> Path:
 def _argv(ws: workspace.Workspace, schema: Path, profile: Path | None) -> list[str]:
     cmd = [
         settings.agy_bin,
-        "-p", _prompt(),
+        "-p", f"{_prompt()}\n\n{_task(ws)}",
         "--model", settings.agy_model,
         # **cwd 만으로는 부족합니다.** agy 는 파일을 현재 디렉터리가 아니라
         # 자기 "워크스페이스" 기준으로 찾습니다. 대화형 셸에서는 어쩌다 맞아
         # 떨어졌는데, launchd 로 띄우니 세 건 연속으로
         # `transcript.md 파일이 존재하지 않습니다` 를 내고 실패했습니다 —
         # 자막을 못 읽은 채 요약을 지어내려다 끊긴 것입니다.
-        "--add-dir", str(ws.path),
+        # **실제 경로로 엽니다.** 샌드박스도 `_task()` 도 `.resolve()` 한
+        # 경로를 쓰는데 여기만 `/tmp` 로 두면 세 군데가 서로 다른 곳을
+        # 가리킵니다.
+        "--add-dir", str(ws.path.resolve()),
         "--output-format", "json",
         "--json-schema", str(schema),
         # 물어보면 print 모드가 그대로 멈춰 서 타임아웃까지 갑니다.

@@ -347,6 +347,28 @@ _TRANSIENT = (
     # 그대로 됩니다. 클로드의 `returned an error result` 와 같은 성격이라
     # 같은 방식으로 둡니다. 이걸 탈락으로 적었더니 12분에 28편이 날아갔습니다.
     "agent execution terminated",
+    # **상대가 "잠시 후 다시 오라"고 말하는데 안 갔습니다.**
+    #
+    # 2026-08-21 04:11 에 안티그래비티가 몇 분 붐볐고, 그 사이 13편이
+    # `Our servers are experiencing high traffic right now, please try again
+    # in a minute.` 를 사유로 **영구 탈락**했습니다. 같은 배치에서 나온
+    # `Agent execution terminated` 9건은 위 줄에 걸려 멀쩡히 다시 시도됐는데,
+    # 더 분명하게 일시적이라고 말하는 쪽이 빠져 있었습니다.
+    "high traffic",
+    "try again",
+    "overloaded",
+    "temporarily unavailable",
+    "service unavailable",
+    "internal error",
+    "502",
+    "503",
+    "504",
+    # 스트림이 중간에 끊긴 것. 영상에는 아무 문제가 없습니다.
+    "stream was interrupted",
+    # agy 가 자막 파일을 못 찾은 것. `_task()` 가 절대 경로를 알려주게 되어
+    # 거의 사라졌지만, 남더라도 **영상 탓이 아닙니다** — 파일은 우리가 그
+    # 자리에 놓았고, 다음 사이클에 폴더를 다시 만들면 그만입니다.
+    "no such file or directory",
 )
 
 
