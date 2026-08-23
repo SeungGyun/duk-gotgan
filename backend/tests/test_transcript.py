@@ -18,6 +18,24 @@ def seg(start, text, dur=3.0):
     return {"start": start, "dur": dur, "text": text}
 
 
+# 자막 길이 하한(`MIN_SUMMARY_CHARS`)만 넘기려고 쓰는 채움말.
+#
+# **같은 말을 되풀이해 채우면 안 됩니다.** 예전에는 `"말" * 300` 이었는데,
+# 되풀이 감지기가 생기면서 그게 정확히 걸러야 할 모습이 됐습니다
+# (`transcript.loops_in`). 시험이 가짜로 실패하는 것을 막으려고 감지기를
+# 무르게 하는 것은 앞뒤가 바뀐 일이라, 채움말 쪽을 진짜 문장으로 바꿉니다.
+_FILLER = (
+    "오늘 다룰 내용은 분산 시스템에서 합의가 왜 어려운가입니다. "
+    "먼저 두 장군 문제를 살펴보고, 그다음 팍소스가 무엇을 보장하고 "
+    "무엇을 보장하지 않는지 정리하겠습니다. 마지막으로 실무에서 흔히 "
+    "쓰는 래프트 구현이 어떤 지점에서 타협했는지 살펴봅니다. "
+    "네트워크가 끊기는 상황을 가정하면 이야기가 완전히 달라집니다. "
+    "정족수를 어떻게 잡느냐에 따라 읽기 지연과 가용성이 함께 움직이고, "
+    "리더 선출에 걸리는 시간은 장애 감지 주기가 사실상 결정합니다. "
+    "실측한 숫자를 같이 보면서 어디를 조여야 하는지 짚어 보겠습니다."
+)
+
+
 def test_15초_안쪽은_한_줄로_묶인다():
     merged = merge_segments([seg(0, "안녕하세요"), seg(3, "오늘은"), seg(9, "CNI 를 다룹니다")])
     assert len(merged) == 1
@@ -677,7 +695,7 @@ def test_자막이_살아_있으면_문을_닫지_않는다(db, monkeypatch):
         if int(v.id[-1]) % 2 == 0:
             raise T.Blocked("429")
         return T.Fetched(source="youtube_auto", language="ko",
-                         segments=[{"start": 0, "dur": 1, "text": "말" * 300}])
+                         segments=[{"start": 0, "dur": 1, "text": _FILLER}])
 
     monkeypatch.setattr(T, "fetch", fetch)
     monkeypatch.setattr(
@@ -688,3 +706,147 @@ def test_자막이_살아_있으면_문을_닫지_않는다(db, monkeypatch):
 
     assert r["ok"] == 2, "받아지는 것은 받아야 합니다"
     assert T.blocked_until(db) is None, "자막이 살아 있는데 문을 닫으면 안 됩니다"
+
+
+# ── 받아쓰기 되풀이(디코더 루프) ────────────────────────────
+
+
+def test_되풀이를_찾아낸다():
+    """위스퍼가 한 토막에 갇히면 그것만 수백 번 내놓습니다. 22분짜리에서
+    75,315자가 나온 적이 있는데 그중 89%가 같은 줄이었습니다."""
+    from app.collector.transcript import loops_in
+
+    share, run = loops_in("hawk " * 40)
+    assert share == 1.0 and run == 40
+
+    # 낱말 하나가 아니라 **토막**이 되풀이되는 것도 같은 자국입니다
+    share, run = loops_in("Then mix well. " * 15)
+    assert share == 1.0 and run == 15
+
+
+def test_사람이_강조로_되풀이하는_것은_안_걸린다():
+    """`아니 아니 아니` 는 말버릇이지 고장이 아닙니다. 쌓인 자막에서
+    3~9회 되풀이는 451편 있었고 그 점유 중앙값은 0.002 였습니다."""
+    from app.collector.transcript import loops_in
+
+    share, run = loops_in("아니 아니 아니 그게 아니고요 제 말은 이렇습니다 잘 들어 보세요 여기서부터")
+    assert share == 0.0 and run == 0
+
+
+def test_띄어쓰기가_없는_글도_잰다():
+    """태국어·중국어 자막은 낱말로 쪼갤 수 없습니다. 낱말로만 재면
+    `఺఺఺఺఺` 같은 것이 통째로 새 나갑니다."""
+    from app.collector.transcript import loops_in
+
+    share, run = loops_in("఺" * 60)
+    assert share == 1.0 and run >= 10
+
+
+def test_되풀이가_잡아먹은_만큼만_센다():
+    """조금 섞였다고 강의를 통째로 버리지 않습니다 — 점유가 낮으면
+    AI 가 그 구간을 건너뛰고 나머지로 요약할 수 있습니다."""
+    from app.collector.transcript import loops_in
+
+    real = "오늘은 합의 알고리즘을 다룹니다 먼저 두 장군 문제를 보고 팍소스로 넘어가겠습니다 " * 4
+    share, _ = loops_in(real + " " + "네 " * 20)
+    assert 0.0 < share < 0.5, f"부분 되풀이는 부분으로 세어야 합니다 (지금 {share})"
+
+
+def test_사람이_쓴_자막에는_이_자국이_없다():
+    """실측 근거. 쌓인 자막 2,327편에서 유튜브 자막 238편 중 10회 이상
+    되풀이가 **0편**, 받아쓰기 2,089편 중 556편이었습니다. 이 문턱이
+    사람의 말버릇이 아니라 기계 자국을 잡는다는 근거입니다."""
+    from app.collector.transcript import LOOP_RUN_MIN
+
+    assert LOOP_RUN_MIN == 10
+
+
+def test_되풀이로_뒤덮인_자막은_요약에_넘기지_않는다(db, monkeypatch):
+    """읽을 것이 남지 않았는데 요약을 부르면 편당 6~8만 토큰을 쓰고
+    "자막이 깨졌다"는 답을 받습니다. 실측에서 점유 80% 이상 44편이
+    대부분 그렇게 끝났습니다."""
+    from app.collector import transcript as T
+    from app.db.models import Video
+
+    db.add(Video(id="loop00000001", title="되풀이", state="TRANSCRIPT_PENDING",
+                 duration_sec=600, channel_title="채널"))
+    db.commit()
+    monkeypatch.setattr(T.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(
+        T, "fetch",
+        lambda v: T.Fetched(source=T.LOCAL_ASR, language="ko",
+                            segments=[{"start": 0, "dur": 1, "text": "생강 " * 400}]),
+    )
+
+    T.transcribe_pending(db, limit=1)
+    v = db.get(Video, "loop00000001")
+    assert v.state == T.EXCLUDED, "실패가 아니라 완전 제외입니다"
+    assert T.LOOP_MARK in v.state_reason
+    assert "400번" in v.state_reason, f"몇 번 되풀이됐는지 적어야 합니다 — {v.state_reason}"
+
+
+def test_되풀이로_제외된_것은_다시_시도할_길이_없다(db):
+    """**다시 해 봐야 같습니다.** 위스퍼는 온도 0 에서 결정적이라 같은
+    오디오를 같은 설정으로 받아쓰면 글자 하나까지 같은 자막이 나옵니다.
+    되살리기가 오디오를 다시 받고 GPU 를 몇 분 쓰고 똑같은 것을 만들어
+    오는 자리라, 실패 목록에 올리지 않고 완전 제외로 보냅니다.
+
+    실패 목록에 없으면 화면이 고를 수 없고, 아이디를 직접 넣어도
+    `_targets` 가 걸러냅니다."""
+    from app.api.routes.queue import EXCLUDED, FAILED_KINDS, Picked, _targets
+    from app.db.models import Video
+
+    db.add(Video(id="loop00000002", title="되풀이", state=EXCLUDED,
+                 duration_sec=600, channel_title="채널",
+                 state_reason="받아쓰기가 같은 말을 되풀이했습니다 · … 완전 제외합니다"))
+    db.commit()
+
+    # 실패 목록의 어느 무리에도 들지 않습니다
+    assert all(EXCLUDED not in states for _, states in FAILED_KINDS.values())
+
+    # 아이디를 직접 찍어 넣어도 대상이 되지 않습니다
+    assert _targets(db, Picked(videoIds=["loop00000002"])) == []
+
+
+def test_되풀이로_제외된_것은_다시_데려오지_않는다():
+    """발견 단계가 같은 영상을 또 데려오면 완전 제외가 무의미해집니다 —
+    받아쓰기를 다시 돌리고 같은 자막을 만들어 같은 자리에서 또 제외됩니다."""
+    import inspect
+
+    from app.collector import discover
+    from app.collector.queue import EXCLUDED, SKIPPED
+
+    src = inspect.getsource(discover)
+    assert f'"{EXCLUDED}", "{SKIPPED}"' in src or f'("{EXCLUDED}"' in src
+
+
+def test_상태_이름은_한_벌뿐이다():
+    """같은 글자가 두 벌이면 한쪽만 고쳤을 때 조용히 갈라집니다."""
+    from app.api.routes import queue as routes_queue
+    from app.collector import queue as collector_queue
+
+    assert routes_queue.EXCLUDED is collector_queue.EXCLUDED
+    assert routes_queue.SKIPPED is collector_queue.SKIPPED
+
+
+def test_되풀이_실패는_다시_해도_같다():
+    """위스퍼는 온도 0 에서 결정적입니다. 같은 오디오를 같은 설정으로
+    다시 받아쓰면 글자 하나까지 같은 결과가 나옵니다 — 되살리기 버튼이
+    GPU 몇 분을 쓰고 똑같은 자막을 만들어 오면 안 됩니다."""
+    from app.collector import failures
+    from app.collector.transcript import LOOP_MARK
+
+    assert not failures.retryable(f"{LOOP_MARK} · 같은 토막이 221번 잇달아 나와 자막의 84% 를 채웠습니다")
+    # 모르는 실패는 여전히 다시 해 볼 만합니다
+    assert failures.retryable("오디오를 지금 받지 못했습니다 — HTTP Error 403")
+
+
+def test_막을_만큼이_아닌_되풀이는_AI_에게_알린다():
+    """모르면 되풀이된 말을 강의의 논지로 오해합니다. 알려 주면 그 구간을
+    건너뛰고 `coverage_note` 에 적습니다."""
+    import inspect
+
+    from app.llm import workspace
+
+    src = inspect.getsource(workspace.prepare)
+    assert '"loop_share"' in src and '"loop_run"' in src

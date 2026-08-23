@@ -33,6 +33,7 @@ from youtube_transcript_api._errors import (
 )
 
 from app.collector import beat, cookies, queue
+from app.collector.queue import EXCLUDED
 from app.db import state
 from app.db.models import AppState, PipelineEvent, Transcript, Video
 from config.settings import settings
@@ -65,6 +66,44 @@ CHARS_PER_TOKEN = 1.7
 # 길이가 아니라 **글자 수**로 겁니다. 51초짜리가 1,280자로 멀쩡히 요약된
 # 반면 10분짜리가 8자만 나온 경우도 있어서, 영상 길이는 기준이 못 됩니다.
 MIN_SUMMARY_CHARS = 200
+
+# ── 받아쓰기 되풀이(디코더 루프) ────────────────────────────
+#
+# 위스퍼는 가끔 같은 토막에 갇혀 그것만 수백 번 내놓습니다. 22분짜리에서
+# 75,315자가 나온 적이 있는데(정상은 분당 500자 남짓), 그중 89%가 같은
+# 줄이었습니다.
+#
+# **이게 드문 일이 아니었습니다.** 쌓인 자막 2,327편을 재 보니:
+#
+#   유튜브 자막   238편 중 10회 이상 되풀이  **0편**
+#   받아쓰기    2,089편 중 10회 이상 되풀이   556편 (27%)
+#
+# 사람이 쓴 자막에는 한 번도 없고 받아쓰기에만 있습니다 — 사람이 같은
+# 낱말을 열 번 잇달아 말하지 않습니다. 되풀이 횟수 분포도 갈라져 있어서
+# (75%가 8회, 90%가 221회) 그 사이에는 거의 아무것도 없습니다. 221 은
+# 위스퍼가 한 구간에 채울 수 있는 토큰 수입니다 — 사람의 말버릇이 아니라
+# 기계가 창을 채운 자국입니다.
+#
+# 열 번을 경계로 잡습니다. 사람이 강조로 되풀이하는 범위(3~9회)는 451편이
+# 있었고 그것들의 점유 중앙값은 0.002 였습니다 — 걸리지 않습니다.
+LOOP_RUN_MIN = 10
+
+# 되풀이가 자막의 이만큼을 잡아먹었으면 요약하지 않습니다.
+#
+# **높게 잡습니다.** 되풀이가 조금 섞였다고 강의를 통째로 버릴 이유가
+# 없습니다 — AI 는 그 구간을 건너뛰고 나머지로 요약할 수 있고, 실제로
+# 점유 15% 미만인 346편은 멀쩡히 요약됐습니다. 여기서 막으려는 것은
+# **읽을 것이 남지 않은** 자막입니다.
+#
+#   점유  0~15%  346편  요약 정상
+#        15~50%   95편  대체로 요약됨
+#        50~80%   71편  경계
+#        80~100%  44편  대부분 요약 실패 — 모델이 "자막이 깨졌다"고 답함
+LOOP_SHARE_MAX = 0.6
+
+# 사유 문장의 머리. **바꾸지 마세요** — `collector/failures.py` 가 이걸
+# 보고 "다시 해도 같은 것"으로 가릅니다.
+LOOP_MARK = "받아쓰기가 같은 말을 되풀이했습니다"
 
 # 일시적 실패로 미룰 수 있는 횟수. 403 은 대개 한두 번이면 풀립니다 —
 # 다섯 번을 넘기면 일시적이 아니라 그 영상의 문제로 봅니다. 상한이
@@ -376,22 +415,70 @@ def to_markdown(merged: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def loops_in(text: str, max_period: int = 6, min_run: int = LOOP_RUN_MIN) -> tuple[float, int]:
+    """되풀이가 잡아먹은 비율과 가장 긴 되풀이 횟수.
+
+    잇달아 `min_run` 번 이상 나오는 토막을 찾아 그것이 덮은 단위를 셉니다.
+    토막은 낱말 여섯 개까지 봅니다 — `hawk hawk hawk` 도, `Then mix well.`
+    을 세 번 되풀이한 것도 같은 자국입니다.
+
+    **띄어쓰기가 없으면 글자로 봅니다.** 태국어·중국어 자막은 낱말로
+    쪼갤 수 없어서, 낱말로만 재면 `఺఺఺఺఺` 같은 것이 통째로 새 나갑니다.
+
+    글자 수가 아니라 **단위 수**로 셉니다. 긴 낱말이 되풀이됐다고 더 나쁜
+    것이 아닙니다.
+    """
+    units = text.split()
+    if len(units) < min_run:
+        units = list(text.replace(" ", ""))
+    if len(units) < min_run:
+        return 0.0, 0
+
+    covered = [False] * len(units)
+    longest = 0
+    for period in range(1, max_period + 1):
+        i = 0
+        while i + period * min_run <= len(units):
+            run = 1
+            while (
+                i + period * (run + 1) <= len(units)
+                and units[i : i + period] == units[i + period * run : i + period * (run + 1)]
+            ):
+                run += 1
+            if run >= min_run:
+                for j in range(i, i + period * run):
+                    covered[j] = True
+                longest = max(longest, run)
+                i += period * run
+            else:
+                i += 1
+    return sum(covered) / len(units), longest
+
+
 def quality_of(merged: list[dict], source: str) -> dict:
     """요약 전에 "이 자막을 믿어도 되는가"를 재 둡니다.
 
     구두점 비율이 낮으면 자동 자막이고, 그러면 문장 경계가 뭉개져 있어
     요약이 흔들립니다. AI 가 커버리지 주석을 달 근거로도 씁니다.
+
+    **되풀이도 같이 잽니다.** 받아쓰기가 한 토막에 갇히면 그 구간은 통째로
+    가짜인데, 구두점 비율로는 그게 안 보입니다 — 되풀이된 문장에도 마침표는
+    있습니다.
     """
     text = " ".join(m["text"] for m in merged)
     n = len(text) or 1
     punct = sum(text.count(c) for c in ".?!。？！")
     spans = [merged[i + 1]["start"] - merged[i]["start"] for i in range(len(merged) - 1)]
+    loop_share, loop_run = loops_in(text)
     return {
         "source": source,
         "has_punctuation": punct / n > 0.002,
         "punct_per_1k": round(punct / n * 1000, 1),
         "avg_segment_sec": round(sum(spans) / len(spans), 1) if spans else 0,
         "line_count": len(merged),
+        # 되풀이가 잡아먹은 비율(0~1)과 가장 긴 되풀이 횟수
+        "loop_share": round(loop_share, 3),
+        "loop_run": loop_run,
     }
 
 
@@ -655,8 +742,48 @@ def transcribe_pending(db: Session, limit: int = 20, run_id: str | None = None) 
             result["rows"].append((video.title, "✕", video.state_reason))
             continue
 
+        loop_share = (row.quality or {}).get("loop_share", 0.0)
+        loop_run = (row.quality or {}).get("loop_run", 0)
+        if loop_share >= LOOP_SHARE_MAX:
+            # **읽을 것이 남지 않았습니다.** 받아쓰기가 한 토막에 갇혀 자막의
+            # 대부분이 그것으로 채워졌습니다. 이대로 요약에 넘기면 편당 6~8만
+            # 토큰을 쓰고 "자막이 깨졌다"는 답을 받습니다 — 실측에서 점유
+            # 80% 이상 44편 중 대부분이 그렇게 끝났습니다.
+            #
+            # **실패가 아니라 완전 제외입니다.** 실패로 적으면 화면의 실패
+            # 목록에 올라 "다시 하기"를 부를 수 있는데, 다시 해 봐야 같습니다 —
+            # 위스퍼는 온도 0 에서 결정적이라 같은 오디오를 같은 설정으로
+            # 받아쓰면 **글자 하나까지 같은** 자막이 나옵니다. 되살릴 때마다
+            # 오디오를 다시 받고 GPU 를 몇 분 쓰고 똑같은 것을 만들어 옵니다.
+            #
+            # 완전 제외면 발견 단계가 다시 데려오지 않고(collector/discover.py),
+            # 실패 목록에도 오르지 않아 다시 시도할 길 자체가 없습니다
+            # (api/routes/queue.py `FAILED_KINDS`·`_targets`).
+            #
+            # **잃는 것은 적습니다.** 이 기준에 걸리는 82편의 판정이
+            # irrelevant 59 · introductory 14 · practical 6 · expert 2 로,
+            # 전체 분포(irrelevant 32%)와 견주면 73% 가 애초에 강의가
+            # 아니었습니다. 소리가 음악·잡음이라 위스퍼가 지어낸 것들입니다.
+            video.state = EXCLUDED
+            video.state_reason = (
+                f"{LOOP_MARK} · 같은 토막이 {loop_run}번 잇달아 나와 "
+                f"자막의 {loop_share * 100:.0f}% 를 채웠습니다 — 완전 제외합니다"
+            )
+            _event(db, video, run_id, "TRANSCRIBING", video.state, False, video.state_reason)
+            db.commit()
+            result["failed"] += 1
+            result["rows"].append((video.title, "✕", video.state_reason))
+            continue
+
         video.state = "TRANSCRIBED"
         video.state_reason = None
+        if loop_run:
+            # 막을 만큼은 아니지만 남겨 둡니다. AI 에게도 넘겨서 그 구간을
+            # 건너뛰고 `coverage_note` 에 적게 합니다 (llm/workspace.py).
+            logger.info(
+                "[transcript] %s 되풀이 %d회 · 자막의 %.0f%% — 그대로 넘깁니다",
+                video.id, loop_run, loop_share * 100,
+            )
         _event(db, video, run_id, "TRANSCRIBING", video.state, True, fetched.source)
         db.commit()
         temp_streak = 0  # 받아졌으면 막힌 게 아닙니다

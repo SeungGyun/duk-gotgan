@@ -67,6 +67,13 @@ def prepare(video: Video, transcript: Transcript, keywords: list[Keyword]) -> Wo
                     # 자동 자막이면 문장 경계를 믿지 말라는 신호입니다
                     "has_punctuation": quality.get("has_punctuation", True),
                     "line_count": quality.get("line_count", 0),
+                    # **받아쓰기가 갇힌 구간이 있다는 신호입니다.** 심한 것은
+                    # 요약까지 오지도 않지만(collector/transcript.py
+                    # `LOOP_SHARE_MAX`), 조금 섞인 것은 그대로 옵니다. 알려
+                    # 주면 그 구간을 건너뛰고 `coverage_note` 에 적습니다 —
+                    # 모르면 되풀이된 말을 강의의 논지로 오해합니다.
+                    "loop_share": quality.get("loop_share", 0.0),
+                    "loop_run": quality.get("loop_run", 0),
                 },
             },
             ensure_ascii=False,

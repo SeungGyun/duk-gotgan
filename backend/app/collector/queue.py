@@ -32,6 +32,20 @@ from config.time import now_kst
 
 logger = logging.getLogger(__name__)
 
+# ── 줄에서 빠진 상태 ────────────────────────────────────────
+#
+# **여기가 정본입니다.** 예전에는 `api/routes/queue.py` 에만 글자로 있었는데,
+# 수집 쪽에서도 쓰게 되면서 같은 글자가 두 벌이 됩니다. 한쪽만 고치면
+# 조용히 갈라지는 자리라 낮은 층에 두고 화면 쪽이 가져다 씁니다.
+
+# 처리 전에 뺀 것. 이번엔 넘어가지만 **되돌릴 수 있습니다.**
+SKIPPED = "SKIPPED"
+
+# 완전 제외. 발견 단계가 이 상태를 보고 **다시 데려오지 않고**
+# (collector/discover.py), 실패 목록에도 오르지 않아 **다시 시도 자체가
+# 불가능합니다** (api/routes/queue.py `FAILED_KINDS`·`_targets`).
+EXCLUDED = "EXCLUDED"
+
 # 키워드별로 순번을 매기고, 순번이 같은 것끼리 먼저 나갑니다.
 # 1번째들 → 2번째들 → 3번째들 … 순서라 결과가 자연스럽게 번갈아 나옵니다.
 _ROUND_ROBIN = text(

@@ -29,14 +29,11 @@ router = APIRouter(tags=["queue"])
 # 아니라 벽이 됩니다. 총 편수는 따로 알려 주므로 정보가 사라지지는 않습니다.
 PREVIEW = 40
 
-# 처리 전에 뺀 것. 완전삭제(EXCLUDED)와 **다릅니다** — 저건 다시는 손대지
-# 않겠다는 뜻이고, 이건 이번엔 넘어가지만 되돌릴 수 있다는 뜻입니다.
-SKIPPED = "SKIPPED"
-
-# 완전 제외. 발견 단계가 이 상태를 보고 **다시 데려오지 않습니다**
-# (collector/discover.py). 되풀이해 실패하는 것을 여기 넣으면 줄에서
-# 영영 빠집니다.
-EXCLUDED = "EXCLUDED"
+# 처리 전에 뺀 것(SKIPPED)과 완전 제외(EXCLUDED). **정본은 수집 쪽에
+# 있습니다** (collector/queue.py) — 받아쓰기가 되풀이에 갇힌 자막을 그
+# 자리에서 완전 제외로 보내면서 양쪽이 같은 이름을 봐야 하게 됐습니다.
+SKIPPED = q.SKIPPED
+EXCLUDED = q.EXCLUDED
 
 # 손봐야 할 실패. **자막과 요약을 가릅니다** — 되살릴 곳이 다르고
 # (자막 줄 / 요약 줄), 사람이 판단하는 근거도 다릅니다.
