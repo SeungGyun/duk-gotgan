@@ -30,11 +30,24 @@ logger = logging.getLogger(__name__)
 # 403 이 오는데, 사유는 그 글이 아니라 그날 이미 쓴 횟수입니다.
 DAILY_CAP_MARK = "하루에 새롭게 공개 발행할 수 있는 글은"
 
+# 티스토리가 블로그에 **캡차를 걸면** 글쓰기가 전부 막힙니다. 자동 발행이
+# 많아 보이면 거는 것이라(2026-10-13, 매일 30편을 2주째 올리던 중) 사람이
+# 브라우저에서 발행해 풀어야 합니다. CLI 는 종료 코드 4 와 이 말로 알립니다.
+CAPTCHA_EXIT = 4
+CAPTCHA_MARK = "캡차"
+
 
 class TistoryError(Exception):
     """CLI 가 일을 못 했습니다."""
 
-    def __init__(self, message: str, *, session: bool = False, daily_cap: bool = False):
+    def __init__(
+        self,
+        message: str,
+        *,
+        session: bool = False,
+        daily_cap: bool = False,
+        captcha: bool = False,
+    ):
         super().__init__(message)
         # 세션 만료는 **사람이 브라우저에서 카카오 로그인을 해야** 풀립니다.
         # 재시도 횟수를 깎을 이유가 없어서 따로 표시합니다.
@@ -42,6 +55,22 @@ class TistoryError(Exception):
         # 하루 상한은 **자정에 저절로 풀립니다.** 이것도 그 글의 잘못이
         # 아니라, 세 번 세어 접어 버리면 멀쩡한 글이 영구 제외됩니다.
         self.daily_cap = daily_cap
+        # 캡차도 그 글의 잘못이 아닙니다. 세션처럼 사람이 풀어야 하고,
+        # 풀릴 때까지 어느 글을 보내도 같은 400 입니다.
+        self.captcha = captcha
+
+
+def classify(returncode: int, detail: str) -> dict[str, bool]:
+    """CLI 의 종료 코드와 stderr 로 실패의 종류를 가립니다.
+
+    종료 코드 2 는 세션 만료, 4 는 캡차입니다. 다른 명령도 세션이 없으면
+    같은 말을 stderr 에 적으므로 문구도 함께 봅니다.
+    """
+    return {
+        "session": returncode == 2 or "세션" in detail,
+        "daily_cap": DAILY_CAP_MARK in detail,
+        "captcha": returncode == CAPTCHA_EXIT or CAPTCHA_MARK in detail,
+    }
 
 
 @dataclass(frozen=True)
@@ -198,13 +227,9 @@ def _run(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
 
     if check and proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").strip()[-400:]
-        # 종료 코드 2 는 whoami 의 "세션 만료" 입니다. 다른 명령도 세션이
-        # 없으면 같은 말을 stderr 에 적습니다.
-        expired = proc.returncode == 2 or "세션" in detail
         raise TistoryError(
             f"tistory {args[0]} 실패 ({proc.returncode}): {detail}",
-            session=expired,
-            daily_cap=DAILY_CAP_MARK in detail,
+            **classify(proc.returncode, detail),
         )
     return proc
 

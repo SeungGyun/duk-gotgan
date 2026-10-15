@@ -559,6 +559,33 @@ def test_상한_문구를_CLI_출력에서_알아본다():
     assert tistory.DAILY_CAP_MARK in real
 
 
+def test_캡차는_그_글의_실패가_아니다(db, cli):
+    """티스토리가 블로그에 캡차를 걸면 어느 글을 보내도 같은 400 입니다.
+    2026-10-13 에 이걸 모르고 글마다 세 번씩 두드려 접었습니다 — 사람이
+    브라우저에서 풀 때까지 횟수를 물리고 길게 쉽니다."""
+    _seed(db, "vid", 90)
+    cli.raises = publish.tistory.TistoryError(
+        "tistory post 실패 (4): 티스토리가 이 블로그에 글쓰기마다 캡차를 요구하고 있습니다.",
+        captcha=True,
+    )
+
+    for _ in range(publish.MAX_ATTEMPTS + 2):
+        publish.publish_once(db)
+
+    row = db.get(BlogPost, "vid")
+    assert (row.state, row.attempts) == ("PENDING", 0)
+    assert publish.candidate(db) is not None
+    assert _rest_min(db) >= publish.SESSION_REST_MIN - 1
+
+
+def test_캡차를_CLI_종료코드와_문구로_알아본다():
+    """CLI 는 캡차를 종료 코드 4 로 알립니다. 코드가 묻혀도 문구로 잡습니다."""
+    assert tistory.classify(4, "") == {"session": False, "daily_cap": False, "captcha": True}
+    assert tistory.classify(1, "✗ 티스토리가 이 블로그에 글쓰기마다 캡차를 요구하고 있습니다.")["captcha"]
+    assert tistory.classify(2, "")["session"] and not tistory.classify(2, "")["captcha"]
+    assert not tistory.classify(1, '✗ /manage/post.json 요청이 400로 실패했습니다: {"data":null}')["captcha"]
+
+
 def test_오늘_몫을_다_쓰면_아예_손을_대지_않는다(db, cli, monkeypatch):
     """403 을 받아 보고 아는 방식은 한 번 헛걸음합니다 — 제목을 짓고 본문을
     만들고 CLI 를 띄운 뒤에야 거절당합니다. 우리가 올린 것은 우리가 셉니다."""

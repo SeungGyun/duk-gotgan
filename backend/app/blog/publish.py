@@ -171,7 +171,7 @@ def remaining(db: Session) -> int:
 
 
 def posted_today(db: Session, now: datetime | None = None) -> int:
-    """오늘 몇 편 올렸는가. 하루 상한(30편)의 분자입니다.
+    """오늘 몇 편 올렸는가. 하루 상한(`settings.blog_daily_cap`)의 분자입니다.
 
     날짜는 **KST 자정 기준**입니다 — 상한이 풀리는 시점이 그때라, 24시간
     슬라이딩 창으로 세면 아침에 남은 몫을 실제보다 적게 봅니다.
@@ -342,6 +342,14 @@ def _post(db: Session, lec: Lecture, row: BlogPost) -> PublishResult:
             # 세션 문제는 이 강의 탓이 아닙니다 — 시도 횟수를 도로 물리고,
             # 사람이 로그인할 시간을 줍니다.
             row.attempts = max(0, row.attempts - 1)
+            return _fail(db, row, str(e), rest_min=SESSION_REST_MIN)
+        if e.captcha:
+            # **티스토리가 블로그에 캡차를 걸었습니다.** 어느 글을 보내도
+            # 같은 400 이라 그 글의 실패가 아니고, 사람이 브라우저에서
+            # 발행해 풀어야 합니다. 2026-10-13 에 이걸 페이로드 문제로 알고
+            # 사흘 동안 글마다 세 번씩 두드려 접었습니다. 세션처럼 다룹니다.
+            row.attempts = max(0, row.attempts - 1)
+            logger.warning("[blog] 캡차에 막혔습니다 — 브라우저에서 한 편 발행해 풀어야 합니다")
             return _fail(db, row, str(e), rest_min=SESSION_REST_MIN)
         if e.daily_cap:
             # **오늘 몫을 다 썼을 뿐입니다.** 이걸 그 글의 실패로 세면,
