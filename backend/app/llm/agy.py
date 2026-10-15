@@ -141,11 +141,38 @@ def _write_schema(ws: workspace.Workspace) -> Path:
     return path
 
 
+# agy 가 자기 기본 모델을 적어 두는 곳. `--model` 을 안 넘기면 이 값으로 돕니다.
+_AGY_SETTINGS = Path.home() / ".gemini" / "antigravity-cli" / "settings.json"
+
+
+def default_model() -> str:
+    """agy 가 지금 기본으로 쓰는 모델 이름. 장부(`evaluations.model`)에 적습니다.
+
+    결과 JSON 에는 모델이 안 실립니다. 설정 파일을 못 읽으면 회사 이름으로
+    대신합니다 — 모르는 것을 지어내서 적지는 않습니다.
+    """
+    try:
+        name = json.loads(_AGY_SETTINGS.read_text(encoding="utf-8")).get("model")
+    except (OSError, ValueError, AttributeError):
+        name = None
+    return str(name) if name else "antigravity-default"
+
+
+def _model_flag() -> list[str]:
+    """`--model` 은 **설정에 적혀 있을 때만** 붙입니다.
+
+    박아 둔 이름은 저쪽이 모델 목록을 바꾸는 날 통째로 거부됩니다 —
+    `gemini-3.1-pro-high` 가 사라지자 모든 요약이 `invalid model selection`
+    으로 죽었습니다. 비워 두면 agy 가 자기 설정의 기본 모델로 돕니다.
+    """
+    return ["--model", settings.agy_model] if settings.agy_model else []
+
+
 def _argv(ws: workspace.Workspace, schema: Path, profile: Path | None) -> list[str]:
     cmd = [
         settings.agy_bin,
         "-p", f"{_prompt()}\n\n{_task(ws)}",
-        "--model", settings.agy_model,
+        *_model_flag(),
         # **cwd 만으로는 부족합니다.** agy 는 파일을 현재 디렉터리가 아니라
         # 자기 "워크스페이스" 기준으로 찾습니다. 대화형 셸에서는 어쩌다 맞아
         # 떨어졌는데, launchd 로 띄우니 세 건 연속으로
@@ -357,7 +384,7 @@ async def review(
             outcome=outcome,
             run_id=run_id,
             owner=owner,
-            model=settings.agy_model,
+            model=settings.agy_model or default_model(),
         )
         logger.info("[agy] %s %s", ws.video_id, message)
         result.ok = True
@@ -393,7 +420,7 @@ def ask_json(prompt: str, schema: dict, timeout_sec: int) -> dict | None:
     cmd = [
         settings.agy_bin,
         "-p", prompt,
-        "--model", settings.agy_model,
+        *_model_flag(),
         "--output-format", "json",
         "--json-schema", str(schema_path),
         "--dangerously-skip-permissions",

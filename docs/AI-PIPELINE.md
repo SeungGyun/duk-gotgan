@@ -845,7 +845,7 @@ REVIEW_PROVIDER=antigravity  python -m scripts.worker --only review
 | 자막 전달 | 작업 폴더 + `Read` | 같음 (cwd 가 작업 폴더) |
 | 도구 제한 | `allowed_tools` + 경로 가드 | **없음 → macOS 샌드박스로 대체** |
 | 조기 종료 계측 | 함 (오버헤드 18,700 고정) | 안 함 (실측 42k~95k 로 흔들림) |
-| 모델 | `claude-opus-5` | `gemini-3.1-pro-high` |
+| 모델 | `claude-opus-5` | 안 넘김 — agy 설정의 기본 모델 (`AGY_MODEL` 로 고정 가능) |
 
 **판정 로직은 한 벌입니다.** 검증·점수 재계산·소유권 확인·적재를 `llm/store.py`
 로 빼고, 두 실행기가 같은 `store.save()` 를 부릅니다. 복사해 두면 한쪽에서
@@ -855,8 +855,15 @@ REVIEW_PROVIDER=antigravity  python -m scripts.worker --only review
 프롬프트도 본문은 한 벌입니다(`prompts/lecture-review.md`). 전달 방식만
 `delivery-claude.md` / `delivery-agy.md` 로 갈라 붙입니다.
 
+**`--model` 도 기본으로는 주지 않습니다.** `gemini-3.1-pro-high` 를 박아
+두었더니 저쪽이 모델 목록을 갈아엎은 날 모든 요약이 `invalid model
+selection` 으로 죽었습니다. 비워 두면 agy 가 자기 설정
+(`~/.gemini/antigravity-cli/settings.json` 의 `model`)으로 돌고, 장부에는
+그 이름을 읽어 적습니다. 고정하려면 `AGY_MODEL` 에 `agy models` 의 이름을
+적습니다.
+
 `--effort` 는 주지 않습니다 — agy 는 강도가 모델 이름에 붙어 있어
-(`gemini-3.1-pro-high`) 같이 주면 `conflicts with --effort` 로 거부합니다.
+(`gemini-3.8-flash-high`) 같이 주면 `conflicts with --effort` 로 거부합니다.
 
 #### 격리 — 여기가 클로드 경로와 다릅니다
 

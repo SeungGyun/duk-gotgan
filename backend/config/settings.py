@@ -92,9 +92,13 @@ class Settings(BaseSettings):
     # 클로드와 달리 SDK 가 아니라 **CLI 한 번 실행**입니다. 결과는 도구가
     # 아니라 `--json-schema` 구조화 출력으로 받습니다.
     agy_bin: str = "agy"
-    # effort 가 모델 이름에 붙어 있습니다 (`agy models` 참고). 그래서
-    # --effort 를 같이 주면 충돌합니다.
-    agy_model: str = "gemini-3.1-pro-high"
+    # **비워 두면 모델을 넘기지 않습니다** — agy 가 자기 설정
+    # (`~/.gemini/antigravity-cli/settings.json` 의 `model`)으로 돕니다.
+    # 이름을 박아 두었더니 저쪽이 모델 목록을 갈아엎은 날
+    # (`gemini-3.1-pro-high` → 없음) 모든 요약이 `invalid model selection`
+    # 으로 죽었습니다. 고정하고 싶을 때만 `agy models` 의 이름을 적습니다.
+    # effort 는 모델 이름에 붙어 있어 --effort 를 같이 주면 충돌합니다.
+    agy_model: str = ""
     # **실측으로 조였습니다** (2026-08-20, 성공 16건).
     #
     #   0.8 0.9 0.9 0.9 1.1 1.1 1.1 1.1 1.2 1.3 1.3 1.6 1.8 2.0 2.2 분  │ 13.6
@@ -113,8 +117,19 @@ class Settings(BaseSettings):
 
     @property
     def active_review_model(self) -> str:
-        """지금 회사가 실제로 쓰는 모델. `evaluations.model` 에 적힙니다."""
-        return self.agy_model if self.review_provider == "antigravity" else self.review_model
+        """지금 회사가 실제로 쓰는 모델. `evaluations.model` 에 적힙니다.
+
+        안티그래비티에 모델을 안 박아 두었으면 agy 설정에서 읽어 옵니다 —
+        결과 JSON 에는 모델 이름이 실리지 않아서, 안 그러면 어느 모델이
+        판정했는지 장부에 남지 않습니다.
+        """
+        if self.review_provider != "antigravity":
+            return self.review_model
+        if self.agy_model:
+            return self.agy_model
+        from app.llm.agy import default_model
+
+        return default_model()
     # 판정 위주 작업이라 최고 강도가 필요 없습니다 (ROADMAP §3-5)
     review_effort: str = "medium"
     review_max_turns: int = 15

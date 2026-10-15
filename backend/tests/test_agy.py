@@ -164,13 +164,44 @@ def test_agy_는_조기종료를_재지_않는다():
     assert "run.early_exit = False" in src
 
 
-def test_모델_이름이_회사를_따라간다():
+def test_모델_이름이_회사를_따라간다(monkeypatch):
     """`evaluations.model` 이 전부 클로드로 적히면, 나중에 어느 회사가
     어떤 판정을 냈는지 되짚을 수 없습니다."""
+    from app.llm import agy
     from config.settings import Settings
 
-    assert Settings(review_provider="antigravity").active_review_model.startswith("gemini")
     assert Settings(review_provider="claude").active_review_model.startswith("claude")
+    assert Settings(review_provider="antigravity", agy_model="x-high").active_review_model == "x-high"
+    # 안 박아 두면 agy 설정의 기본 모델이 적힙니다
+    monkeypatch.setattr(agy, "default_model", lambda: "Gemini 3.8 Flash (Medium)")
+    assert Settings(review_provider="antigravity").active_review_model == "Gemini 3.8 Flash (Medium)"
+
+
+def test_모델을_박아_두지_않으면_넘기지_않는다(monkeypatch):
+    """`gemini-3.1-pro-high` 가 목록에서 사라지자 모든 요약이 `invalid model
+    selection` 으로 죽었습니다. 비워 두면 `--model` 자체를 붙이지 않아
+    agy 가 자기 기본 모델로 돕니다."""
+    from app.llm import agy, workspace
+    from config.settings import settings
+
+    ws = workspace.Workspace(Path("/tmp/dukgotgan-jobs/v"), "v")
+    monkeypatch.setattr(settings, "agy_model", "")
+    assert "--model" not in agy._argv(ws, Path("/tmp/s"), None)
+    monkeypatch.setattr(settings, "agy_model", "x-high")
+    argv = agy._argv(ws, Path("/tmp/s"), None)
+    assert argv[argv.index("--model") + 1] == "x-high"
+
+
+def test_agy_기본_모델은_설정_파일에서_읽는다(tmp_path, monkeypatch):
+    """결과 JSON 에 모델이 안 실려서, 설정 파일을 봐야 장부에 적을 이름이
+    나옵니다. 못 읽으면 지어내지 않고 회사 이름으로 적습니다."""
+    from app.llm import agy
+
+    f = tmp_path / "settings.json"
+    monkeypatch.setattr(agy, "_AGY_SETTINGS", f)
+    assert agy.default_model() == "antigravity-default"
+    f.write_text('{"model": "Gemini 3.8 Flash (Medium)"}', encoding="utf-8")
+    assert agy.default_model() == "Gemini 3.8 Flash (Medium)"
 
 
 def test_실행_환경을_최소로_넘긴다():

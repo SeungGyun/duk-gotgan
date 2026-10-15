@@ -57,7 +57,7 @@ DISCOVERED ──> TRANSCRIPT_PENDING ──> TRANSCRIBED ──> PUBLISHED
 
 ```
 요약 대기 ──┬─> 클로드 워커      (claude-opus-5)
-            └─> 안티그래비티 워커 (gemini-3.1-pro-high, agy CLI)
+            └─> 안티그래비티 워커 (agy CLI — agy 설정의 기본 모델)
 ```
 
 **같은 영상을 둘이 요약하지 않습니다.** 조건부 UPDATE 로 한 건씩 집어서,
